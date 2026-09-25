@@ -273,6 +273,48 @@ Topology describes the connectivity through which that movement can occur.
 The runtime must represent actual topology rather than assuming a fixed
 machine architecture.
 
+## Topology Identity and Lifetime
+
+Topology relationships have identity independent of the identities of their
+endpoints.
+
+Each topology relationship has a `TopologyLinkId`.
+
+`TopologyLinkId` values are unique within their owning topology graph and are
+not reused by that graph after a topology link is removed. A future
+runtime-level identity authority may establish a broader runtime-wide
+identity scope.
+
+A topology link owns its relationship description but does not own its
+endpoint Devices, Resources, or other runtime objects.
+
+Topology endpoints contain non-owning runtime identifiers rather than
+transferring ownership. The topology graph validates endpoint identifier
+structure, but does not own or directly validate the referenced Device or
+Resource objects. Endpoint existence and reconciliation with active runtime
+objects belong to a future runtime integration layer.
+
+The topology graph owns active topology links. A future runtime-level owner
+may own the topology graph itself.
+
+Topology does not own the Device Registry and must not become an alternative
+Device or Resource ownership mechanism.
+
+Removing a topology link retires its `TopologyLinkId`.
+
+Removing a Device or Resource invalidates the applicability of topology
+relationships that reference it. The mechanism that reconciles topology with
+the active Device/Resource registry is a future runtime integration concern;
+the topology graph itself must not silently acquire ownership of those
+objects.
+
+Topology identity is distinct from measurements. Observed bandwidth,
+latency, contention, and throughput must not redefine topology-link identity.
+
+The initial topology implementation is deliberately single-threaded and
+requires external synchronization if accessed concurrently. Concurrency
+machinery is not part of the topology contract at this stage.
+
 # 9. Transfer Resource
 
 Data movement is itself a schedulable resource.

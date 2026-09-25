@@ -8,6 +8,7 @@
 #include "gerdos/core/device_registry.hpp"
 #include "gerdos/core/ids.hpp"
 #include "gerdos/core/resource.hpp"
+#include "gerdos/core/topology.hpp"
 
 namespace {
 
@@ -39,6 +40,16 @@ int main() {
     static_assert(!std::is_copy_assignable_v<DeviceRegistry>);
     static_assert(!std::is_move_constructible_v<DeviceRegistry>);
     static_assert(!std::is_move_assignable_v<DeviceRegistry>);
+
+    static_assert(!std::is_copy_constructible_v<TopologyLink>);
+    static_assert(!std::is_copy_assignable_v<TopologyLink>);
+    static_assert(std::is_move_constructible_v<TopologyLink>);
+    static_assert(!std::is_move_assignable_v<TopologyLink>);
+
+    static_assert(!std::is_copy_constructible_v<Topology>);
+    static_assert(!std::is_copy_assignable_v<Topology>);
+    static_assert(!std::is_move_constructible_v<Topology>);
+    static_assert(!std::is_move_assignable_v<Topology>);
 
     const DeviceId device_a{1};
     const DeviceId device_b{1};
@@ -257,6 +268,112 @@ int main() {
     GERDOS_CHECK(device_two != nullptr);
     GERDOS_CHECK(registry.device_count() == 1);
     GERDOS_CHECK(registry.find_device(DeviceId{200}) == device_two);
+
+    Topology topology;
+
+    GERDOS_CHECK(topology.link_count() == 0);
+
+    TopologyLink invalid_link{
+        TopologyLinkDescription{
+            TopologyLinkId{},
+            TopologyEndpoint::device_endpoint(DeviceId{200}),
+            TopologyEndpoint::device_endpoint(DeviceId{201}),
+            TopologyLinkDirection::BIDIRECTIONAL,
+        },
+    };
+
+    GERDOS_CHECK(!topology.add_link(std::move(invalid_link)));
+
+    TopologyLink invalid_endpoint_link{
+        TopologyLinkDescription{
+            TopologyLinkId{3},
+            TopologyEndpoint::device_endpoint(DeviceId{}),
+            TopologyEndpoint::device_endpoint(DeviceId{201}),
+            TopologyLinkDirection::DIRECTED,
+        },
+    };
+
+    GERDOS_CHECK(
+        !topology.add_link(std::move(invalid_endpoint_link)));
+
+    TopologyLink invalid_resource_endpoint_link{
+        TopologyLinkDescription{
+            TopologyLinkId{4},
+            TopologyEndpoint::resource_endpoint(
+                DeviceId{200},
+                ResourceId{}),
+            TopologyEndpoint::resource_endpoint(
+                DeviceId{200},
+                ResourceId{2001}),
+            TopologyLinkDirection::DIRECTED,
+        },
+    };
+
+    GERDOS_CHECK(
+        !topology.add_link(
+            std::move(invalid_resource_endpoint_link)));
+
+    TopologyLink device_link{
+        TopologyLinkDescription{
+            TopologyLinkId{1},
+            TopologyEndpoint::device_endpoint(DeviceId{200}),
+            TopologyEndpoint::device_endpoint(DeviceId{201}),
+            TopologyLinkDirection::BIDIRECTIONAL,
+        },
+    };
+
+    GERDOS_CHECK(topology.add_link(std::move(device_link)));
+    GERDOS_CHECK(topology.link_count() == 1);
+
+    const TopologyLink* borrowed_link =
+        topology.find_link(TopologyLinkId{1});
+
+    GERDOS_CHECK(borrowed_link != nullptr);
+    GERDOS_CHECK(
+        borrowed_link->description().id == TopologyLinkId{1});
+    GERDOS_CHECK(
+        borrowed_link->description().source.kind ==
+        TopologyEndpointKind::DEVICE);
+    GERDOS_CHECK(
+        borrowed_link->description().source.device == DeviceId{200});
+    GERDOS_CHECK(
+        borrowed_link->description().destination.device == DeviceId{201});
+    GERDOS_CHECK(
+        borrowed_link->description().direction ==
+        TopologyLinkDirection::BIDIRECTIONAL);
+
+    TopologyLink resource_link{
+        TopologyLinkDescription{
+            TopologyLinkId{2},
+            TopologyEndpoint::resource_endpoint(
+                DeviceId{200},
+                ResourceId{2000}),
+            TopologyEndpoint::resource_endpoint(
+                DeviceId{200},
+                ResourceId{2001}),
+            TopologyLinkDirection::DIRECTED,
+        },
+    };
+
+    GERDOS_CHECK(topology.add_link(std::move(resource_link)));
+    GERDOS_CHECK(topology.link_count() == 2);
+
+    GERDOS_CHECK(topology.remove_link(TopologyLinkId{1}));
+    GERDOS_CHECK(topology.link_count() == 1);
+    GERDOS_CHECK(topology.find_link(TopologyLinkId{1}) == nullptr);
+    GERDOS_CHECK(!topology.remove_link(TopologyLinkId{1}));
+
+    TopologyLink reused_link{
+        TopologyLinkDescription{
+            TopologyLinkId{1},
+            TopologyEndpoint::device_endpoint(DeviceId{200}),
+            TopologyEndpoint::device_endpoint(DeviceId{201}),
+            TopologyLinkDirection::DIRECTED,
+        },
+    };
+
+    GERDOS_CHECK(!topology.add_link(std::move(reused_link)));
+    GERDOS_CHECK(topology.link_count() == 1);
 
     return 0;
 }

@@ -195,7 +195,26 @@ lifetime guarantee must remain explicit.
 
 Raw pointers and references must not silently imply ownership.
 
-## 11. Architectural Invariants
+## 11. Topology Boundary
+
+Topology is a separate runtime graph and is not part of the Device ownership
+hierarchy.
+
+Topology links may refer to Devices and Resources by non-owning identifier,
+but topology does not own or directly validate those objects.
+
+Device and Resource lifetime therefore remains authoritative for object
+ownership. A topology relationship must not be interpreted as keeping an
+endpoint alive.
+
+When a Device or Resource is removed, topology relationships referring to
+that endpoint become invalid for execution. The future runtime integration
+layer is responsible for reconciling active topology with active resources.
+
+Topology identifiers are separate from DeviceId and ResourceId and must not
+be used as ownership tokens.
+
+## 12. Architectural Invariants
 
 The implementation must preserve these invariants:
 
@@ -211,7 +230,7 @@ The implementation must preserve these invariants:
 9. Simulated hardware uses the same core contracts.
 10. No global mutable singleton registry is required.
 
-## 12. Test Requirements
+## 13. Test Requirements
 
 The implementation must eventually test:
 
