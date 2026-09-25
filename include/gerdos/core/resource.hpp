@@ -47,6 +47,11 @@ public:
     explicit Resource(ResourceDescription description)
         : description_(std::move(description)) {}
 
+    Resource(const Resource&) = delete;
+    Resource& operator=(const Resource&) = delete;
+    Resource(Resource&&) noexcept = default;
+    Resource& operator=(Resource&&) noexcept = delete;
+
     [[nodiscard]] const ResourceDescription& description() const noexcept {
         return description_;
     }

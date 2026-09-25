@@ -1,6 +1,8 @@
 #include <cassert>
 #include <unordered_map>
+#include <utility>
 
+#include "gerdos/core/device.hpp"
 #include "gerdos/core/ids.hpp"
 #include "gerdos/core/resource.hpp"
 
@@ -59,6 +61,81 @@ int main() {
     assert(resource.available());
     assert(is_available(ResourceAvailability::AVAILABLE));
     assert(!is_available(ResourceAvailability::FAILED));
+
+    const DeviceDescription device_description{
+        device_a,
+        "test-device",
+    };
+
+    Device device{device_description};
+
+    assert(device.description().id == device_a);
+    assert(device.description().name == "test-device");
+
+    Resource owned_resource{
+        ResourceDescription{
+            ResourceId{10},
+            device_a,
+            ResourceKind::COMPUTE,
+            "owned-compute",
+        },
+    };
+
+    assert(device.resource_count() == 0);
+    assert(device.add_resource(std::move(owned_resource)));
+    assert(device.resource_count() == 1);
+
+    Resource* borrowed_resource = device.find_resource(ResourceId{10});
+
+    assert(borrowed_resource != nullptr);
+    assert(borrowed_resource->description().id == ResourceId{10});
+    assert(borrowed_resource->description().owner == device_a);
+    assert(
+        borrowed_resource->description().kind == ResourceKind::COMPUTE);
+
+    Resource duplicate_resource{
+        ResourceDescription{
+            ResourceId{10},
+            device_a,
+            ResourceKind::COMPUTE,
+            "duplicate-id",
+        },
+    };
+
+    assert(!device.add_resource(std::move(duplicate_resource)));
+    assert(
+        duplicate_resource.description().name == "duplicate-id");
+
+    Resource wrong_owner_resource{
+        ResourceDescription{
+            ResourceId{11},
+            device_c,
+            ResourceKind::MEMORY,
+            "wrong-owner",
+        },
+    };
+
+    assert(!device.add_resource(std::move(wrong_owner_resource)));
+    assert(
+        wrong_owner_resource.description().name == "wrong-owner");
+    assert(device.resource_count() == 1);
+    assert(device.find_resource(ResourceId{11}) == nullptr);
+
+    assert(device.remove_resource(ResourceId{10}));
+    assert(device.resource_count() == 0);
+    assert(device.find_resource(ResourceId{10}) == nullptr);
+    assert(!device.remove_resource(ResourceId{10}));
+
+    Resource invalid_id_resource{
+        ResourceDescription{
+            ResourceId{},
+            device_a,
+            ResourceKind::STORAGE,
+            "invalid-id",
+        },
+    };
+
+    assert(!device.add_resource(std::move(invalid_id_resource)));
 
     resource.set_availability(ResourceAvailability::DRAINING);
 
