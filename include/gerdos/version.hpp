@@ -1,0 +1,5 @@
+#pragma once
+
+#define GERDOS_VERSION_MAJOR 0
+#define GERDOS_VERSION_MINOR 1
+#define GERDOS_VERSION_PATCH 0
