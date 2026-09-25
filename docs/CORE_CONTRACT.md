@@ -341,6 +341,37 @@ Borrowed enumeration results follow the same lifetime rules as other borrowed
 runtime access: removal of an object invalidates previously obtained borrowed
 access to that object.
 
+## Concurrency and Synchronization
+
+The initial core runtime objects and ownership containers are not internally
+synchronized.
+
+Concurrent access to a core object or ownership container therefore requires
+external synchronization by the owning runtime or integration layer.
+
+Any operation that may mutate ownership, registration, removal, runtime state,
+or topology must be externally synchronized against other accesses that could
+observe or modify the affected object or collection.
+
+Read-only access is valid concurrently only when the underlying object or
+collection is not concurrently mutated.
+
+A `const` API provides const access semantics but does not constitute a
+thread-safety guarantee.
+
+Borrowed pointers and references do not extend object lifetime and must not be
+used after the owning object has been removed or destroyed.
+
+Enumeration follows the same synchronization and lifetime rules as direct
+lookup. Enumeration must not be treated as a concurrent snapshot.
+
+Topology access follows the same external-synchronization requirement as
+Device and Resource ownership access.
+
+The initial contract deliberately does not mandate mutexes, atomics, lock-free
+structures, reader-writer locks, or any other particular synchronization
+mechanism. Such mechanisms belong to a future runtime or integration layer.
+
 # 9. Transfer Resource
 
 Data movement is itself a schedulable resource.

@@ -195,7 +195,36 @@ lifetime guarantee must remain explicit.
 
 Raw pointers and references must not silently imply ownership.
 
-## 11. Topology Boundary
+## 11. Concurrency and Synchronization
+
+The Device Registry, Device resource ownership, and their runtime state are
+not internally synchronized in the initial implementation.
+
+Concurrent access therefore requires external synchronization by the owning
+runtime or integration layer.
+
+Operations that create, remove, or otherwise mutate Devices or Resources must
+be externally synchronized against other accesses to the affected registry or
+Device.
+
+Runtime availability/state changes follow the same external-synchronization
+rule.
+
+Const lookup and const enumeration do not provide an independent thread-safety
+guarantee. They are safe for concurrent use only when the underlying object or
+collection is not concurrently mutated.
+
+Borrowed Device and Resource pointers remain subject to the lifetime of their
+owning object. Removal or destruction invalidates previously obtained borrowed
+access.
+
+Enumeration does not create a snapshot and does not change these
+synchronization or lifetime requirements.
+
+The initial contract does not prescribe mutexes, atomics, lock-free structures,
+or another particular synchronization mechanism.
+
+## 12. Topology Boundary
 
 Topology is a separate runtime graph and is not part of the Device ownership
 hierarchy.
@@ -214,7 +243,7 @@ layer is responsible for reconciling active topology with active resources.
 Topology identifiers are separate from DeviceId and ResourceId and must not
 be used as ownership tokens.
 
-## 12. Enumeration
+## 13. Enumeration
 
 The Device Registry exposes enumeration of active Devices without transferring
 ownership.
@@ -250,7 +279,7 @@ remove topology links from the collection currently being enumerated.
 Topology enumeration does not create an ownership relationship between the
 Topology graph and its endpoint Devices or Resources.
 
-## 13. Architectural Invariants
+## 14. Architectural Invariants
 
 The implementation must preserve these invariants:
 
@@ -266,7 +295,7 @@ The implementation must preserve these invariants:
 9. Simulated hardware uses the same core contracts.
 10. No global mutable singleton registry is required.
 
-## 13. Test Requirements
+## 15. Test Requirements
 
 The implementation must eventually test:
 
