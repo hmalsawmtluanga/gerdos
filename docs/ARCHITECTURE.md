@@ -6,7 +6,8 @@ GERDOS is an inference runtime whose primary abstraction is not a particular
 model or accelerator.
 
 The runtime manages execution across heterogeneous compute, memory, storage,
-and interconnect resources.
+and transfer resources, while representing physical and logical connectivity
+through a separate topology model.
 
 The architecture must therefore remain independent of any particular:
 
@@ -67,15 +68,35 @@ GERDOS will eventually represent at least:
 - SSD
 - other persistent storage
 
-### Interconnect
+### Transfer
+
+- DMA engines
+- copy engines
+- storage I/O engines
+- host-to-device transfer mechanisms
+
+### Synchronization
+
+- synchronization mechanisms required to coordinate execution
+
+## 4. Topology
+
+GERDOS represents physical and logical connectivity separately from Resource
+identity.
+
+Examples include:
 
 - PCIe
 - NVLink
 - Infinity Fabric
+- CPU memory fabrics
+- storage connectivity
 - other accelerator interconnects
-- CPU memory fabric
 
-## 4. Model abstraction
+Topology describes endpoints, paths, accessibility, bandwidth, latency, and
+measured behavior. It is not itself a ResourceKind.
+
+## 5. Model abstraction
 
 Models are external workloads.
 
@@ -85,7 +106,7 @@ individual model families.
 Model support should be implemented through explicit model/graph/weight
 interfaces.
 
-## 5. Execution
+## 6. Execution
 
 GERDOS should eventually be able to construct an execution plan based on:
 
@@ -104,7 +125,7 @@ GERDOS should eventually be able to construct an execution plan based on:
 Static heuristics may provide initial behavior, but runtime measurement should
 be preferred wherever practical.
 
-## 6. Data movement
+## 7. Data movement
 
 Computation and data movement are separate resources.
 
@@ -118,14 +139,14 @@ The runtime should support:
 - topology-aware movement
 - demand-driven loading
 
-## 7. Hardware independence
+## 8. Hardware independence
 
 Hardware-specific functionality belongs behind backend/device interfaces.
 
 The core runtime must not depend directly on CUDA, ROCm, SYCL, or any individual
 vendor API.
 
-## 8. Performance philosophy
+## 9. Performance philosophy
 
 GERDOS does not assume that maximum theoretical FLOPS determine inference
 performance.
@@ -146,7 +167,7 @@ Relevant constraints can include:
 
 The runtime should measure these factors rather than assuming them.
 
-## 9. Validation
+## 10. Validation
 
 Specific models and hardware configurations will be introduced later as
 validation workloads.

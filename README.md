@@ -8,8 +8,9 @@ performance from heterogeneous and constrained hardware.
 Its purpose is to make modern open models practical across hardware
 configurations that conventional inference runtimes may not exploit efficiently.
 
-GERDOS treats compute, memory, storage, interconnects, and model state as
-resources available to a single global execution system.
+GERDOS treats compute, memory, storage, transfer mechanisms, and model state
+as resources within a single global execution system, while representing
+physical connectivity through a separate topology model.
 
 ### Core principle
 

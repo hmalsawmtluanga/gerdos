@@ -117,7 +117,6 @@ Initial conceptual resource categories include:
     COMPUTE
     MEMORY
     STORAGE
-    INTERCONNECT
     TRANSFER
     SYNCHRONIZATION
 
@@ -234,32 +233,45 @@ semantics differ.
 
 ---
 
-# 8. Interconnect Resource
+# 8. Topology
 
-An interconnect resource represents a path through which resources communicate.
+Topology describes the physical and logical connectivity through which
+resources and other runtime endpoints can communicate or move data.
 
-Examples:
+Topology is not itself a `ResourceKind`.
+
+Examples include:
 
 - PCIe
 - NVLink
 - Infinity Fabric
-- memory fabric
-- other device interconnects
+- CPU memory fabrics
+- storage connectivity
+- other accelerator interconnects
 
-Relevant properties include:
+A topology link or path may describe:
 
-- endpoints
+- source endpoint
+- destination endpoint
 - directionality
-- bandwidth
-- latency
-- peer access
-- access semantics
+- static bandwidth or capacity
+- latency characteristics
+- accessibility
+- peer-access capability
+- transfer mechanisms
 - measured effective throughput
-- contention
+- contention characteristics
 
-The runtime must represent actual topology rather than assuming a fixed machine.
+Physical connectivity such as PCIe or NVLink therefore belongs to Topology,
+rather than being represented automatically as an `INTERCONNECT` resource.
 
----
+A `TRANSFER` resource represents a schedulable mechanism that performs data
+movement, such as a DMA engine, copy engine, or storage I/O engine.
+
+Topology describes the connectivity through which that movement can occur.
+
+The runtime must represent actual topology rather than assuming a fixed
+machine architecture.
 
 # 9. Transfer Resource
 
@@ -286,7 +298,14 @@ Therefore transfers must be visible to the execution planner.
 
 # 10. Topology Graph
 
-The Topology Graph describes relationships between resources.
+The Topology Graph describes connectivity and communication relationships
+between runtime endpoints.
+
+Endpoints may include devices, resources, memory regions, storage resources,
+or other addressable execution/runtime entities.
+
+Topology therefore describes how the runtime environment is connected rather
+than defining another category of Resource.
 
 Conceptually:
 
@@ -810,17 +829,15 @@ such as:
 
                   GERDOS
                     |
-              Resource Graph
-                    |
         +-----------+-----------+
-        |           |           |
-      Compute     Memory     Storage
-        |           |           |
-       CPU      RAM / VRAM    NVMe
-                   |
-                Topology
-                   |
-              Interconnects
+        |                       |
+   Resource Graph           Topology
+        |                       |
+   +----+----+----+----+    PCIe / NVLink
+   |    |    |    |    |
+Compute Memory Storage Transfer Synchronization
+   |      |      |      |
+  CPU  RAM/VRAM   NVMe   DMA / Copy
 
 while allowing a workload to move through that environment without the core
 being aware of which model, vendor, accelerator generation, or storage device
