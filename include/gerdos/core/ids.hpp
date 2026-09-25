@@ -31,6 +31,7 @@ struct DeviceIdTag;
 struct ResourceIdTag;
 struct TopologyLinkIdTag;
 struct DataIdTag;
+struct DataResidencyIdTag;
 struct OperationIdTag;
 struct ExecutionIdTag;
 
@@ -38,6 +39,7 @@ using DeviceId = StrongId<DeviceIdTag>;
 using ResourceId = StrongId<ResourceIdTag>;
 using TopologyLinkId = StrongId<TopologyLinkIdTag>;
 using DataId = StrongId<DataIdTag>;
+using DataResidencyId = StrongId<DataResidencyIdTag>;
 using OperationId = StrongId<OperationIdTag>;
 using ExecutionId = StrongId<ExecutionIdTag>;
 

@@ -513,7 +513,96 @@ at a particular execution resource.
 
 ---
 
-# 13. Operation
+# 13. Data Identity and Residency Contract
+
+The implementation separates logical Data identity from physical residency.
+
+A `DataId` identifies one logical Data object. It does not identify a physical
+allocation, memory address, storage location, representation, or Device.
+
+Data objects are runtime-owned objects. The owning Data Registry is responsible
+for their lifetime and identity management.
+
+A Data object does not own Devices or Resources. It may refer to runtime
+resources through non-owning identifiers.
+
+Logical Data identity remains stable while physical representations are
+created, transferred, replaced, or removed.
+
+A logical Data object may have multiple simultaneous physical representations.
+
+Each physical representation is represented by a distinct Data Residency
+record. A residency record identifies the Resource on which the representation
+exists through a non-owning ResourceId.
+
+A `DataResidencyId` identifies one residency record and is distinct from
+`DataId` and `ResourceId`.
+
+Data Residency identifiers are owned by their containing Data object and are
+not reused after the corresponding residency record is removed. The residency
+identifier namespace is scoped to the containing Data object.
+
+Data Residency records do not transfer or imply ownership of the referenced
+Resource.
+
+A residency record describes runtime state associated with one physical
+representation, including:
+
+- residency identity
+- logical Data identity
+- referenced Resource identity
+- representation information
+- residency state
+
+The initial residency state model is deliberately small:
+
+- `VALID` — the representation is currently usable
+- `STALE` — the representation exists but is not the current usable version
+- `TRANSFERRING` — the representation is involved in an in-progress movement
+  or update and must not be assumed usable
+- `UNAVAILABLE` — the representation exists but cannot currently be used
+
+Residency state is distinct from `ResourceAvailability`. Resource availability
+describes whether a Resource can accept or support work; residency state
+describes the condition of a particular physical representation of Data.
+
+The initial implementation does not define a separate `CREATING` residency
+state. Creation of a residency is represented by later operation and execution
+semantics rather than by expanding the initial residency state machine.
+
+Representation information is intentionally opaque at the core level. The
+core must not introduce model-specific tensor types, datatype enumerations,
+quantization formats, or backend allocation handles merely to represent
+residency.
+
+Multiple representations of the same logical Data object may coexist.
+
+A representation may become stale without invalidating the logical Data
+identity. Removing a physical representation removes that residency; it does
+not remove the logical Data object.
+
+A residency that is being transferred must remain distinguishable from a
+usable valid residency.
+
+An unavailable or stale residency must not be treated as usable merely because
+the residency record still exists.
+
+The initial implementation does not define automatic coherence, eviction,
+prefetch, placement, transfer scheduling, or planner policy. Those behaviors
+belong to later runtime layers.
+
+Data and residency ownership follows the same external-synchronization and
+borrowed-access rules established by the core concurrency contract.
+
+Data identity and residency identity must not be inferred from enumeration
+position, ResourceId, DeviceId, memory address, or backend allocation handle.
+
+The core Data abstraction must remain independent of model architecture,
+tensor semantics, quantization scheme, storage format, and backend vendor.
+
+---
+
+# 14. Operation
 
 An Operation represents executable work.
 
