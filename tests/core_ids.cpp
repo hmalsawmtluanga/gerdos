@@ -1,4 +1,5 @@
 #include <cassert>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -8,6 +9,16 @@
 
 int main() {
     using namespace gerdos;
+
+    static_assert(!std::is_copy_constructible_v<Resource>);
+    static_assert(!std::is_copy_assignable_v<Resource>);
+    static_assert(std::is_move_constructible_v<Resource>);
+    static_assert(!std::is_move_assignable_v<Resource>);
+
+    static_assert(!std::is_copy_constructible_v<Device>);
+    static_assert(!std::is_copy_assignable_v<Device>);
+    static_assert(!std::is_move_constructible_v<Device>);
+    static_assert(!std::is_move_assignable_v<Device>);
 
     const DeviceId device_a{1};
     const DeviceId device_b{1};
