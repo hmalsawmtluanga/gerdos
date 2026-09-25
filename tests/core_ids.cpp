@@ -1,4 +1,5 @@
-#include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -7,6 +8,19 @@
 #include "gerdos/core/device_registry.hpp"
 #include "gerdos/core/ids.hpp"
 #include "gerdos/core/resource.hpp"
+
+namespace {
+
+void check(bool condition, const char* expression) {
+    if (!condition) {
+        std::fprintf(stderr, "TEST FAILURE: %s\n", expression);
+        std::abort();
+    }
+}
+
+} // namespace
+
+#define GERDOS_CHECK(condition) check((condition), #condition)
 
 int main() {
     using namespace gerdos;
@@ -30,28 +44,28 @@ int main() {
     const DeviceId device_b{1};
     const DeviceId device_c{2};
 
-    assert(!DeviceId{}.valid());
-    assert(device_a.valid());
+    GERDOS_CHECK(!DeviceId{}.valid());
+    GERDOS_CHECK(device_a.valid());
 
-    assert(device_a == device_b);
-    assert(device_a != device_c);
+    GERDOS_CHECK(device_a == device_b);
+    GERDOS_CHECK(device_a != device_c);
 
     const ResourceId resource_a{1};
     const ResourceId resource_b{1};
 
-    assert(resource_a.valid());
-    assert(resource_a.value() == 1);
-    assert(resource_a == resource_b);
+    GERDOS_CHECK(resource_a.valid());
+    GERDOS_CHECK(resource_a.value() == 1);
+    GERDOS_CHECK(resource_a == resource_b);
 
     std::unordered_map<DeviceId, int> devices;
     devices.emplace(device_a, 42);
 
-    assert(devices.at(device_b) == 42);
+    GERDOS_CHECK(devices.at(device_b) == 42);
 
     std::unordered_map<ResourceId, int> resources;
     resources.emplace(resource_a, 99);
 
-    assert(resources.at(resource_b) == 99);
+    GERDOS_CHECK(resources.at(resource_b) == 99);
 
     const ResourceDescription resource_description{
         resource_a,
@@ -62,22 +76,22 @@ int main() {
 
     Resource resource{resource_description};
 
-    assert(resource.description().id == resource_a);
-    assert(resource.description().owner == device_a);
-    assert(resource.description().kind == ResourceKind::COMPUTE);
-    assert(resource.description().name == "test-compute");
+    GERDOS_CHECK(resource.description().id == resource_a);
+    GERDOS_CHECK(resource.description().owner == device_a);
+    GERDOS_CHECK(resource.description().kind == ResourceKind::COMPUTE);
+    GERDOS_CHECK(resource.description().name == "test-compute");
 
-    assert(
+    GERDOS_CHECK(
         resource.availability() == ResourceAvailability::INITIALIZING);
-    assert(!resource.available());
+    GERDOS_CHECK(!resource.available());
 
     resource.set_availability(ResourceAvailability::AVAILABLE);
 
-    assert(
+    GERDOS_CHECK(
         resource.availability() == ResourceAvailability::AVAILABLE);
-    assert(resource.available());
-    assert(is_available(ResourceAvailability::AVAILABLE));
-    assert(!is_available(ResourceAvailability::FAILED));
+    GERDOS_CHECK(resource.available());
+    GERDOS_CHECK(is_available(ResourceAvailability::AVAILABLE));
+    GERDOS_CHECK(!is_available(ResourceAvailability::FAILED));
 
     const DeviceDescription device_description{
         device_a,
@@ -86,8 +100,8 @@ int main() {
 
     Device device{device_description};
 
-    assert(device.description().id == device_a);
-    assert(device.description().name == "test-device");
+    GERDOS_CHECK(device.description().id == device_a);
+    GERDOS_CHECK(device.description().name == "test-device");
 
     Resource owned_resource{
         ResourceDescription{
@@ -98,16 +112,16 @@ int main() {
         },
     };
 
-    assert(device.resource_count() == 0);
-    assert(device.add_resource(std::move(owned_resource)));
-    assert(device.resource_count() == 1);
+    GERDOS_CHECK(device.resource_count() == 0);
+    GERDOS_CHECK(device.add_resource(std::move(owned_resource)));
+    GERDOS_CHECK(device.resource_count() == 1);
 
     Resource* borrowed_resource = device.find_resource(ResourceId{10});
 
-    assert(borrowed_resource != nullptr);
-    assert(borrowed_resource->description().id == ResourceId{10});
-    assert(borrowed_resource->description().owner == device_a);
-    assert(
+    GERDOS_CHECK(borrowed_resource != nullptr);
+    GERDOS_CHECK(borrowed_resource->description().id == ResourceId{10});
+    GERDOS_CHECK(borrowed_resource->description().owner == device_a);
+    GERDOS_CHECK(
         borrowed_resource->description().kind == ResourceKind::COMPUTE);
 
     Resource duplicate_resource{
@@ -119,8 +133,8 @@ int main() {
         },
     };
 
-    assert(!device.add_resource(std::move(duplicate_resource)));
-    assert(
+    GERDOS_CHECK(!device.add_resource(std::move(duplicate_resource)));
+    GERDOS_CHECK(
         duplicate_resource.description().name == "duplicate-id");
 
     Resource wrong_owner_resource{
@@ -132,16 +146,30 @@ int main() {
         },
     };
 
-    assert(!device.add_resource(std::move(wrong_owner_resource)));
-    assert(
+    GERDOS_CHECK(!device.add_resource(std::move(wrong_owner_resource)));
+    GERDOS_CHECK(
         wrong_owner_resource.description().name == "wrong-owner");
-    assert(device.resource_count() == 1);
-    assert(device.find_resource(ResourceId{11}) == nullptr);
+    GERDOS_CHECK(device.resource_count() == 1);
+    GERDOS_CHECK(device.find_resource(ResourceId{11}) == nullptr);
 
-    assert(device.remove_resource(ResourceId{10}));
-    assert(device.resource_count() == 0);
-    assert(device.find_resource(ResourceId{10}) == nullptr);
-    assert(!device.remove_resource(ResourceId{10}));
+    GERDOS_CHECK(device.remove_resource(ResourceId{10}));
+    GERDOS_CHECK(device.resource_count() == 0);
+    GERDOS_CHECK(device.find_resource(ResourceId{10}) == nullptr);
+    GERDOS_CHECK(!device.remove_resource(ResourceId{10}));
+
+    Resource reused_resource{
+        ResourceDescription{
+            ResourceId{10},
+            device_a,
+            ResourceKind::MEMORY,
+            "reused-resource-id",
+        },
+    };
+
+    GERDOS_CHECK(!device.add_resource(std::move(reused_resource)));
+    GERDOS_CHECK(
+        reused_resource.description().name == "reused-resource-id");
+    GERDOS_CHECK(device.resource_count() == 0);
 
     Resource invalid_id_resource{
         ResourceDescription{
@@ -152,19 +180,19 @@ int main() {
         },
     };
 
-    assert(!device.add_resource(std::move(invalid_id_resource)));
+    GERDOS_CHECK(!device.add_resource(std::move(invalid_id_resource)));
 
     resource.set_availability(ResourceAvailability::DRAINING);
 
-    assert(
+    GERDOS_CHECK(
         resource.availability() == ResourceAvailability::DRAINING);
-    assert(!resource.available());
+    GERDOS_CHECK(!resource.available());
 
     DeviceRegistry registry;
 
-    assert(registry.device_count() == 0);
+    GERDOS_CHECK(registry.device_count() == 0);
 
-    assert(
+    GERDOS_CHECK(
         registry.create_device(
             DeviceDescription{
                 DeviceId{},
@@ -177,23 +205,23 @@ int main() {
             "device-one",
         });
 
-    assert(device_one != nullptr);
-    assert(device_one->description().id == DeviceId{100});
-    assert(device_one->description().name == "device-one");
-    assert(registry.device_count() == 1);
+    GERDOS_CHECK(device_one != nullptr);
+    GERDOS_CHECK(device_one->description().id == DeviceId{100});
+    GERDOS_CHECK(device_one->description().name == "device-one");
+    GERDOS_CHECK(registry.device_count() == 1);
 
-    assert(registry.find_device(DeviceId{100}) == device_one);
-    assert(registry.find_device(DeviceId{101}) == nullptr);
+    GERDOS_CHECK(registry.find_device(DeviceId{100}) == device_one);
+    GERDOS_CHECK(registry.find_device(DeviceId{101}) == nullptr);
 
-    assert(
+    GERDOS_CHECK(
         registry.create_device(
             DeviceDescription{
                 DeviceId{100},
                 "duplicate-device",
             }) == nullptr);
 
-    assert(registry.device_count() == 1);
-    assert(registry.find_device(DeviceId{100}) == device_one);
+    GERDOS_CHECK(registry.device_count() == 1);
+    GERDOS_CHECK(registry.find_device(DeviceId{100}) == device_one);
 
     Resource registry_resource{
         ResourceDescription{
@@ -204,16 +232,16 @@ int main() {
         },
     };
 
-    assert(device_one->add_resource(std::move(registry_resource)));
-    assert(device_one->resource_count() == 1);
+    GERDOS_CHECK(device_one->add_resource(std::move(registry_resource)));
+    GERDOS_CHECK(device_one->resource_count() == 1);
 
-    assert(registry.remove_device(DeviceId{100}));
-    assert(registry.device_count() == 0);
-    assert(registry.find_device(DeviceId{100}) == nullptr);
+    GERDOS_CHECK(registry.remove_device(DeviceId{100}));
+    GERDOS_CHECK(registry.device_count() == 0);
+    GERDOS_CHECK(registry.find_device(DeviceId{100}) == nullptr);
 
-    assert(!registry.remove_device(DeviceId{100}));
+    GERDOS_CHECK(!registry.remove_device(DeviceId{100}));
 
-    assert(
+    GERDOS_CHECK(
         registry.create_device(
             DeviceDescription{
                 DeviceId{100},
@@ -226,9 +254,9 @@ int main() {
             "device-two",
         });
 
-    assert(device_two != nullptr);
-    assert(registry.device_count() == 1);
-    assert(registry.find_device(DeviceId{200}) == device_two);
+    GERDOS_CHECK(device_two != nullptr);
+    GERDOS_CHECK(registry.device_count() == 1);
+    GERDOS_CHECK(registry.find_device(DeviceId{200}) == device_two);
 
     return 0;
 }

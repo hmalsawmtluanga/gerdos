@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "gerdos/core/ids.hpp"
@@ -62,7 +63,7 @@ public:
             return false;
         }
 
-        if (resources_.contains(id)) {
+        if (resources_.contains(id) || retired_resource_ids_.contains(id)) {
             return false;
         }
 
@@ -73,8 +74,16 @@ public:
         return true;
     }
 
-    [[nodiscard]] bool remove_resource(ResourceId id) noexcept {
-        return resources_.erase(id) != 0;
+    [[nodiscard]] bool remove_resource(ResourceId id) {
+        const auto it = resources_.find(id);
+
+        if (it == resources_.end()) {
+            return false;
+        }
+
+        retired_resource_ids_.insert(id);
+        resources_.erase(it);
+        return true;
     }
 
     [[nodiscard]] std::size_t resource_count() const noexcept {
@@ -84,6 +93,7 @@ public:
 private:
     DeviceDescription description_;
     std::unordered_map<ResourceId, std::unique_ptr<Resource>> resources_;
+    std::unordered_set<ResourceId> retired_resource_ids_;
 };
 
 } // namespace gerdos

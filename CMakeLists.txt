@@ -41,6 +41,16 @@ target_include_directories(gerdos_core_ids_test
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+if(MSVC)
+    target_compile_options(gerdos_core_ids_test PRIVATE /W4)
+else()
+    target_compile_options(gerdos_core_ids_test PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+    )
+endif()
+
 add_test(
     NAME gerdos_core_ids
     COMMAND gerdos_core_ids_test
