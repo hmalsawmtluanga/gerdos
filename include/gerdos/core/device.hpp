@@ -90,6 +90,22 @@ public:
         return resources_.size();
     }
 
+    template <typename Fn>
+    void for_each_resource(Fn&& fn) {
+        for (auto& [id, resource] : resources_) {
+            (void)id;
+            fn(resource.get());
+        }
+    }
+
+    template <typename Fn>
+    void for_each_resource(Fn&& fn) const {
+        for (const auto& [id, resource] : resources_) {
+            (void)id;
+            fn(resource.get());
+        }
+    }
+
 private:
     DeviceDescription description_;
     std::unordered_map<ResourceId, std::unique_ptr<Resource>> resources_;

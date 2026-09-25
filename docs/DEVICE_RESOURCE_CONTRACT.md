@@ -214,7 +214,43 @@ layer is responsible for reconciling active topology with active resources.
 Topology identifiers are separate from DeviceId and ResourceId and must not
 be used as ownership tokens.
 
-## 12. Architectural Invariants
+## 12. Enumeration
+
+The Device Registry exposes enumeration of active Devices without transferring
+ownership.
+
+A Device exposes enumeration of its active Resources without transferring
+ownership.
+
+Enumeration callbacks receive borrowed pointers. Const owners expose const
+borrowed pointers.
+
+Enumeration order is unspecified because active objects are stored in
+unordered ownership containers. Consumers must identify objects by their
+stable runtime identifiers rather than by enumeration position.
+
+Enumeration does not create a snapshot. Callbacks must not add or remove
+entries from the collection currently being enumerated.
+
+Enumeration does not expose or transfer ownership of the underlying
+containers.
+
+Topology exposes enumeration of its active topology links without transferring
+ownership.
+
+Topology enumeration callbacks receive borrowed pointers. Const topology
+owners expose const borrowed pointers.
+
+Topology-link enumeration order is unspecified. Consumers must identify links
+by their stable TopologyLinkId rather than by enumeration position.
+
+Topology enumeration does not create a snapshot. Callbacks must not add or
+remove topology links from the collection currently being enumerated.
+
+Topology enumeration does not create an ownership relationship between the
+Topology graph and its endpoint Devices or Resources.
+
+## 13. Architectural Invariants
 
 The implementation must preserve these invariants:
 

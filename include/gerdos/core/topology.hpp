@@ -150,6 +150,22 @@ public:
         return links_.size();
     }
 
+    template <typename Fn>
+    void for_each_link(Fn&& fn) {
+        for (auto& [id, link] : links_) {
+            (void)id;
+            fn(link.get());
+        }
+    }
+
+    template <typename Fn>
+    void for_each_link(Fn&& fn) const {
+        for (const auto& [id, link] : links_) {
+            (void)id;
+            fn(link.get());
+        }
+    }
+
 private:
     std::unordered_map<
         TopologyLinkId,

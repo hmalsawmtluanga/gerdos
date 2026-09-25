@@ -135,6 +135,25 @@ int main() {
     GERDOS_CHECK(
         borrowed_resource->description().kind == ResourceKind::COMPUTE);
 
+    std::size_t resource_enumerated = 0;
+    device.for_each_resource(
+        [&](Resource* resource) {
+            GERDOS_CHECK(resource != nullptr);
+            GERDOS_CHECK(resource->description().id == ResourceId{10});
+            ++resource_enumerated;
+        });
+    GERDOS_CHECK(resource_enumerated == 1);
+
+    const Device& const_device = device;
+    std::size_t const_resource_enumerated = 0;
+    const_device.for_each_resource(
+        [&](const Resource* resource) {
+            GERDOS_CHECK(resource != nullptr);
+            GERDOS_CHECK(resource->description().id == ResourceId{10});
+            ++const_resource_enumerated;
+        });
+    GERDOS_CHECK(const_resource_enumerated == 1);
+
     Resource duplicate_resource{
         ResourceDescription{
             ResourceId{10},
@@ -223,6 +242,25 @@ int main() {
 
     GERDOS_CHECK(registry.find_device(DeviceId{100}) == device_one);
     GERDOS_CHECK(registry.find_device(DeviceId{101}) == nullptr);
+
+    std::size_t registry_enumerated = 0;
+    registry.for_each_device(
+        [&](Device* device) {
+            GERDOS_CHECK(device != nullptr);
+            GERDOS_CHECK(device->description().id == DeviceId{100});
+            ++registry_enumerated;
+        });
+    GERDOS_CHECK(registry_enumerated == 1);
+
+    const DeviceRegistry& const_registry = registry;
+    std::size_t const_registry_enumerated = 0;
+    const_registry.for_each_device(
+        [&](const Device* device) {
+            GERDOS_CHECK(device != nullptr);
+            GERDOS_CHECK(device->description().id == DeviceId{100});
+            ++const_registry_enumerated;
+        });
+    GERDOS_CHECK(const_registry_enumerated == 1);
 
     GERDOS_CHECK(
         registry.create_device(
@@ -341,6 +379,25 @@ int main() {
     GERDOS_CHECK(
         borrowed_link->description().direction ==
         TopologyLinkDirection::BIDIRECTIONAL);
+
+    std::size_t links_enumerated = 0;
+    topology.for_each_link(
+        [&](TopologyLink* link) {
+            GERDOS_CHECK(link != nullptr);
+            GERDOS_CHECK(link->description().id == TopologyLinkId{1});
+            ++links_enumerated;
+        });
+    GERDOS_CHECK(links_enumerated == 1);
+
+    const Topology& const_topology = topology;
+    std::size_t const_links_enumerated = 0;
+    const_topology.for_each_link(
+        [&](const TopologyLink* link) {
+            GERDOS_CHECK(link != nullptr);
+            GERDOS_CHECK(link->description().id == TopologyLinkId{1});
+            ++const_links_enumerated;
+        });
+    GERDOS_CHECK(const_links_enumerated == 1);
 
     TopologyLink resource_link{
         TopologyLinkDescription{

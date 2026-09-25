@@ -74,6 +74,22 @@ public:
         return devices_.size();
     }
 
+    template <typename Fn>
+    void for_each_device(Fn&& fn) {
+        for (auto& [id, device] : devices_) {
+            (void)id;
+            fn(device.get());
+        }
+    }
+
+    template <typename Fn>
+    void for_each_device(Fn&& fn) const {
+        for (const auto& [id, device] : devices_) {
+            (void)id;
+            fn(device.get());
+        }
+    }
+
 private:
     std::unordered_map<DeviceId, std::unique_ptr<Device>> devices_;
     std::unordered_set<DeviceId> retired_ids_;

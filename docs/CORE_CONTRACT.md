@@ -315,6 +315,32 @@ The initial topology implementation is deliberately single-threaded and
 requires external synchronization if accessed concurrently. Concurrency
 machinery is not part of the topology contract at this stage.
 
+## Enumeration
+
+Runtime-owned collections may expose enumeration of their active objects
+without transferring ownership.
+
+Enumeration APIs expose borrowed pointers or references to objects owned by
+the corresponding runtime owner. Const owners expose const borrowed access.
+
+Enumeration order is unspecified unless a future contract explicitly defines
+an ordering guarantee. Consumers must identify runtime objects by their stable
+identifiers rather than by enumeration position.
+
+Enumeration does not create a snapshot. The collection currently being
+enumerated must not be structurally modified by the enumeration callback.
+
+Enumeration does not expose or transfer ownership of the underlying
+containers.
+
+Device enumeration is owned by the Device Registry. Resource enumeration is
+owned by its Device. Topology-link enumeration is owned by the Topology graph.
+These enumeration boundaries must not create alternative ownership paths.
+
+Borrowed enumeration results follow the same lifetime rules as other borrowed
+runtime access: removal of an object invalidates previously obtained borrowed
+access to that object.
+
 # 9. Transfer Resource
 
 Data movement is itself a schedulable resource.
