@@ -31,3 +31,17 @@ else()
 endif()
 
 enable_testing()
+
+add_executable(gerdos_core_ids_test
+    tests/core_ids.cpp
+)
+
+target_include_directories(gerdos_core_ids_test
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_test(
+    NAME gerdos_core_ids
+    COMMAND gerdos_core_ids_test
+)
