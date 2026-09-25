@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "gerdos/core/device.hpp"
+#include "gerdos/core/device_registry.hpp"
 #include "gerdos/core/ids.hpp"
 #include "gerdos/core/resource.hpp"
 
@@ -19,6 +20,11 @@ int main() {
     static_assert(!std::is_copy_assignable_v<Device>);
     static_assert(!std::is_move_constructible_v<Device>);
     static_assert(!std::is_move_assignable_v<Device>);
+
+    static_assert(!std::is_copy_constructible_v<DeviceRegistry>);
+    static_assert(!std::is_copy_assignable_v<DeviceRegistry>);
+    static_assert(!std::is_move_constructible_v<DeviceRegistry>);
+    static_assert(!std::is_move_assignable_v<DeviceRegistry>);
 
     const DeviceId device_a{1};
     const DeviceId device_b{1};
@@ -153,6 +159,76 @@ int main() {
     assert(
         resource.availability() == ResourceAvailability::DRAINING);
     assert(!resource.available());
+
+    DeviceRegistry registry;
+
+    assert(registry.device_count() == 0);
+
+    assert(
+        registry.create_device(
+            DeviceDescription{
+                DeviceId{},
+                "invalid-device",
+            }) == nullptr);
+
+    Device* device_one = registry.create_device(
+        DeviceDescription{
+            DeviceId{100},
+            "device-one",
+        });
+
+    assert(device_one != nullptr);
+    assert(device_one->description().id == DeviceId{100});
+    assert(device_one->description().name == "device-one");
+    assert(registry.device_count() == 1);
+
+    assert(registry.find_device(DeviceId{100}) == device_one);
+    assert(registry.find_device(DeviceId{101}) == nullptr);
+
+    assert(
+        registry.create_device(
+            DeviceDescription{
+                DeviceId{100},
+                "duplicate-device",
+            }) == nullptr);
+
+    assert(registry.device_count() == 1);
+    assert(registry.find_device(DeviceId{100}) == device_one);
+
+    Resource registry_resource{
+        ResourceDescription{
+            ResourceId{1000},
+            DeviceId{100},
+            ResourceKind::COMPUTE,
+            "registry-owned-compute",
+        },
+    };
+
+    assert(device_one->add_resource(std::move(registry_resource)));
+    assert(device_one->resource_count() == 1);
+
+    assert(registry.remove_device(DeviceId{100}));
+    assert(registry.device_count() == 0);
+    assert(registry.find_device(DeviceId{100}) == nullptr);
+
+    assert(!registry.remove_device(DeviceId{100}));
+
+    assert(
+        registry.create_device(
+            DeviceDescription{
+                DeviceId{100},
+                "reused-device-id",
+            }) == nullptr);
+
+    Device* device_two = registry.create_device(
+        DeviceDescription{
+            DeviceId{200},
+            "device-two",
+        });
+
+    assert(device_two != nullptr);
+    assert(registry.device_count() == 1);
+    assert(registry.find_device(DeviceId{200}) == device_two);
 
     return 0;
 }
