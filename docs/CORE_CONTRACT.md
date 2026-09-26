@@ -593,8 +593,14 @@ state. Transition validity is enforced by the core rather than being left to
 callers.
 
 Residency state is distinct from `ResourceAvailability`. Resource availability
-describes whether a Resource can accept or support work; residency state
-describes the condition of a particular physical representation of Data.
+describes whether a Resource can accept or support work; residency state describes
+the condition of a particular physical representation of Data.
+
+`DataResidency::usable()` reports only residency-state usability: it is true when
+the residency state is `VALID`. It does not establish that the Resource referenced
+by that residency is currently available. Effective runtime usability therefore
+requires both a usable residency state and an available referenced Resource; that
+combined evaluation belongs to a later runtime or execution-admission layer.
 
 The initial implementation does not define a separate `CREATING` residency
 state. Creation of a residency is represented by later operation and execution
