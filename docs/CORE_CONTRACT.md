@@ -697,8 +697,8 @@ The core must not introduce model-specific operation types or vendor-specific
 capability identifiers merely to represent an Operation requirement.
 
 An Operation may declare resource requirements. Resource requirements express
-what classes or capabilities of runtime resources are required without
-selecting a concrete Resource or Device.
+what runtime participation the work needs — as resource binding roles and
+minimum counts — without selecting a concrete Resource or Device.
 
 An Operation does not own referenced Data, Resources, Devices, or other
 runtime objects. References are non-owning identity references.
@@ -744,6 +744,47 @@ An Operation may contain generic execution requirements such as:
 - estimated cost
 
 An Operation does not select a vendor backend.
+
+## Operation Requirements
+
+An Operation declares its requirements; it does not classify itself. There is
+no operation-kind taxonomy in the core. What an operation needs is expressed
+only through its declared data references, its declared resource requirements,
+and — in the future — capability requirements.
+
+Data requirements are derived from the declared data references:
+
+- every `DataId` declared as an input must be bound in a consuming role
+  (`INPUT` or `SOURCE`) by an admissible physical realization
+- every `DataId` declared as an output must be bound in a producing role
+  (`OUTPUT` or `DESTINATION`) by an admissible physical realization
+- a `DataId` may be declared as both input and output; an admissible physical
+  realization then binds it in both a consuming and a producing role
+
+Resource requirements declare required runtime participation:
+
+- a resource requirement names a resource binding role and a minimum number
+  of resource entries of that role
+- an admissible physical realization binds at least the required number of
+  resources in each required role
+- at most one requirement exists per resource binding role; a requirement must
+  have a minimum of at least one
+- resources bound beyond the declared requirements are permitted
+- an operation with no resource requirements places no resource-role demand
+
+Resource requirements speak the current resource binding role domain and grow
+with it. They do not express resource kinds, vendor features, placement, or
+model semantics.
+
+Capability requirements are reserved as a future extension of this requirement
+model. They will be introduced only together with defined capability semantics
+on Resources; the core does not represent capabilities as free-form strings.
+
+Requirements are declarative. They do not select placement, order execution,
+imply dependencies, or encode scheduling or planner policy.
+
+Semantic execution admissibility evaluates a physical binding against these
+requirements.
 
 ---
 
