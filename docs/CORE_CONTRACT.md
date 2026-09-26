@@ -1005,12 +1005,20 @@ encode retry or scheduling policy, or classify the Operation.
 ## Execution Result
 
 A terminal Execution records one result. The result identifies the outcome of
-the attempt and may carry an opaque non-semantic diagnostic. The result is
+the attempt, records whether the attempt's execution effects were applied
+coherently, and may carry an opaque non-semantic diagnostic. The result is
 recorded once and is immutable afterwards.
 
 - a result is recorded only while the Execution is in a terminal state
 - the recorded outcome must equal the Execution's terminal state
 - at most one result exists per Execution
+
+An attempt whose finishing effects were rejected is recorded as
+`EFFECTS_REJECTED` rather than silently presented as coherent: its result and
+its residency state may then disagree, and the disagreement is part of the
+attempt's history. A rejected effects verdict is never discarded; it is
+reported through the result and through the runtime integration layer's
+completion reporting.
 
 The result does not carry measurements; timing, duration, and throughput are
 Measurement concerns. The result does not carry output data; produced and
@@ -1059,10 +1067,15 @@ Effects do not apply to attempts that never started: a cancelled PENDING
 attempt has not touched any representation.
 
 Effects are applied by the runtime integration layer in the intended
-sequence: admission, start effects, `RUNNING`, backend work, terminal
-transition, finish effects, result recording. Effects do not record results,
-do not change execution state, and do not consult availability, admissibility,
-topology, or measurements.
+sequence: admissibility, admission, backend submission, start effects,
+`RUNNING`, backend work, terminal transition, finish effects, result
+recording, measurement capture. Backend submission precedes the start effects
+and the state transition so that rejection stays atomic; backend work is
+therefore in flight briefly before its producing representations are marked
+update-in-progress, within one uninterruptible integration step under the
+external-synchronization rules. Effects do not record results, do not change
+execution state, and do not consult availability, admissibility, topology, or
+measurements.
 
 Concurrent updates to one residency are not arbitrated by these rules. The
 residency state machine's self-transitions make repeated start effects
@@ -1140,8 +1153,25 @@ cannot be rejected.
 
 Completion is applied in the fixed sequence: terminal transition, finish
 effects, result recording, measurement capture. Completions for attempts that
-are not `RUNNING` are discarded. Cancellation policy for attempts that have
-started is a later concern.
+are not `RUNNING` are discarded. Every completion is reported with its
+integrity: a completion whose finishing effects were rejected is reported as
+incoherent and its result is recorded as `EFFECTS_REJECTED`; nothing in the
+completion path discards an effects verdict.
+
+Cancellation of an attempt is performed by the executor: a `PENDING` attempt
+is cancelled without effects, and an in-flight attempt receives the
+failed-or-cancelled finishing effects before its result is recorded.
+
+Runtime object removal is preconditioned on lifecycle state:
+
+- an Execution may be removed only in a terminal state; an in-flight attempt
+  must be cancelled first
+- a Data Residency whose update is in progress cannot be removed; its
+  in-progress state must be resolved first
+- a Data object cannot be removed while one of its residencies is updating
+
+These preconditions keep the finishing effects applicable: removing the
+objects an attempt must finalize would strand their state silently.
 
 The executor holds no scheduling, placement, or retry policy: it advances
 attempts that have already been given a physical binding. Choosing bindings
