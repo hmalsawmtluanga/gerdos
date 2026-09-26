@@ -637,11 +637,59 @@ tensor semantics, quantization scheme, storage format, and backend vendor.
 
 ---
 
-# 14. Operation
+# 14. Operation Identity and Contract
 
-An Operation represents executable work.
+An `OperationId` identifies one logical Operation. Operation identity is
+distinct from Data identity, Data Residency identity, Resource identity,
+Device identity, and Execution identity.
 
-Examples:
+An Operation represents declarative executable work. It describes what work
+must occur without selecting the physical resources, data residencies,
+execution backend, execution queue, or execution attempt.
+
+An Operation may reference logical Data objects through `DataId`. These
+references do not identify a physical Data Residency and do not imply any
+specific memory, storage, Device, or backend placement.
+
+An Operation may declare input and output Data references.
+
+An Operation may declare dependencies on other Operations through
+`OperationId`. A dependency expresses a logical prerequisite relationship and
+does not by itself define scheduling, synchronization primitives, queue
+selection, or physical execution ordering.
+
+An Operation may declare capability requirements. Capability requirements are
+opaque to model architecture and backend implementation at the core level.
+The core must not introduce model-specific operation types or vendor-specific
+capability identifiers merely to represent an Operation requirement.
+
+An Operation may declare resource requirements. Resource requirements express
+what classes or capabilities of runtime resources are required without
+selecting a concrete Resource or Device.
+
+An Operation does not own referenced Data, Resources, Devices, or other
+runtime objects. References are non-owning identity references.
+
+An Operation does not contain execution state. Running, completed, failed,
+cancelled, retried, timing, measurements, and other attempt-specific state
+belong to Execution.
+
+An Operation does not contain backend handles, device pointers, memory
+addresses, physical placement decisions, transfer paths, scheduler decisions,
+or execution timestamps.
+
+An Operation remains logically distinct from each Execution that attempts to
+perform it. A single Operation may therefore correspond to zero, one, or
+multiple Executions over its lifetime.
+
+Operation identity must not be inferred from enumeration position, DataId,
+ResourceId, DeviceId, memory address, backend allocation handle, or execution
+attempt.
+
+Operation ownership follows the core ownership and external-synchronization
+rules established by this contract.
+
+Examples include:
 
 - matrix multiplication
 - attention
@@ -652,7 +700,7 @@ Examples:
 - storage read
 - synchronization
 
-An Operation contains generic execution requirements such as:
+An Operation may contain generic execution requirements such as:
 
 - inputs
 - outputs
@@ -666,7 +714,7 @@ An Operation does not select a vendor backend.
 
 ---
 
-# 14. Execution
+# 15. Execution
 
 Execution is a concrete runtime instance of an Operation.
 
@@ -694,7 +742,7 @@ reproducibility.
 
 ---
 
-# 15. Workload
+# 16. Workload
 
 A Workload describes the computation submitted to GERDOS.
 
@@ -713,7 +761,7 @@ GERDOS must not require workloads to originate from models.
 
 ---
 
-# 16. Model Boundary
+# 17. Model Boundary
 
 Models exist outside the core runtime.
 
@@ -752,7 +800,7 @@ is allowed.
 
 ---
 
-# 17. Backend Boundary
+# 18. Backend Boundary
 
 Backends translate generic execution requirements into hardware-specific
 operations.
