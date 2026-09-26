@@ -961,9 +961,46 @@ requesting admission again. Concurrent mutation remains subject to the core
 external-synchronization rules.
 
 Semantic execution admissibility — whether the resolved binding is appropriate
-for the Operation being attempted — remains a separate later concern. Admission
-does not inspect Operation semantics, topology paths, measurements, or planner
+for the Operation being attempted — is established separately by the
+binding-admissibility gate. Admission does not inspect Operation semantics,
+topology paths, measurements, or planner state.
+
+## Semantic Execution Admissibility
+
+Semantic execution admissibility establishes whether a physical binding is an
+appropriate realization of a specific Operation. It evaluates the Operation's
+declared requirements against the binding. It does not consult registries,
+runtime state, topology, measurements, or planner policy.
+
+A physical binding is semantically admissible for an Operation when:
+
+- every data binding in a consuming role (`INPUT`, `SOURCE`) references a
+  `DataId` that the Operation declares as an input
+- every data binding in a producing role (`OUTPUT`, `DESTINATION`) references
+  a `DataId` that the Operation declares as an output
+- every declared input `DataId` is referenced by at least one consuming data
+  binding
+- every declared output `DataId` is referenced by at least one producing data
+  binding
+- for every declared resource requirement, the binding contains at least the
+  required number of resource bindings in the required role
+
+A binding containing a role value outside the binding role domains is
+inadmissible. Bindings beyond the declared coverage and requirements are
+permitted: additional data bindings and additional resource bindings do not
+make a binding inadmissible when the rules above hold.
+
+Semantic execution admissibility is distinct from structural validity, runtime
+resolution, and execution admission. Structural validity establishes
+well-formed role/reference pairs. Runtime resolution establishes that the
+referenced identities currently exist. Execution admission establishes that
+the bound attempt is executable under current runtime state. Semantic
+execution admissibility establishes that the realization matches the declared
+work. These checks compose and must not be collapsed into one binding-validity
 state.
+
+Semantic execution admissibility does not select placement, order execution,
+encode retry or scheduling policy, or classify the Operation.
 
 ---
 
