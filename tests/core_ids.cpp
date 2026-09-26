@@ -85,6 +85,32 @@ int main() {
     GERDOS_CHECK(resource_a.value() == 1);
     GERDOS_CHECK(resource_a == resource_b);
 
+    const DataResidencyRef residency_ref_a{
+        DataId{10},
+        DataResidencyId{20},
+    };
+
+    const DataResidencyRef residency_ref_b{
+        DataId{10},
+        DataResidencyId{20},
+    };
+
+    const DataResidencyRef residency_ref_different_data{
+        DataId{11},
+        DataResidencyId{20},
+    };
+
+    const DataResidencyRef residency_ref_different_id{
+        DataId{10},
+        DataResidencyId{21},
+    };
+
+    GERDOS_CHECK(!DataResidencyRef{}.valid());
+    GERDOS_CHECK(residency_ref_a.valid());
+    GERDOS_CHECK(residency_ref_a == residency_ref_b);
+    GERDOS_CHECK(residency_ref_a != residency_ref_different_data);
+    GERDOS_CHECK(residency_ref_a != residency_ref_different_id);
+
     std::unordered_map<DeviceId, int> devices;
     devices.emplace(device_a, 42);
 

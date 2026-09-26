@@ -54,6 +54,19 @@ struct ResourceRef {
     friend constexpr bool operator==(ResourceRef, ResourceRef) = default;
 };
 
+struct DataResidencyRef {
+    DataId data;
+    DataResidencyId residency;
+
+    [[nodiscard]] constexpr bool valid() const noexcept {
+        return data.valid() && residency.valid();
+    }
+
+    friend constexpr bool operator==(
+        DataResidencyRef,
+        DataResidencyRef) = default;
+};
+
 } // namespace gerdos
 
 namespace std {

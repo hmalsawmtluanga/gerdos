@@ -550,6 +550,14 @@ Data Residency identifiers are owned by their containing Data object and are
 not reused after the corresponding residency record is removed. The residency
 identifier namespace is scoped to the containing Data object.
 
+A `DataResidencyRef` identifies a residency within its containing Data object
+by combining the owning `DataId` and the `DataResidencyId`. A bare
+`DataResidencyId` is not sufficient to identify a residency outside its
+containing Data scope.
+
+A `DataResidencyRef` is a non-owning identity reference. It does not transfer
+ownership of the Data object or the residency record.
+
 Data Residency records do not transfer or imply ownership of the referenced
 Resource.
 
