@@ -82,3 +82,6 @@ gerdos_add_test(gerdos_core_binding_admissibility
 gerdos_add_test(gerdos_core_execution_effects
     tests/core_execution_effects.cpp)
 
+gerdos_add_test(gerdos_core_execution_backend
+    tests/core_execution_backend.cpp)
+
