@@ -4,6 +4,7 @@
 #include "gerdos/core/device_registry.hpp"
 #include "gerdos/core/execution_registry.hpp"
 #include "gerdos/core/operation_registry.hpp"
+#include "gerdos/core/physical_binding.hpp"
 #include "gerdos/core/topology.hpp"
 
 int main() {
@@ -320,10 +321,60 @@ int main() {
     assert(operation->description().dependencies.empty());
 
     // ---------------------------------------------------------------------
-    // 7. Multiple concrete attempts of the same Operation
+    // 7. Physical binding is orthogonal to Execution lifecycle
     // ---------------------------------------------------------------------
 
     ExecutionRegistry executions;
+
+    Execution* unbound_cancelled = executions.create_execution(
+        ExecutionDescription{
+            ExecutionId{802},
+            OperationId{700},
+        });
+
+    assert(unbound_cancelled != nullptr);
+    assert(unbound_cancelled->state() == ExecutionState::PENDING);
+    assert(!unbound_cancelled->has_binding());
+    assert(unbound_cancelled->binding() == nullptr);
+
+    // A PENDING execution cannot enter RUNNING without a physical binding.
+    assert(!unbound_cancelled->set_state(ExecutionState::RUNNING));
+
+    // Cancellation does not require a physical binding.
+    assert(unbound_cancelled->set_state(ExecutionState::CANCELLED));
+    assert(!unbound_cancelled->has_binding());
+
+    // ---------------------------------------------------------------------
+    // 8. Binding is established once and becomes immutable
+    // ---------------------------------------------------------------------
+
+    PhysicalBinding binding_a{
+        {
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{
+                    DataId{500},
+                    DataResidencyId{5001},
+                },
+            },
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{
+                    DataId{500},
+                    DataResidencyId{5002},
+                },
+            },
+        },
+        {
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{
+                    DeviceId{200},
+                    ResourceId{201},
+                },
+            },
+        },
+    };
 
     Execution* failed_attempt = executions.create_execution(
         ExecutionDescription{
@@ -331,15 +382,166 @@ int main() {
             OperationId{700},
         });
 
+    assert(failed_attempt != nullptr);
+    assert(!failed_attempt->has_binding());
+
+    assert(failed_attempt->bind(std::move(binding_a)));
+    assert(failed_attempt->has_binding());
+    assert(failed_attempt->binding() != nullptr);
+    assert(failed_attempt->binding()->data.size() == 2);
+    assert(failed_attempt->binding()->resources.size() == 1);
+
+    assert(
+        failed_attempt->binding()->data[0].role ==
+        DataBindingRole::INPUT);
+
+    assert(
+        failed_attempt->binding()->data[0].residency ==
+        (DataResidencyRef{
+            DataId{500},
+            DataResidencyId{5001},
+        }));
+
+    assert(
+        failed_attempt->binding()->data[1].role ==
+        DataBindingRole::OUTPUT);
+
+    assert(
+        failed_attempt->binding()->data[1].residency ==
+        (DataResidencyRef{
+            DataId{500},
+            DataResidencyId{5002},
+        }));
+
+    assert(
+        failed_attempt->binding()->resources[0].role ==
+        ResourceBindingRole::COMPUTE);
+
+    assert(
+        failed_attempt->binding()->resources[0].resource ==
+        (ResourceRef{
+            DeviceId{200},
+            ResourceId{201},
+        }));
+
+    // A physical binding may be established only once.
+    PhysicalBinding replacement_binding{
+        {
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{
+                    DataId{500},
+                    DataResidencyId{5000},
+                },
+            },
+        },
+        {
+            ResourceBinding{
+                ResourceBindingRole::TRANSFER,
+                ResourceRef{
+                    DeviceId{200},
+                    ResourceId{202},
+                },
+            },
+        },
+    };
+
+    assert(!failed_attempt->bind(std::move(replacement_binding)));
+
+    // The original binding remains unchanged.
+    assert(failed_attempt->binding()->data.size() == 2);
+    assert(failed_attempt->binding()->resources.size() == 1);
+    assert(
+        failed_attempt->binding()->resources[0].role ==
+        ResourceBindingRole::COMPUTE);
+
+    // A bound PENDING execution may enter RUNNING.
+    assert(failed_attempt->set_state(ExecutionState::RUNNING));
+
+    // Binding remains immutable while RUNNING.
+    PhysicalBinding running_replacement{
+        {},
+        {
+            ResourceBinding{
+                ResourceBindingRole::TRANSFER,
+                ResourceRef{
+                    DeviceId{200},
+                    ResourceId{202},
+                },
+            },
+        },
+    };
+
+    assert(!failed_attempt->bind(std::move(running_replacement)));
+    assert(
+        failed_attempt->binding()->resources[0].role ==
+        ResourceBindingRole::COMPUTE);
+
+    // A failed attempt retains its historical physical binding.
+    assert(failed_attempt->set_state(ExecutionState::FAILED));
+    assert(failed_attempt->has_binding());
+
+    PhysicalBinding failed_replacement{
+        {},
+        {
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{
+                    DeviceId{200},
+                    ResourceId{201},
+                },
+            },
+        },
+    };
+
+    assert(!failed_attempt->bind(std::move(failed_replacement)));
+    assert(failed_attempt->has_binding());
+
+    // ---------------------------------------------------------------------
+    // 9. Retry is a new Execution with an independent physical binding
+    // ---------------------------------------------------------------------
+
+    PhysicalBinding binding_b{
+        {
+            DataBinding{
+                DataBindingRole::SOURCE,
+                DataResidencyRef{
+                    DataId{500},
+                    DataResidencyId{5001},
+                },
+            },
+            DataBinding{
+                DataBindingRole::DESTINATION,
+                DataResidencyRef{
+                    DataId{500},
+                    DataResidencyId{5002},
+                },
+            },
+        },
+        {
+            ResourceBinding{
+                ResourceBindingRole::TRANSFER,
+                ResourceRef{
+                    DeviceId{200},
+                    ResourceId{202},
+                },
+            },
+        },
+    };
+
     Execution* retry_attempt = executions.create_execution(
         ExecutionDescription{
             ExecutionId{801},
             OperationId{700},
         });
 
-    assert(failed_attempt != nullptr);
     assert(retry_attempt != nullptr);
-    assert(executions.execution_count() == 2);
+    assert(retry_attempt->state() == ExecutionState::PENDING);
+    assert(!retry_attempt->has_binding());
+
+    assert(retry_attempt->bind(std::move(binding_b)));
+    assert(retry_attempt->has_binding());
+    assert(retry_attempt->set_state(ExecutionState::RUNNING));
 
     assert(
         failed_attempt->description().operation ==
@@ -349,14 +551,92 @@ int main() {
         failed_attempt->description().id !=
         retry_attempt->description().id);
 
-    assert(failed_attempt->set_state(ExecutionState::RUNNING));
-    assert(failed_attempt->set_state(ExecutionState::FAILED));
+    // The retry has a different physical realization.
+    assert(
+        retry_attempt->binding()->data[0].role ==
+        DataBindingRole::SOURCE);
 
-    assert(retry_attempt->state() == ExecutionState::PENDING);
-    assert(retry_attempt->set_state(ExecutionState::RUNNING));
+    assert(
+        retry_attempt->binding()->resources[0].role ==
+        ResourceBindingRole::TRANSFER);
+
+    assert(
+        retry_attempt->binding()->resources[0].resource ==
+        (ResourceRef{
+            DeviceId{200},
+            ResourceId{202},
+        }));
+
+    // The failed attempt retains its original compute binding.
+    assert(
+        failed_attempt->binding()->resources[0].role ==
+        ResourceBindingRole::COMPUTE);
+
+    assert(
+        failed_attempt->binding()->resources[0].resource ==
+        (ResourceRef{
+            DeviceId{200},
+            ResourceId{201},
+        }));
 
     // ---------------------------------------------------------------------
-    // 8. Identity boundaries remain intact
+    // 10. Terminal executions cannot acquire a physical binding
+    // ---------------------------------------------------------------------
+
+    Execution* completed_attempt = executions.create_execution(
+        ExecutionDescription{
+            ExecutionId{803},
+            OperationId{700},
+        });
+
+    assert(completed_attempt != nullptr);
+
+    assert(completed_attempt->bind(PhysicalBinding{}));
+    assert(completed_attempt->set_state(ExecutionState::RUNNING));
+    assert(completed_attempt->set_state(ExecutionState::COMPLETED));
+
+    assert(
+        !completed_attempt->bind(
+            PhysicalBinding{
+                {},
+                {
+                    ResourceBinding{
+                        ResourceBindingRole::COMPUTE,
+                        ResourceRef{
+                            DeviceId{200},
+                            ResourceId{201},
+                        },
+                    },
+                },
+            }));
+
+    Execution* cancelled_attempt = executions.create_execution(
+        ExecutionDescription{
+            ExecutionId{804},
+            OperationId{700},
+        });
+
+    assert(cancelled_attempt != nullptr);
+    assert(cancelled_attempt->bind(PhysicalBinding{}));
+    assert(cancelled_attempt->set_state(ExecutionState::CANCELLED));
+
+    assert(
+        !cancelled_attempt->bind(
+            PhysicalBinding{
+                {},
+                {
+                    ResourceBinding{
+                        ResourceBindingRole::TRANSFER,
+                        ResourceRef{
+                            DeviceId{200},
+                            ResourceId{202},
+                        },
+                    },
+                },
+            }));
+
+    // ---------------------------------------------------------------------
+    // 11. Identity boundaries remain intact
     // ---------------------------------------------------------------------
 
     assert(operation->description().id == OperationId{700});
@@ -379,6 +659,21 @@ int main() {
         (ResourceRef{
             DeviceId{200},
             ResourceId{200},
+        }));
+
+    // Binding references do not rewrite logical or runtime identities.
+    assert(
+        failed_attempt->binding()->data[0].residency ==
+        (DataResidencyRef{
+            DataId{500},
+            DataResidencyId{5001},
+        }));
+
+    assert(
+        failed_attempt->binding()->resources[0].resource ==
+        (ResourceRef{
+            DeviceId{200},
+            ResourceId{201},
         }));
 
     return 0;

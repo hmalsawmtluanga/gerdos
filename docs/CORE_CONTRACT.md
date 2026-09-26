@@ -756,6 +756,87 @@ Residencies and does not yet contain backend handles, physical placement,
 transfer paths, execution queues, timing, measurements, result payloads, or
 failure metadata. Those concerns require subsequent contracts.
 
+A subsequent physical execution binding may be associated with an Execution.
+The binding belongs to the Execution and contains non-owning runtime identity
+references. It does not transfer ownership of referenced Data, Data Residency,
+Resource, Device, or Topology objects.
+
+Physical binding is optional while an Execution is PENDING. Once a physical
+binding has been established, it is immutable for the lifetime of that
+Execution. An existing Execution must not be rebound to a different physical
+realization. If a different physical realization is required, a new Execution
+must be created for the same Operation.
+
+Under the subsequent physical binding contract, an Execution entering RUNNING
+must have an established physical binding. A PENDING Execution may instead
+be cancelled before physical binding is established.
+
+A physical binding records the runtime identities selected for one concrete
+execution attempt. It does not cache or assert current runtime availability.
+The validity of a binding's identifiers, resolution of those identifiers
+against current runtime registries, and current execution admissibility are
+distinct concerns.
+
+If a referenced Resource or Data Residency becomes unavailable or is removed
+after binding, the historical binding of the Execution is not rewritten.
+Execution-time validation determines whether the bound attempt can proceed.
+A failed Execution retains the physical binding that was selected for that
+attempt.
+
+Physical binding does not alter Operation identity or Data identity. A retry
+is represented by a new Execution and may select different physical bindings.
+
+The initial physical binding contract does not encode backend handles, device
+addresses, queues, events, vendor-specific objects, or other backend execution
+state. Topology paths are also not part of the initial physical binding
+contract; topology remains a separate description of connectivity and path
+constraints.
+
+The core does not yet mandate separate binding types for computation,
+movement, storage, or synchronization. Such role-specific semantics require
+later contracts. In particular, a transfer Resource identifies a runtime
+resource through which movement may execute; it is not itself the movement
+operation.
+
+Physical bindings contain two distinct role domains: Data binding
+roles and Resource binding roles. A Data binding role refers to a
+Data Residency through a `DataResidencyRef`. A Resource binding role refers
+to a Resource through a `ResourceRef`. A role from one domain must not be used
+to classify a reference from the other domain.
+
+The initial Data binding roles are `INPUT`, `OUTPUT`, `SOURCE`, and
+`DESTINATION`. `INPUT` and `OUTPUT` describe data representations consumed or
+produced by an execution. `SOURCE` and `DESTINATION` describe directional
+relationships involving physical data representations. The Operation contract
+determines the meaning of that relationship. These role meanings are not
+interchangeable and do not by themselves determine the kind of Operation being
+executed.
+
+The initial Resource binding roles are `COMPUTE` and `TRANSFER`. `COMPUTE`
+identifies a Resource through which computation executes. `TRANSFER`
+identifies a Resource through which movement executes. Resource kinds remain
+defined by the Resource contract and must not be duplicated unnecessarily as
+binding roles.
+
+A physical binding may contain multiple references with the same role. A role
+does not imply uniqueness, cardinality, or exclusivity. Whether a particular
+combination or repetition of roles is semantically valid is determined by the
+Operation and its execution contract, not by the physical binding identity
+structure alone.
+
+Physical binding validation is separated into structural validity, runtime
+resolution, and semantic execution admissibility. Structural validity
+establishes that the binding contains well-formed role/reference pairs.
+Runtime resolution establishes whether the referenced runtime identities can
+currently be resolved. Semantic execution admissibility establishes whether
+the resolved binding is appropriate for the Operation and current execution
+conditions. These are distinct checks and must not be collapsed into one
+binding-validity state.
+
+A physical binding does not determine the kind or semantics of the Operation.
+The Operation establishes the logical work being performed, while the
+physical binding describes one concrete physical realization of that work.
+
 Execution state transitions are explicit and must be validated by the
 Execution state machine. An Execution may transition from PENDING to RUNNING,
 and from RUNNING to COMPLETED, FAILED, or CANCELLED. PENDING may transition

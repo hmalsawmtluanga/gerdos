@@ -1,9 +1,11 @@
 #pragma once
 
+#include <optional>
 #include <utility>
 
 #include "gerdos/core/execution_state.hpp"
 #include "gerdos/core/ids.hpp"
+#include "gerdos/core/physical_binding.hpp"
 
 namespace gerdos {
 
@@ -31,7 +33,36 @@ public:
         return state_;
     }
 
+    [[nodiscard]] bool has_binding() const noexcept {
+        return binding_.has_value();
+    }
+
+    [[nodiscard]] const PhysicalBinding* binding() const noexcept {
+        if (!binding_.has_value()) {
+            return nullptr;
+        }
+
+        return &*binding_;
+    }
+
+    [[nodiscard]] bool bind(PhysicalBinding binding) {
+        if (binding_.has_value()) {
+            return false;
+        }
+
+        if (state_ != ExecutionState::PENDING) {
+            return false;
+        }
+
+        binding_ = std::move(binding);
+        return true;
+    }
+
     [[nodiscard]] bool set_state(ExecutionState state) noexcept {
+        if (state == ExecutionState::RUNNING && !binding_.has_value()) {
+            return false;
+        }
+
         if (!can_transition(state_, state)) {
             return false;
         }
@@ -43,6 +74,7 @@ public:
 private:
     ExecutionDescription description_;
     ExecutionState state_{ExecutionState::PENDING};
+    std::optional<PhysicalBinding> binding_;
 };
 
 } // namespace gerdos
