@@ -142,6 +142,18 @@ Example:
 
 The scheduler must not confuse them.
 
+Resource availability is represented by `ResourceAvailability`:
+
+- `AVAILABLE` — the resource may currently accept or support work.
+- `UNAVAILABLE` — the resource exists but cannot currently accept or support work.
+- `INITIALIZING` — the resource is not yet available for work.
+- `DRAINING` — the resource is being withdrawn and is not available for new work.
+- `FAILED` — the resource is not currently available because it has entered a failure state.
+
+`Resource::set_availability()` currently records the runtime availability state without imposing a core-level transition table. In particular, recovery semantics for `FAILED` and the operational conditions governing transitions between availability states are not yet defined by the core contract. Those lifecycle and recovery policies belong to a later runtime layer.
+
+Availability is not part of resource identity. A resource may become unavailable while remaining the same resource, and references to it remain structurally valid. Resolution therefore does not imply current availability.
+
 ---
 
 # 5. Compute Resource
