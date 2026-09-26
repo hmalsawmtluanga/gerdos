@@ -38,6 +38,17 @@ public:
         return state_;
     }
 
+    // The attempt whose update is in progress, if any. The claim is
+    // meaningful only while the state is update-in-progress; leaving that
+    // state releases it.
+    [[nodiscard]] ExecutionId update_owner() const noexcept {
+        return update_owner_;
+    }
+
+    void set_update_owner(ExecutionId owner) noexcept {
+        update_owner_ = owner;
+    }
+
     [[nodiscard]] bool usable() const noexcept {
         return is_usable(state_);
     }
@@ -48,12 +59,18 @@ public:
         }
 
         state_ = state;
+
+        if (state_ != DataResidencyState::TRANSFERRING) {
+            update_owner_ = ExecutionId{};
+        }
+
         return true;
     }
 
 private:
     DataResidencyDescription description_;
     DataResidencyState state_{DataResidencyState::UNAVAILABLE};
+    ExecutionId update_owner_{};
 };
 
 struct DataDescription {

@@ -8,6 +8,7 @@ using namespace gerdos;
 
 struct Fixture {
     DataRegistry data_registry;
+    ExecutionRegistry executions;
     Data* data = nullptr;
     DataResidency* input = nullptr;
     DataResidency* output = nullptr;
@@ -94,7 +95,7 @@ int main() {
 
     {
         Fixture fixture;
-        ExecutionEffects effects(fixture.data_registry);
+        ExecutionEffects effects(fixture.data_registry, fixture.executions);
         auto execution = bound_execution(ExecutionId{500});
 
         GERDOS_CHECK(effects.start(execution));
@@ -117,7 +118,7 @@ int main() {
 
     {
         Fixture fixture;
-        ExecutionEffects effects(fixture.data_registry);
+        ExecutionEffects effects(fixture.data_registry, fixture.executions);
         auto execution = bound_execution(ExecutionId{501});
 
         GERDOS_CHECK(effects.start(execution));
@@ -139,7 +140,7 @@ int main() {
 
     {
         Fixture fixture;
-        ExecutionEffects effects(fixture.data_registry);
+        ExecutionEffects effects(fixture.data_registry, fixture.executions);
         auto execution = bound_execution(ExecutionId{502});
 
         GERDOS_CHECK(effects.start(execution));
@@ -154,7 +155,7 @@ int main() {
 
     {
         Fixture fixture;
-        ExecutionEffects effects(fixture.data_registry);
+        ExecutionEffects effects(fixture.data_registry, fixture.executions);
         auto execution = bound_execution(ExecutionId{503});
 
         GERDOS_CHECK(effects.start(execution));
@@ -172,7 +173,7 @@ int main() {
 
     {
         Fixture fixture;
-        ExecutionEffects effects(fixture.data_registry);
+        ExecutionEffects effects(fixture.data_registry, fixture.executions);
         auto execution = bound_execution(ExecutionId{504});
 
         // The rewrite scenario: an existing usable representation would be
@@ -194,7 +195,7 @@ int main() {
 
     {
         Fixture fixture;
-        ExecutionEffects effects(fixture.data_registry);
+        ExecutionEffects effects(fixture.data_registry, fixture.executions);
         auto execution = bound_execution(ExecutionId{505});
 
         GERDOS_CHECK(execution.set_state(ExecutionState::RUNNING));
@@ -217,7 +218,7 @@ int main() {
 
     {
         Fixture fixture;
-        ExecutionEffects effects(fixture.data_registry);
+        ExecutionEffects effects(fixture.data_registry, fixture.executions);
 
         // A second producing residency that cannot be resolved rejects the
         // whole call: the resolvable one stays unchanged.
@@ -259,7 +260,7 @@ int main() {
 
     {
         Fixture fixture;
-        ExecutionEffects effects(fixture.data_registry);
+        ExecutionEffects effects(fixture.data_registry, fixture.executions);
 
         Execution execution{
             ExecutionDescription{
@@ -289,7 +290,7 @@ int main() {
 
     {
         Fixture fixture;
-        ExecutionEffects effects(fixture.data_registry);
+        ExecutionEffects effects(fixture.data_registry, fixture.executions);
 
         Execution execution{
             ExecutionDescription{
@@ -316,6 +317,109 @@ int main() {
         GERDOS_CHECK(
             fixture.output->state() == DataResidencyState::UNAVAILABLE);
         GERDOS_CHECK(fixture.input->state() == DataResidencyState::VALID);
+    }
+
+    // ---------------------------------------------------------------------
+    // 9. An update-in-progress is owned by exactly one attempt
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        ExecutionEffects effects(fixture.data_registry, fixture.executions);
+
+        auto* first = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{520},
+                OperationId{600},
+            });
+
+        auto* second = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{521},
+                OperationId{600},
+            });
+
+        auto* third = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{522},
+                OperationId{600},
+            });
+
+        auto* fourth = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{523},
+                OperationId{600},
+            });
+
+        PhysicalBinding binding;
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{
+                    DataId{300},
+                    DataResidencyId{400},
+                },
+            });
+
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{
+                    DataId{300},
+                    DataResidencyId{401},
+                },
+            });
+
+        GERDOS_CHECK(first->bind(binding));
+        GERDOS_CHECK(second->bind(binding));
+        GERDOS_CHECK(third->bind(binding));
+        GERDOS_CHECK(fourth->bind(binding));
+
+        // The first attempt claims the producing residency.
+        GERDOS_CHECK(effects.claims_free(*first));
+        GERDOS_CHECK(effects.start(*first));
+        GERDOS_CHECK(
+            fixture.output->update_owner() == ExecutionId{520});
+
+        // A live foreign claim blocks the second attempt.
+        GERDOS_CHECK(!effects.claims_free(*second));
+        GERDOS_CHECK(!effects.start(*second));
+        GERDOS_CHECK(
+            fixture.output->update_owner() == ExecutionId{520});
+
+        // The second attempt cannot finish the first attempt's claim.
+        GERDOS_CHECK(second->set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(second->set_state(ExecutionState::COMPLETED));
+        GERDOS_CHECK(!effects.finish(*second));
+        GERDOS_CHECK(
+            fixture.output->state() == DataResidencyState::TRANSFERRING);
+
+        // The owner finishes and releases the claim.
+        GERDOS_CHECK(first->set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(first->set_state(ExecutionState::COMPLETED));
+        GERDOS_CHECK(effects.finish(*first));
+        GERDOS_CHECK(!fixture.output->update_owner().valid());
+        GERDOS_CHECK(fixture.output->state() == DataResidencyState::VALID);
+
+        // A released claim is free for the next attempt.
+        GERDOS_CHECK(effects.claims_free(*third));
+        GERDOS_CHECK(effects.start(*third));
+        GERDOS_CHECK(
+            fixture.output->update_owner() == ExecutionId{522});
+
+        // An attempt that terminates without applying its finishing
+        // effects leaves a stale claim; a later attempt takes it over.
+        GERDOS_CHECK(third->set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(third->set_state(ExecutionState::CANCELLED));
+        GERDOS_CHECK(
+            fixture.output->update_owner() == ExecutionId{522});
+
+        GERDOS_CHECK(effects.claims_free(*fourth));
+        GERDOS_CHECK(effects.start(*fourth));
+        GERDOS_CHECK(
+            fixture.output->update_owner() == ExecutionId{523});
+        GERDOS_CHECK(
+            fixture.output->state() == DataResidencyState::TRANSFERRING);
     }
 
     return 0;

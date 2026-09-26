@@ -799,5 +799,77 @@ int main() {
         GERDOS_CHECK(outcomes.empty());
     }
 
+    // ---------------------------------------------------------------------
+    // 10. Two attempts cannot update the same representation at once
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        SimulatedBackend backend{4};
+        Executor executor(
+            fixture.executions,
+            fixture.operations,
+            fixture.devices,
+            fixture.data,
+            backend);
+
+        auto* first = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{830},
+                OperationId{700},
+            });
+
+        auto* second = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{831},
+                OperationId{700},
+            });
+
+        GERDOS_CHECK(
+            first->bind(compute_binding(DataId{301}, DataResidencyId{410})));
+
+        GERDOS_CHECK(
+            second->bind(compute_binding(DataId{301}, DataResidencyId{410})));
+
+        GERDOS_CHECK(executor.start(ExecutionId{830}));
+        GERDOS_CHECK(
+            fixture.output_a->update_owner() == ExecutionId{830});
+
+        // The second attempt is refused atomically: nothing about it
+        // changes and no work is submitted for it.
+        GERDOS_CHECK(!executor.start(ExecutionId{831}));
+        GERDOS_CHECK(second->state() == ExecutionState::PENDING);
+        GERDOS_CHECK(!second->has_result());
+        GERDOS_CHECK(backend.in_flight_count() == 1);
+        GERDOS_CHECK(
+            fixture.output_a->update_owner() == ExecutionId{830});
+
+        // Once the owner completes and releases the claim, the rewrite
+        // may proceed.
+        std::vector<AttemptStatus> outcomes;
+        for (int step = 0; step < 4; ++step) {
+            executor.advance(outcomes);
+        }
+
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(
+            outcomes.front().integrity == AttemptIntegrity::COHERENT);
+        GERDOS_CHECK(!fixture.output_a->update_owner().valid());
+
+        GERDOS_CHECK(executor.start(ExecutionId{831}));
+        GERDOS_CHECK(
+            fixture.output_a->update_owner() == ExecutionId{831});
+
+        outcomes.clear();
+        for (int step = 0; step < 4; ++step) {
+            executor.advance(outcomes);
+        }
+
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(outcomes.front().execution == ExecutionId{831});
+        GERDOS_CHECK(
+            fixture.output_a->state() == DataResidencyState::VALID);
+    }
+
     return 0;
 }

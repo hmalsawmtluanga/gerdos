@@ -4,6 +4,7 @@
 
 #include "gerdos/core/data_registry.hpp"
 #include "gerdos/core/execution.hpp"
+#include "gerdos/core/execution_registry.hpp"
 
 namespace gerdos {
 
@@ -12,14 +13,60 @@ namespace gerdos {
 // in producing roles; consuming bindings are never modified. Application is
 // transactional: a call either applies all of its state changes or leaves
 // every residency unchanged and reports rejection.
+//
+// An update-in-progress is owned by exactly one attempt: starting effects
+// claim the producing residencies for the attempt, finishing effects apply
+// only to residencies the attempt claims, and a claim held by a terminal
+// attempt is stale and may be taken over.
 class ExecutionEffects {
 public:
-    explicit ExecutionEffects(DataRegistry& data_registry) noexcept
-        : data_registry_(data_registry) {}
+    ExecutionEffects(
+        DataRegistry& data_registry,
+        const ExecutionRegistry& executions) noexcept
+        : data_registry_(data_registry),
+          executions_(executions) {}
 
-    // Marks every producing residency update-in-progress. Idempotent.
-    // Rejected when the attempt is terminal, when a producing residency
-    // cannot be resolved, or when a binding role is outside the role domain.
+    // Whether the attempt can claim every producing residency it binds:
+    // none of them is claimed by another live attempt.
+    [[nodiscard]] bool claims_free(const Execution& execution) const
+        noexcept {
+        const auto* binding = execution.binding();
+
+        if (binding == nullptr) {
+            return true;
+        }
+
+        for (const auto& data_binding : binding->data) {
+            const auto role = data_binding.role;
+
+            if (is_consuming(role)) {
+                continue;
+            }
+
+            if (!is_producing(role)) {
+                return false;
+            }
+
+            const auto* residency = resolve(data_binding.residency);
+
+            if (residency == nullptr) {
+                return false;
+            }
+
+            if (claimed_by_other(
+                    *residency,
+                    execution.description().id)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Claims every producing residency for the attempt. Idempotent for the
+    // claiming attempt. Rejected when the attempt is terminal, when a
+    // producing residency cannot be resolved, or when another live attempt
+    // holds a claim.
     [[nodiscard]] bool start(const Execution& execution) const {
         if (is_terminal(execution.state())) {
             return false;
@@ -31,13 +78,13 @@ public:
             return true;
         }
 
-        return apply(*binding, DataResidencyState::TRANSFERRING);
+        return apply_claim(*binding, execution.description().id);
     }
 
-    // Applies the outcome effects to producing residencies whose update is in
-    // progress: a completed attempt makes them VALID; a failed or cancelled
-    // attempt makes them UNAVAILABLE. Single-shot: finishing effects require
-    // every producing residency to still be update-in-progress.
+    // Applies the outcome effects to producing residencies claimed by the
+    // attempt: a completed attempt makes them VALID; a failed or cancelled
+    // attempt makes them UNAVAILABLE. Single-shot: the claim must still be
+    // held and the update still in progress.
     [[nodiscard]] bool finish(const Execution& execution) const {
         if (!is_terminal(execution.state())) {
             return false;
@@ -53,7 +100,7 @@ public:
                                 ? DataResidencyState::VALID
                                 : DataResidencyState::UNAVAILABLE;
 
-        return apply(*binding, target, true);
+        return apply_outcome(*binding, execution.description().id, target);
     }
 
 private:
@@ -68,13 +115,23 @@ private:
         return data->find_residency(ref.residency);
     }
 
-    // Transactional application: validate every producing entry first, then
-    // apply. With require_updating set, every producing residency must still
-    // be in the update-in-progress state.
-    [[nodiscard]] bool apply(
+    [[nodiscard]] bool live(ExecutionId owner) const noexcept {
+        const auto* attempt = executions_.find_execution(owner);
+
+        return attempt != nullptr && !is_terminal(attempt->state());
+    }
+
+    [[nodiscard]] bool claimed_by_other(
+        const DataResidency& residency,
+        ExecutionId id) const noexcept {
+        const auto owner = residency.update_owner();
+
+        return owner.valid() && owner != id && live(owner);
+    }
+
+    [[nodiscard]] bool apply_claim(
         const PhysicalBinding& binding,
-        DataResidencyState target,
-        bool require_updating = false) const {
+        ExecutionId id) const {
         std::vector<DataResidency*> producing;
 
         for (const auto& data_binding : binding.data) {
@@ -94,8 +151,52 @@ private:
                 return false;
             }
 
-            if (require_updating &&
-                residency->state() != DataResidencyState::TRANSFERRING) {
+            if (claimed_by_other(*residency, id)) {
+                return false;
+            }
+
+            if (!can_transition(
+                    residency->state(),
+                    DataResidencyState::TRANSFERRING)) {
+                return false;
+            }
+
+            producing.push_back(residency);
+        }
+
+        for (auto* residency : producing) {
+            (void)residency->set_state(DataResidencyState::TRANSFERRING);
+            residency->set_update_owner(id);
+        }
+
+        return true;
+    }
+
+    [[nodiscard]] bool apply_outcome(
+        const PhysicalBinding& binding,
+        ExecutionId id,
+        DataResidencyState target) const {
+        std::vector<DataResidency*> producing;
+
+        for (const auto& data_binding : binding.data) {
+            const auto role = data_binding.role;
+
+            if (is_consuming(role)) {
+                continue;
+            }
+
+            if (!is_producing(role)) {
+                return false;
+            }
+
+            auto* residency = resolve(data_binding.residency);
+
+            if (residency == nullptr) {
+                return false;
+            }
+
+            if (residency->state() != DataResidencyState::TRANSFERRING ||
+                residency->update_owner() != id) {
                 return false;
             }
 
@@ -106,6 +207,8 @@ private:
             producing.push_back(residency);
         }
 
+        // Setting the state outside the update-in-progress state releases
+        // the claim.
         for (auto* residency : producing) {
             (void)residency->set_state(target);
         }
@@ -114,6 +217,7 @@ private:
     }
 
     DataRegistry& data_registry_;
+    const ExecutionRegistry& executions_;
 };
 
 } // namespace gerdos

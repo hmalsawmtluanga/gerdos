@@ -34,7 +34,7 @@ public:
           backend_(backend),
           measurements_(measurements),
           admission_(devices, data),
-          effects_(data) {}
+          effects_(data, executions) {}
 
     // Begins one admitted attempt: admissibility, admission, backend
     // submission, start effects, and the RUNNING transition. Rejection is
@@ -67,14 +67,21 @@ public:
             return false;
         }
 
+        // Output arbitration: the attempt must be able to claim every
+        // producing residency it binds.
+        if (!effects_.claims_free(*execution)) {
+            return false;
+        }
+
         if (!backend_.submit(*operation, *execution)) {
             return false;
         }
 
-        // Pinned invariants (tests/core_executor.cpp): given admission,
-        // start effects and the RUNNING transition cannot reject — every
-        // producing residency resolves and can enter the update-in-progress
-        // state, and a PENDING attempt with a binding may enter RUNNING. If
+        // Pinned invariants (tests/core_executor.cpp): given admission and
+        // free claims, start effects and the RUNNING transition cannot
+        // reject — every producing residency resolves, is claimable, and can
+        // enter the update-in-progress state, and a PENDING attempt with a
+        // binding may enter RUNNING. If
         // either ever rejects, the attempt is in flight but incoherent: the
         // rejection is remembered and reported with its completion instead of
         // being discarded.
