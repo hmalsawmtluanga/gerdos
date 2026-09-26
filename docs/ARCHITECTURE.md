@@ -37,7 +37,7 @@ Conceptually:
         |              |              |
         +--------------+--------------+
                        |
-                Global Scheduler
+                Planner
                        |
                 Execution Plan
 
@@ -103,8 +103,8 @@ Models are external workloads.
 The core runtime must not contain architecture-specific assumptions about
 individual model families.
 
-Model support should be implemented through explicit model/graph/weight
-interfaces.
+Model support should be implemented through explicit adapters that translate
+model-specific representations into generic GERDOS workloads.
 
 ## 6. Execution
 
@@ -118,7 +118,7 @@ GERDOS should eventually be able to construct an execution plan based on:
 - transfer latency
 - topology
 - workload characteristics
-- model state
+- workload state
 - cache state
 - runtime measurements
 
@@ -127,7 +127,7 @@ be preferred wherever practical.
 
 ## 7. Data movement
 
-Computation and data movement are separate resources.
+Computation and data movement are separate but interacting execution concerns.
 
 The runtime should support:
 
@@ -158,7 +158,7 @@ Relevant constraints can include:
 - accelerator utilization
 - CPU execution capacity
 - storage latency
-- expert locality
+- data locality
 - cache hit rate
 - transfer overlap
 - synchronization
@@ -173,3 +173,122 @@ Specific models and hardware configurations will be introduced later as
 validation workloads.
 
 They must not become architectural dependencies of GERDOS itself.
+
+## 11. Heterogeneous execution adversarial scenario
+
+Before implementing higher-level scheduling and execution abstractions, GERDOS
+must be tested against a synthetic heterogeneous workload that exercises
+capacity, residency, movement, topology, resource availability, and repeated
+execution without depending on any particular model architecture.
+
+### 11.1 Scenario topology
+
+The adversarial environment contains two devices.
+
+Host Device:
+- Resource 100: host RAM, kind MEMORY
+- Resource 101: NVMe storage, kind STORAGE
+
+Accelerator Device:
+- Resource 200: device-local memory, kind MEMORY
+- Resource 201: compute engine, kind COMPUTE
+- Resource 202: transfer engine, kind TRANSFER
+
+The conceptual movement path is:
+
+NVMe -> RAM -> device-local memory -> accelerator compute
+
+Topology and Resource identity remain separate. A topology path describes
+connectivity and movement possibilities; it does not become a Resource merely
+because it carries traffic.
+
+### 11.2 Logical data and physical residency
+
+The workload contains one logical Data object, identified independently from
+where it is stored or which representation is currently usable.
+
+The same Data may have multiple physical residencies:
+- NVMe residency with a storage-oriented representation
+- RAM residency with a host-accessible representation
+- device-local memory residency with a compute-ready representation
+
+A residency identifies the logical Data, the concrete ResourceRef, and its
+representation. Different representations may coexist for the same Data.
+
+The scenario must therefore preserve these distinctions:
+
+Data != Data Residency
+Data Residency != Resource
+Resource != Device
+
+A Data residency in TRANSFERRING state indicates that the residency is
+currently involved in a transfer-related runtime state. The transfer
+mechanism itself remains a higher-level concern and does not change the
+identity of the logical Data object.
+
+### 11.3 Operation and execution pressure
+
+The scenario contains a logical Operation that requires Data to be available to
+a suitable compute resource. The Operation identifies what work is required,
+but does not select the accelerator, residency, transfer path, queue, backend,
+or execution attempt.
+
+The same Operation must be able to produce multiple Executions. For example,
+one execution may fail after a transfer failure while a later execution retries
+after establishing another usable residency.
+
+Execution-specific information such as running, completed, failed, retried,
+timing, measurements, selected resources, and selected physical residencies
+belongs to Execution rather than Operation.
+
+### 11.4 Adversarial runtime conditions
+
+The scenario must exercise the following conditions independently:
+
+1. Multiple residencies of the same Data exist simultaneously.
+2. Different representations of the same Data coexist.
+3. A required residency is TRANSFERRING while computation is waiting.
+4. Another residency can satisfy the Operation instead of waiting for the first.
+5. Transfer activity competes for shared movement capacity.
+6. Topology constrains which movement paths are available.
+7. Prefetch may create a residency before it is immediately required.
+8. Eviction may remove a residency while preserving the logical Data.
+9. A Resource may become unavailable while a residency still exists.
+10. A transfer may fail and require a later Execution to retry.
+11. One residency may become UNAVAILABLE while another remains VALID.
+12. Capacity pressure may force placement or eviction decisions.
+
+### 11.5 Architectural invariants under test
+
+The scenario is successful only if the abstractions continue to preserve the
+following boundaries:
+
+- Data remains a logical identity independent of physical placement.
+- Data Residency remains physical runtime state rather than logical Data
+  identity.
+- Resource remains an execution resource rather than a model-specific object.
+- Device remains an ownership boundary rather than automatically becoming the
+  scheduling unit.
+- Topology remains separate from Resource identity.
+- Operation remains declarative and contains no execution state.
+- Execution remains the identity of a concrete attempt to perform an Operation.
+- Backend-specific handles and vendor APIs remain outside the core contracts.
+- Model-specific concepts remain outside the core contracts.
+
+The scenario must not add missing concepts merely to make the scenario
+executable. Any failure must instead be classified as a missing identity,
+state, resource description, capability, topology, data-movement, operation,
+execution, or planning concept.
+
+### 11.6 Validation questions
+
+The scenario should force explicit answers to these questions before higher-level
+execution machinery is implemented:
+
+- Can the current identity model represent every physical residency
+  unambiguously within its defined ownership scopes?
+- Can a logical Operation remain independent of its eventual Resource and residency choices?
+- Can multiple Executions of one Operation be represented without changing Operation identity?
+- Can resource disappearance be represented without corrupting Data identity?
+- Can movement, contention, and topology constraints be represented without conflating them with computation?
+- Which missing concepts belong in identity, state, resource description, capability, topology, data movement, Operation, Execution, or planning?
