@@ -27,5 +27,67 @@ int main() {
     GERDOS_CHECK(!execution.set_state(ExecutionState::RUNNING));
     GERDOS_CHECK(execution.state() == ExecutionState::COMPLETED);
 
+    // A terminal execution records its result exactly once.
+    GERDOS_CHECK(!execution.has_result());
+    GERDOS_CHECK(execution.result() == nullptr);
+
+    GERDOS_CHECK(
+        execution.record_result(
+            ExecutionResult{ExecutionState::COMPLETED, {}}));
+    GERDOS_CHECK(execution.has_result());
+    GERDOS_CHECK(
+        execution.result()->outcome == ExecutionState::COMPLETED);
+
+    // Result recording is rejected before a terminal state is reached and
+    // for an outcome other than the one reached.
+    Execution failed_attempt{
+        ExecutionDescription{
+            ExecutionId{101},
+            OperationId{42},
+        }};
+
+    GERDOS_CHECK(
+        !failed_attempt.record_result(
+            ExecutionResult{ExecutionState::FAILED, "too early"}));
+    GERDOS_CHECK(!failed_attempt.has_result());
+
+    GERDOS_CHECK(failed_attempt.bind(PhysicalBinding{}));
+    GERDOS_CHECK(failed_attempt.set_state(ExecutionState::RUNNING));
+    GERDOS_CHECK(failed_attempt.set_state(ExecutionState::FAILED));
+
+    GERDOS_CHECK(
+        !failed_attempt.record_result(
+            ExecutionResult{ExecutionState::COMPLETED, "mismatched"}));
+    GERDOS_CHECK(!failed_attempt.has_result());
+
+    GERDOS_CHECK(
+        failed_attempt.record_result(
+            ExecutionResult{ExecutionState::FAILED, "device reset"}));
+
+    // The result is immutable after recording.
+    GERDOS_CHECK(
+        !failed_attempt.record_result(
+            ExecutionResult{ExecutionState::FAILED, "rewritten"}));
+    GERDOS_CHECK(failed_attempt.result()->detail == "device reset");
+    GERDOS_CHECK(failed_attempt.result()->outcome == ExecutionState::FAILED);
+
+    // A cancelled attempt records its own result.
+    Execution cancelled_attempt{
+        ExecutionDescription{
+            ExecutionId{102},
+            OperationId{42},
+        }};
+
+    GERDOS_CHECK(
+        cancelled_attempt.set_state(ExecutionState::CANCELLED));
+
+    GERDOS_CHECK(
+        cancelled_attempt.record_result(
+            ExecutionResult{ExecutionState::CANCELLED, {}}));
+
+    GERDOS_CHECK(
+        cancelled_attempt.result()->outcome ==
+        ExecutionState::CANCELLED);
+
     return 0;
 }
