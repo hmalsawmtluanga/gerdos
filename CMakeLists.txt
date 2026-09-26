@@ -11,261 +11,68 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+function(gerdos_configure_target target)
+    target_include_directories(${target}
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+    else()
+        target_compile_options(${target} PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+        )
+    endif()
+endfunction()
+
+function(gerdos_add_test test_name source)
+    add_executable(${test_name}_test ${source})
+    gerdos_configure_target(${test_name}_test)
+
+    add_test(
+        NAME ${test_name}
+        COMMAND ${test_name}_test
+    )
+endfunction()
+
 add_executable(gerdos
     src/main.cpp
 )
 
-target_include_directories(gerdos
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-if(MSVC)
-    target_compile_options(gerdos PRIVATE /W4)
-else()
-    target_compile_options(gerdos PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-    )
-endif()
+gerdos_configure_target(gerdos)
 
 enable_testing()
 
-add_executable(gerdos_core_ids_test
-    tests/core_ids.cpp
-)
+gerdos_add_test(gerdos_core_ids
+    tests/core_ids.cpp)
 
-target_include_directories(gerdos_core_ids_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
+gerdos_add_test(gerdos_core_operation
+    tests/core_operation.cpp)
 
-if(MSVC)
-    target_compile_options(gerdos_core_ids_test PRIVATE /W4)
-else()
-    target_compile_options(gerdos_core_ids_test PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-    )
-endif()
+gerdos_add_test(gerdos_core_operation_registry
+    tests/core_operation_registry.cpp)
 
-add_test(
-    NAME gerdos_core_ids
-    COMMAND gerdos_core_ids_test
-)
+gerdos_add_test(gerdos_core_execution_state
+    tests/core_execution_state.cpp)
 
-add_executable(gerdos_core_operation_test
-    tests/core_operation.cpp
-)
+gerdos_add_test(gerdos_core_execution
+    tests/core_execution.cpp)
 
-target_include_directories(gerdos_core_operation_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
+gerdos_add_test(gerdos_core_execution_registry
+    tests/core_execution_registry.cpp)
 
-if(MSVC)
-    target_compile_options(gerdos_core_operation_test PRIVATE /W4)
-else()
-    target_compile_options(gerdos_core_operation_test PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-    )
-endif()
+gerdos_add_test(gerdos_core_execution_adversarial
+    tests/core_execution_adversarial.cpp)
 
-add_test(
-    NAME gerdos_core_operation
-    COMMAND gerdos_core_operation_test
-)
+gerdos_add_test(gerdos_core_physical_binding_resolution
+    tests/core_physical_binding_resolution.cpp)
 
-add_executable(gerdos_core_operation_registry_test
-    tests/core_operation_registry.cpp
-)
+gerdos_add_test(gerdos_core_physical_binding_validation
+    tests/core_physical_binding_validation.cpp)
 
-target_include_directories(gerdos_core_operation_registry_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
+gerdos_add_test(gerdos_core_execution_admission
+    tests/core_execution_admission.cpp)
 
-if(MSVC)
-    target_compile_options(gerdos_core_operation_registry_test PRIVATE /W4)
-else()
-    target_compile_options(gerdos_core_operation_registry_test PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-    )
-endif()
-
-add_test(
-    NAME gerdos_core_operation_registry
-    COMMAND gerdos_core_operation_registry_test
-)
-
-add_executable(gerdos_core_execution_state_test
-    tests/core_execution_state.cpp
-)
-
-target_include_directories(gerdos_core_execution_state_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-if(MSVC)
-    target_compile_options(gerdos_core_execution_state_test PRIVATE /W4)
-else()
-    target_compile_options(gerdos_core_execution_state_test PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-    )
-endif()
-
-add_test(
-    NAME gerdos_core_execution_state
-    COMMAND gerdos_core_execution_state_test
-)
-
-add_executable(gerdos_core_execution_test
-    tests/core_execution.cpp
-)
-
-target_include_directories(gerdos_core_execution_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-if(MSVC)
-    target_compile_options(gerdos_core_execution_test PRIVATE /W4)
-else()
-    target_compile_options(gerdos_core_execution_test PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-    )
-endif()
-
-add_test(
-    NAME gerdos_core_execution
-    COMMAND gerdos_core_execution_test
-)
-
-add_executable(gerdos_core_execution_registry_test
-    tests/core_execution_registry.cpp
-)
-
-target_include_directories(gerdos_core_execution_registry_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-if(MSVC)
-    target_compile_options(gerdos_core_execution_registry_test PRIVATE /W4)
-else()
-    target_compile_options(gerdos_core_execution_registry_test PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-    )
-endif()
-
-add_test(
-    NAME gerdos_core_execution_registry
-    COMMAND gerdos_core_execution_registry_test
-)
-
-add_executable(gerdos_core_execution_adversarial_test
-    tests/core_execution_adversarial.cpp
-)
-
-target_include_directories(gerdos_core_execution_adversarial_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-if(MSVC)
-    target_compile_options(gerdos_core_execution_adversarial_test PRIVATE /W4)
-else()
-    target_compile_options(gerdos_core_execution_adversarial_test PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-    )
-endif()
-
-add_test(
-    NAME gerdos_core_execution_adversarial
-    COMMAND gerdos_core_execution_adversarial_test
-)
-
-add_executable(gerdos_core_physical_binding_resolution_test
-    tests/core_physical_binding_resolution.cpp
-)
-
-target_include_directories(gerdos_core_physical_binding_resolution_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-if(MSVC)
-    target_compile_options(gerdos_core_physical_binding_resolution_test PRIVATE /W4)
-else()
-    target_compile_options(gerdos_core_physical_binding_resolution_test PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-    )
-endif()
-
-add_test(
-    NAME gerdos_core_physical_binding_resolution
-    COMMAND gerdos_core_physical_binding_resolution_test
-)
-
-add_executable(gerdos_core_physical_binding_validation_test
-    tests/core_physical_binding_validation.cpp
-)
-
-target_include_directories(gerdos_core_physical_binding_validation_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-if(MSVC)
-    target_compile_options(gerdos_core_physical_binding_validation_test PRIVATE /W4)
-else()
-    target_compile_options(gerdos_core_physical_binding_validation_test PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-    )
-endif()
-
-add_test(
-    NAME gerdos_core_physical_binding_validation
-    COMMAND gerdos_core_physical_binding_validation_test
-)
-
-add_executable(gerdos_core_execution_admission_test
-    tests/core_execution_admission.cpp
-)
-
-target_include_directories(gerdos_core_execution_admission_test
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-if(MSVC)
-    target_compile_options(gerdos_core_execution_admission_test PRIVATE /W4)
-else()
-    target_compile_options(gerdos_core_execution_admission_test PRIVATE
-        -Wall -Wextra -Wpedantic
-    )
-endif()
-
-add_test(
-    NAME gerdos_core_execution_admission
-    COMMAND gerdos_core_execution_admission_test
-)
