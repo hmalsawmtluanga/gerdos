@@ -127,3 +127,27 @@ add_test(
     NAME gerdos_core_execution_state
     COMMAND gerdos_core_execution_state_test
 )
+
+add_executable(gerdos_core_execution_test
+    tests/core_execution.cpp
+)
+
+target_include_directories(gerdos_core_execution_test
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(MSVC)
+    target_compile_options(gerdos_core_execution_test PRIVATE /W4)
+else()
+    target_compile_options(gerdos_core_execution_test PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+    )
+endif()
+
+add_test(
+    NAME gerdos_core_execution
+    COMMAND gerdos_core_execution_test
+)
