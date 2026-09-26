@@ -94,4 +94,7 @@ gerdos_add_test(gerdos_core_executor
 gerdos_add_test(gerdos_core_vertical_slice
     tests/core_vertical_slice.cpp)
 
+gerdos_add_test(gerdos_core_measurement
+    tests/core_measurement.cpp)
+
 

@@ -34,6 +34,7 @@ struct DataIdTag;
 struct DataResidencyIdTag;
 struct OperationIdTag;
 struct ExecutionIdTag;
+struct MeasurementIdTag;
 
 using DeviceId = StrongId<DeviceIdTag>;
 using ResourceId = StrongId<ResourceIdTag>;
@@ -42,6 +43,7 @@ using DataId = StrongId<DataIdTag>;
 using DataResidencyId = StrongId<DataResidencyIdTag>;
 using OperationId = StrongId<OperationIdTag>;
 using ExecutionId = StrongId<ExecutionIdTag>;
+using MeasurementId = StrongId<MeasurementIdTag>;
 
 struct ResourceRef {
     DeviceId device;
