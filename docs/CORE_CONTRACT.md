@@ -1069,6 +1069,51 @@ residency state machine's self-transitions make repeated start effects
 harmless; conflict avoidance belongs to semantic execution admissibility and
 planning.
 
+## Representation Movement and Lifetime
+
+Movement is expressed by binding one logical Data object in a consuming role
+at a source residency and in a producing role at a destination residency. The
+execution effects rules then treat the destination as being created or
+rewritten while the source representation remains usable; a movement is
+therefore a copy at the effects level.
+
+Whether a particular Operation also invalidates or removes its source
+representation is part of that Operation's semantics and requires later
+contracts. The effects rules do not infer it from the binding roles.
+
+Representation records are destroyed only by explicit removal from their
+containing Data object. Runtime state changes never destroy records, and a
+record's identity is retired on removal as defined by the Data Residency
+contract. Eviction — deciding when a representation should no longer be
+retained — is future policy and is not part of execution effects.
+
+## Backend Execution Interface
+
+The backend execution interface is the single seam through which the core
+runtime causes work to happen. Backends receive the work to perform — the
+Operation of an attempt and the attempt's established physical binding — and
+report when attempts complete.
+
+- submitting an attempt begins backend-side work; a backend may reject the
+  attempt
+- polling appends attempts completed since the previous call; polling never
+  blocks the runtime on hardware
+- a completion reports only the attempt identity and whether the work
+  succeeded; terminal state transitions, execution effects, and result
+  recording remain the responsibility of the runtime integration layer
+
+Backend-specific state — vendor handles, queues, streams, events, device
+pointers, and addresses — remains behind this interface and must never appear
+in core types.
+
+The simulated backend implements this interface with a deterministic
+execution model so that the complete runtime — admission, effects, lifecycle,
+and overlap — can be exercised without physical accelerator hardware.
+
+Operation work descriptions — the generic semantics a real backend needs in
+order to perform computation — require a later contract. Until then, backends
+perform abstract work.
+
 ---
 
 # 16. Workload
