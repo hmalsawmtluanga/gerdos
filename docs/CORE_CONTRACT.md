@@ -1114,6 +1114,36 @@ Operation work descriptions — the generic semantics a real backend needs in
 order to perform computation — require a later contract. Until then, backends
 perform abstract work.
 
+## Runtime Integration
+
+The runtime integration layer — the executor — is the only component that
+advances an attempt through its lifecycle. It composes the established gates
+as mandatory steps rather than optional advice:
+
+    semantic admissibility
+        -> execution admission
+        -> backend submission
+        -> start effects
+        -> RUNNING
+        -> backend work
+        -> terminal transition
+        -> finish effects
+        -> result recording
+
+Beginning an attempt is rejection-atomic: unless the backend accepts the
+attempt, no gate verdict, residency state, execution state, or result is
+changed. Given admission succeeded, start effects and the RUNNING transition
+cannot be rejected.
+
+Completion is applied in the fixed sequence: terminal transition, finish
+effects, result recording. Completions for attempts that are not `RUNNING`
+are discarded. Cancellation policy for attempts that have started is a later
+concern.
+
+The executor holds no scheduling, placement, or retry policy: it advances
+attempts that have already been given a physical binding. Choosing bindings
+and ordering work belongs to planning.
+
 ---
 
 # 16. Workload
