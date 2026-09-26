@@ -10,6 +10,13 @@ int main() {
 
     GERDOS_CHECK(registry.execution_count() == 0);
 
+    // Invalid referenced OperationId is rejected.
+    GERDOS_CHECK(registry.create_execution(
+        ExecutionDescription{
+            ExecutionId{1},
+            OperationId{},
+        }) == nullptr);
+
     GERDOS_CHECK(registry.create_execution(
         ExecutionDescription{
             ExecutionId{100},

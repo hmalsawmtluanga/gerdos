@@ -17,6 +17,25 @@ int main() {
 
     GERDOS_CHECK(registry.operation_count() == 0);
 
+    // Invalid referenced identities are rejected, but existence is not required.
+    GERDOS_CHECK(registry.create_operation(OperationDescription{
+               OperationId{1},
+               {DataId{}},
+               {DataId{20}},
+               {}}) == nullptr);
+
+    GERDOS_CHECK(registry.create_operation(OperationDescription{
+               OperationId{2},
+               {DataId{10}},
+               {DataId{}},
+               {}}) == nullptr);
+
+    GERDOS_CHECK(registry.create_operation(OperationDescription{
+               OperationId{3},
+               {DataId{10}},
+               {DataId{20}},
+               {OperationId{}}}) == nullptr);
+
     // Registration does not require referenced DataIds or dependency
     // OperationIds to already exist.
     Operation* operation_a = registry.create_operation(

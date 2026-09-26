@@ -27,6 +27,10 @@ public:
             return nullptr;
         }
 
+        if (!description.operation.valid()) {
+            return nullptr;
+        }
+
         if (executions_.contains(id) || retired_ids_.contains(id)) {
             return nullptr;
         }

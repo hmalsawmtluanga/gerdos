@@ -27,6 +27,24 @@ public:
             return nullptr;
         }
 
+        for (const auto data_id : description.inputs) {
+            if (!data_id.valid()) {
+                return nullptr;
+            }
+        }
+
+        for (const auto data_id : description.outputs) {
+            if (!data_id.valid()) {
+                return nullptr;
+            }
+        }
+
+        for (const auto dependency : description.dependencies) {
+            if (!dependency.valid()) {
+                return nullptr;
+            }
+        }
+
         if (operations_.contains(id) || retired_ids_.contains(id)) {
             return nullptr;
         }

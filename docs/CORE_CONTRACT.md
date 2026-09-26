@@ -677,12 +677,17 @@ An Operation may reference logical Data objects through `DataId`. These
 references do not identify a physical Data Residency and do not imply any
 specific memory, storage, Device, or backend placement.
 
-An Operation may declare input and output Data references.
+An Operation may declare input and output Data references. Every stored
+`DataId` reference must be a valid identity. The referenced Data object need
+not already exist when the Operation is registered; reference validity and
+object existence are separate concerns.
 
 An Operation may declare dependencies on other Operations through
-`OperationId`. A dependency expresses a logical prerequisite relationship and
-does not by itself define scheduling, synchronization primitives, queue
-selection, or physical execution ordering.
+`OperationId`. Every stored dependency reference must be a valid identity. A
+referenced Operation need not already exist when the Operation is registered;
+forward references are permitted. A dependency expresses a logical
+prerequisite relationship and does not by itself define scheduling,
+synchronization primitives, queue selection, or physical execution ordering.
 
 An Operation may declare capability requirements. Capability requirements are
 opaque to model architecture and backend implementation at the core level.
@@ -767,7 +772,9 @@ This distinction is fundamental to scheduling, retries, profiling, and
 reproducibility.
 
 The initial core implementation establishes Execution identity, its
-association with an Operation, and its lifecycle state only.
+association with an Operation, and its lifecycle state only. The associated
+`OperationId` must be a valid identity, but the referenced Operation need not
+already exist at Execution registration time.
 
 The initial Execution object does not yet select concrete Resources or Data
 Residencies and does not yet contain backend handles, physical placement,
