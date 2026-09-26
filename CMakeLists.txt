@@ -85,3 +85,7 @@ gerdos_add_test(gerdos_core_execution_effects
 gerdos_add_test(gerdos_core_execution_backend
     tests/core_execution_backend.cpp)
 
+gerdos_add_test(gerdos_core_simulated_backend
+    tests/core_simulated_backend.cpp)
+
+
