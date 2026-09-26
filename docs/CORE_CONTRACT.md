@@ -821,8 +821,8 @@ already exist at Execution registration time.
 
 The initial Execution object does not yet select concrete Resources or Data
 Residencies and does not yet contain backend handles, physical placement,
-transfer paths, execution queues, timing, measurements, result payloads, or
-failure metadata. Those concerns require subsequent contracts.
+transfer paths, execution queues, timing, measurements, or result payloads.
+Attempt outcomes are recorded through the execution result.
 
 A subsequent physical execution binding may be associated with an Execution.
 The binding belongs to the Execution and contains non-owning runtime identity
@@ -1001,6 +1001,29 @@ state.
 
 Semantic execution admissibility does not select placement, order execution,
 encode retry or scheduling policy, or classify the Operation.
+
+## Execution Result
+
+A terminal Execution records one result. The result identifies the outcome of
+the attempt and may carry an opaque non-semantic diagnostic. The result is
+recorded once and is immutable afterwards.
+
+- a result is recorded only while the Execution is in a terminal state
+- the recorded outcome must equal the Execution's terminal state
+- at most one result exists per Execution
+
+The result does not carry measurements; timing, duration, and throughput are
+Measurement concerns. The result does not carry output data; produced and
+rewritten representations are governed by Data Residency and the execution
+effects rules. The result does not carry backend state.
+
+A failed Execution retains its physical binding and its result as the history
+of that attempt. Result recording is independent of retry policy: a retry is a
+new Execution with its own result.
+
+The runtime effects of an attempt — the residency state changes applied
+through its binding roles when the attempt completes or fails — are defined by
+the execution effects contract.
 
 ---
 
