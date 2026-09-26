@@ -151,3 +151,27 @@ add_test(
     NAME gerdos_core_execution
     COMMAND gerdos_core_execution_test
 )
+
+add_executable(gerdos_core_execution_registry_test
+    tests/core_execution_registry.cpp
+)
+
+target_include_directories(gerdos_core_execution_registry_test
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(MSVC)
+    target_compile_options(gerdos_core_execution_registry_test PRIVATE /W4)
+else()
+    target_compile_options(gerdos_core_execution_registry_test PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+    )
+endif()
+
+add_test(
+    NAME gerdos_core_execution_registry
+    COMMAND gerdos_core_execution_registry_test
+)
