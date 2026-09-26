@@ -2,10 +2,12 @@
 
 ## Status
 
-Architecture contract v0.2.
+Architecture contract v0.3.
 
-This document defines the conceptual boundaries of the GERDOS runtime before
-implementation begins.
+This document defines the conceptual boundaries of the GERDOS runtime. The core
+implementation currently establishes identity, ownership, resource and data
+residency state, topology identity, operations, executions, physical binding,
+and execution admission.
 
 The central architectural model is:
 
@@ -612,7 +614,7 @@ the condition of a particular physical representation of Data.
 the residency state is `VALID`. It does not establish that the Resource referenced
 by that residency is currently available. Effective runtime usability therefore
 requires both a usable residency state and an available referenced Resource; that
-combined evaluation belongs to a later runtime or execution-admission layer.
+combined evaluation is performed by the execution-admission gate.
 
 The initial implementation does not define a separate `CREATING` residency
 state. Creation of a residency is represented by later operation and execution
@@ -792,6 +794,11 @@ Execution. An existing Execution must not be rebound to a different physical
 realization. If a different physical realization is required, a new Execution
 must be created for the same Operation.
 
+Establishing a physical binding consumes the supplied binding value. If
+establishment is rejected, the supplied value is discarded; it is not retained
+or restored. Callers must not rely on the state of the supplied binding value
+after the call.
+
 Under the subsequent physical binding contract, an Execution entering RUNNING
 must have an established physical binding. A PENDING Execution may instead
 be cancelled before physical binding is established.
@@ -804,9 +811,9 @@ distinct concerns.
 
 If a referenced Resource or Data Residency becomes unavailable or is removed
 after binding, the historical binding of the Execution is not rewritten.
-Execution-time validation determines whether the bound attempt can proceed.
-A failed Execution retains the physical binding that was selected for that
-attempt.
+Execution-time validation, currently established by the execution-admission
+gate, determines whether the bound attempt can proceed. A failed Execution
+retains the physical binding that was selected for that attempt.
 
 Physical binding does not alter Operation identity or Data identity. A retry
 is represented by a new Execution and may select different physical bindings.
@@ -870,6 +877,52 @@ states are not resurrected into non-terminal states.
 
 A retry is represented by a new Execution associated with the same Operation;
 retry policy and retry limits are outside the initial Execution contract.
+
+## Execution Admission
+
+The execution-admission gate establishes whether an Execution and its
+established physical binding form an executable physical realization under the
+current runtime state. It composes structural validity, runtime resolution, and
+current usability. It does not evaluate semantic execution admissibility.
+
+Admission requires all of the following:
+
+- the Execution is `PENDING`
+- a physical binding has been established
+- the binding is non-empty: at least one data or resource entry exists
+- the binding is structurally valid
+- every binding reference resolves against the current registries
+- every referenced Resource is currently available
+- every data residency referenced in a consuming role (`INPUT`, `SOURCE`) is
+  usable
+
+A data residency referenced in a producing role (`OUTPUT`, `DESTINATION`) is
+not required to be usable: a representation that is about to be created or
+rewritten is not yet usable. Its referenced Resource must still be available.
+
+Effective residency usability is evaluated as defined by the Data Residency
+contract: a usable residency state and an available referenced Resource.
+
+Admission is observational. It does not mutate registries, the Execution, its
+binding, or runtime state. On success it produces execution-scoped admission
+evidence that identifies the admitted Execution. Admission evidence can be
+produced only by the admission gate.
+
+An Execution may transition from `PENDING` to `RUNNING` only after admission has
+been established for it. The state machine's binding requirement is structural:
+a binding value has been established. Admission is stricter and defines the
+executable physical realization. Both requirements apply.
+
+Admission evidence is established against the runtime state observed at
+admission time. If a referenced object is removed or its runtime state changes
+after admission, the evidence is not rewritten; re-evaluation is obtained by
+requesting admission again. Concurrent mutation remains subject to the core
+external-synchronization rules.
+
+Semantic execution admissibility — whether the resolved binding is appropriate
+for the Operation being attempted — remains a separate later concern. Admission
+does not inspect Operation semantics, topology paths, measurements, or planner
+state.
 
 ---
 
