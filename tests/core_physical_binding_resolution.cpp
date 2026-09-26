@@ -142,6 +142,89 @@ int main() {
                device->find_resource(ResourceId{201}));
     }
 
+    // Resolution is independent of operational availability. An existing
+    // resource is still an identity-resolution success even when it is
+    // operationally unavailable.
+    {
+        auto* resource = device->find_resource(ResourceId{200});
+        assert(resource != nullptr);
+
+        resource->set_availability(ResourceAvailability::FAILED);
+
+        PhysicalBinding binding;
+
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{
+                    DeviceId{100},
+                    ResourceId{200},
+                },
+            });
+
+        const auto resolution = resolver.resolve(binding);
+
+        assert(resolution.resources.size() == 1);
+        assert(resolution.resources.front().resolved == resource);
+        assert(resolution.fully_resolved());
+
+        resource->set_availability(ResourceAvailability::AVAILABLE);
+    }
+
+    // Partial resolution preserves successful resolutions while leaving
+    // missing references unresolved.
+    {
+        PhysicalBinding binding;
+
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{
+                    DeviceId{100},
+                    ResourceId{200},
+                },
+            });
+
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::TRANSFER,
+                ResourceRef{
+                    DeviceId{100},
+                    ResourceId{999},
+                },
+            });
+
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{
+                    DataId{300},
+                    DataResidencyId{400},
+                },
+            });
+
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{
+                    DataId{300},
+                    DataResidencyId{999},
+                },
+            });
+
+        const auto resolution = resolver.resolve(binding);
+
+        assert(resolution.resources.size() == 2);
+        assert(resolution.resources[0].resolved != nullptr);
+        assert(resolution.resources[1].resolved == nullptr);
+
+        assert(resolution.data.size() == 2);
+        assert(resolution.data[0].resolved != nullptr);
+        assert(resolution.data[1].resolved == nullptr);
+
+        assert(!resolution.fully_resolved());
+    }
+
     // A missing device leaves the resource unresolved.
     {
         PhysicalBinding binding;
