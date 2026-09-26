@@ -15,7 +15,7 @@ namespace gerdos {
 struct DataResidencyDescription {
     DataResidencyId id;
     DataId data;
-    ResourceId resource;
+    ResourceRef resource;
     std::string representation;
 };
 
@@ -42,8 +42,13 @@ public:
         return is_usable(state_);
     }
 
-    void set_state(DataResidencyState state) noexcept {
+    [[nodiscard]] bool set_state(DataResidencyState state) noexcept {
+        if (!can_transition(state_, state)) {
+            return false;
+        }
+
         state_ = state;
+        return true;
     }
 
 private:
@@ -103,6 +108,18 @@ public:
 
         if (!description.resource.valid()) {
             return false;
+        }
+
+        for (const auto& [existing_id, existing_residency] : residencies_) {
+            (void)existing_id;
+            const auto& existing_description =
+                existing_residency->description();
+
+            if (existing_description.resource == description.resource &&
+                existing_description.representation ==
+                    description.representation) {
+                return false;
+            }
         }
 
         if (residencies_.contains(id) ||

@@ -504,7 +504,6 @@ The runtime must track whether each copy is:
 
 - valid
 - stale
-- being created
 - being transferred
 - unavailable
 
@@ -533,10 +532,19 @@ A logical Data object may have multiple simultaneous physical representations.
 
 Each physical representation is represented by a distinct Data Residency
 record. A residency record identifies the Resource on which the representation
-exists through a non-owning ResourceId.
+exists through a non-owning `ResourceRef`.
+
+`ResourceRef` identifies a Resource within its owning Device by combining the
+owning `DeviceId` and the `ResourceId`. A bare `ResourceId` is not sufficient
+to identify a Resource outside its owning Device scope.
 
 A `DataResidencyId` identifies one residency record and is distinct from
 `DataId` and `ResourceId`.
+
+Within one Data object, at most one Data Residency may exist for a given
+`(ResourceRef, representation)` pair. Multiple representations may coexist on
+the same Resource, and the same representation may exist on different
+Resources. A duplicate `(ResourceRef, representation)` pair must be rejected.
 
 Data Residency identifiers are owned by their containing Data object and are
 not reused after the corresponding residency record is removed. The residency
@@ -550,7 +558,7 @@ representation, including:
 
 - residency identity
 - logical Data identity
-- referenced Resource identity
+- referenced ResourceRef
 - representation information
 - residency state
 
@@ -561,6 +569,20 @@ The initial residency state model is deliberately small:
 - `TRANSFERRING` — the representation is involved in an in-progress movement
   or update and must not be assumed usable
 - `UNAVAILABLE` — the representation exists but cannot currently be used
+
+Residency state changes are constrained by an explicit transition predicate.
+Self-transitions are legal and idempotent. The authoritative transitions are:
+
+| From | Allowed destinations |
+|---|---|
+| `UNAVAILABLE` | `UNAVAILABLE`, `VALID`, `TRANSFERRING` |
+| `VALID` | `VALID`, `STALE`, `TRANSFERRING` |
+| `STALE` | `STALE`, `TRANSFERRING`, `UNAVAILABLE` |
+| `TRANSFERRING` | `TRANSFERRING`, `VALID`, `UNAVAILABLE` |
+
+Any transition not listed above must be rejected without changing the current
+state. Transition validity is enforced by the core rather than being left to
+callers.
 
 Residency state is distinct from `ResourceAvailability`. Resource availability
 describes whether a Resource can accept or support work; residency state
@@ -593,6 +615,19 @@ belong to later runtime layers.
 
 Data and residency ownership follows the same external-synchronization and
 borrowed-access rules established by the core concurrency contract.
+
+Ownership-registration functions use conditional ownership transfer semantics.
+A registration request first validates the supplied object and rejects invalid,
+conflicting, or retired identities without transferring ownership. A successful
+registration transfers ownership to the containing runtime object.
+
+Callers must not rely on the state of a successfully registered source object
+after ownership transfer. Registration failure during pre-transfer validation
+does not consume the supplied object.
+
+The core uses `bool` registration results for these ownership-adoption
+operations. `true` means that ownership was accepted by the containing object;
+`false` means that the object was not registered.
 
 Data identity and residency identity must not be inferred from enumeration
 position, ResourceId, DeviceId, memory address, or backend allocation handle.

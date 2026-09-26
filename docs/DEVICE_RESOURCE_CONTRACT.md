@@ -17,7 +17,7 @@ A Device has:
 - an immutable `DeviceDescription`
 - zero or more Resources
 
-The Resource Registry owns active Device objects. A Device owns its active
+The Device Registry owns active Device objects. A Device owns its active
 Resource objects. External components do not own Devices or Resources merely
 by obtaining an identifier or lookup result.
 
@@ -52,13 +52,13 @@ automatically to Resource.
 
 The runtime ownership hierarchy is:
 
-    ResourceRegistry
+    DeviceRegistry
         |
         +-- Device
               |
               +-- Resource
 
-The Resource Registry owns active Devices.
+The Device Registry owns active Devices.
 
 A Device owns its active Resources.
 
@@ -129,7 +129,7 @@ explicit future policy permits it.
 
 ## 7. Registry
 
-The Resource Registry is an ownership and discovery boundary.
+The Device Registry is an ownership and discovery boundary.
 
 It is responsible for:
 
@@ -154,8 +154,15 @@ Device removal must invalidate all Resources owned by that Device.
 Previously issued identifiers may remain as historical identifiers, but must
 not resolve to active resources after removal.
 
-Device and Resource identifiers are not reused during the lifetime of a GERDOS
-runtime instance.
+DeviceId values are unique within their owning DeviceRegistry and are not
+reused by that registry after a Device is removed.
+
+ResourceId values are unique within their owning Device and are not reused by
+that Device after a Resource is removed.
+
+Identifier uniqueness and retirement are therefore scoped to the ownership
+boundary that owns the identifier namespace. A broader runtime-wide identity
+authority is not implied by these contracts.
 
 The system must distinguish:
 
@@ -285,8 +292,9 @@ The implementation must preserve these invariants:
 
 1. Every active Resource has exactly one owning Device.
 2. Every active Resource has exactly one ResourceId.
-3. `DeviceId` and `ResourceId` values are not reused during the lifetime of
-   a GERDOS runtime instance.
+3. `DeviceId` values are unique and non-reused within their owning
+   `DeviceRegistry`; `ResourceId` values are unique and non-reused within
+   their owning `Device`.
 4. Device removal removes active ownership of its Resources.
 5. Resource descriptions are not runtime state.
 6. Runtime state does not redefine resource identity.

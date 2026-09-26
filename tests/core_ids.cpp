@@ -463,25 +463,83 @@ int main() {
         DataResidencyDescription{
             DataResidencyId{1},
             DataId{100},
-            ResourceId{2000},
+            ResourceRef{DeviceId{200}, ResourceId{2000}},
             "opaque-representation",
         },
     };
+
+    const ResourceRef device_a_resource{
+        DeviceId{200},
+        ResourceId{2000},
+    };
+    const ResourceRef device_b_resource{
+        DeviceId{201},
+        ResourceId{2000},
+    };
+
+    GERDOS_CHECK(device_a_resource.valid());
+    GERDOS_CHECK(device_b_resource.valid());
+    GERDOS_CHECK(device_a_resource != device_b_resource);
+    GERDOS_CHECK(device_a_resource.resource == device_b_resource.resource);
+    GERDOS_CHECK(device_a_resource.device != device_b_resource.device);
+
+    GERDOS_CHECK(
+        residency.description().resource == device_a_resource);
 
     GERDOS_CHECK(
         residency.state() == DataResidencyState::UNAVAILABLE);
     GERDOS_CHECK(!residency.usable());
 
-    residency.set_state(DataResidencyState::VALID);
+    GERDOS_CHECK(
+        residency.set_state(DataResidencyState::VALID));
     GERDOS_CHECK(
         residency.state() == DataResidencyState::VALID);
     GERDOS_CHECK(residency.usable());
 
-    residency.set_state(DataResidencyState::STALE);
+    GERDOS_CHECK(
+        residency.set_state(DataResidencyState::STALE));
     GERDOS_CHECK(!residency.usable());
 
-    residency.set_state(DataResidencyState::TRANSFERRING);
+    GERDOS_CHECK(
+        residency.set_state(DataResidencyState::TRANSFERRING));
     GERDOS_CHECK(!residency.usable());
+
+    GERDOS_CHECK(residency.set_state(DataResidencyState::VALID));
+    GERDOS_CHECK(
+        residency.state() == DataResidencyState::VALID);
+
+    GERDOS_CHECK(
+        residency.set_state(DataResidencyState::VALID));
+
+    GERDOS_CHECK(
+        !residency.set_state(DataResidencyState::UNAVAILABLE));
+    GERDOS_CHECK(
+        residency.state() == DataResidencyState::VALID);
+
+    GERDOS_CHECK(
+        !can_transition(
+            DataResidencyState::UNAVAILABLE,
+            DataResidencyState::STALE));
+
+    GERDOS_CHECK(
+        can_transition(
+            DataResidencyState::UNAVAILABLE,
+            DataResidencyState::UNAVAILABLE));
+
+    GERDOS_CHECK(
+        !can_transition(
+            DataResidencyState::VALID,
+            DataResidencyState::UNAVAILABLE));
+
+    GERDOS_CHECK(
+        !can_transition(
+            DataResidencyState::STALE,
+            DataResidencyState::VALID));
+
+    GERDOS_CHECK(
+        !can_transition(
+            DataResidencyState::TRANSFERRING,
+            DataResidencyState::STALE));
 
     Data data{
         DataDescription{
@@ -498,7 +556,7 @@ int main() {
         DataResidencyDescription{
             DataResidencyId{},
             DataId{100},
-            ResourceId{2000},
+            ResourceRef{DeviceId{200}, ResourceId{2000}},
             "representation",
         },
     };
@@ -511,7 +569,7 @@ int main() {
         DataResidencyDescription{
             DataResidencyId{2},
             DataId{101},
-            ResourceId{2000},
+            ResourceRef{DeviceId{200}, ResourceId{2000}},
             "representation",
         },
     };
@@ -524,7 +582,7 @@ int main() {
         DataResidencyDescription{
             DataResidencyId{3},
             DataId{100},
-            ResourceId{},
+            ResourceRef{},
             "representation",
         },
     };
@@ -537,7 +595,7 @@ int main() {
         DataResidencyDescription{
             DataResidencyId{10},
             DataId{100},
-            ResourceId{2000},
+            ResourceRef{DeviceId{200}, ResourceId{2000}},
             "representation-a",
         },
     };
@@ -555,9 +613,9 @@ int main() {
     GERDOS_CHECK(
         borrowed_residency->description().data ==
         DataId{100});
-    GERDOS_CHECK(
+    GERDOS_CHECK((
         borrowed_residency->description().resource ==
-        ResourceId{2000});
+        ResourceRef{DeviceId{200}, ResourceId{2000}}));
     GERDOS_CHECK(
         borrowed_residency->description().representation ==
         "representation-a");
@@ -565,7 +623,8 @@ int main() {
         borrowed_residency->state() ==
         DataResidencyState::UNAVAILABLE);
 
-    borrowed_residency->set_state(DataResidencyState::VALID);
+    GERDOS_CHECK(
+        borrowed_residency->set_state(DataResidencyState::VALID));
     GERDOS_CHECK(borrowed_residency->usable());
 
     const Data& const_data = data;
@@ -579,13 +638,47 @@ int main() {
         DataResidencyDescription{
             DataResidencyId{11},
             DataId{100},
-            ResourceId{2001},
+            ResourceRef{DeviceId{200}, ResourceId{2001}},
             "representation-b",
         },
     };
 
     GERDOS_CHECK(data.add_residency(std::move(residency_b)));
     GERDOS_CHECK(data.residency_count() == 2);
+
+    DataResidency duplicate_location_and_representation{
+        DataResidencyDescription{
+            DataResidencyId{13},
+            DataId{100},
+            ResourceRef{DeviceId{200}, ResourceId{2000}},
+            "representation-a",
+        }};
+
+    GERDOS_CHECK(
+        !data.add_residency(std::move(duplicate_location_and_representation)));
+    GERDOS_CHECK(data.residency_count() == 2);
+
+    DataResidency alternate_representation{
+        DataResidencyDescription{
+            DataResidencyId{14},
+            DataId{100},
+            ResourceRef{DeviceId{200}, ResourceId{2000}},
+            "int8",
+        }};
+
+    GERDOS_CHECK(data.add_residency(std::move(alternate_representation)));
+    GERDOS_CHECK(data.residency_count() == 3);
+
+    DataResidency alternate_resource{
+        DataResidencyDescription{
+            DataResidencyId{15},
+            DataId{100},
+            ResourceRef{DeviceId{201}, ResourceId{2000}},
+            "fp16",
+        }};
+
+    GERDOS_CHECK(data.add_residency(std::move(alternate_resource)));
+    GERDOS_CHECK(data.residency_count() == 4);
 
     std::size_t residencies_enumerated = 0;
     data.for_each_residency(
@@ -594,7 +687,7 @@ int main() {
             GERDOS_CHECK(entry->description().data == DataId{100});
             ++residencies_enumerated;
         });
-    GERDOS_CHECK(residencies_enumerated == 2);
+    GERDOS_CHECK(residencies_enumerated == 4);
 
     std::size_t const_residencies_enumerated = 0;
     const_data.for_each_residency(
@@ -603,24 +696,24 @@ int main() {
             GERDOS_CHECK(entry->description().data == DataId{100});
             ++const_residencies_enumerated;
         });
-    GERDOS_CHECK(const_residencies_enumerated == 2);
+    GERDOS_CHECK(const_residencies_enumerated == 4);
 
     DataResidency duplicate_residency{
         DataResidencyDescription{
             DataResidencyId{10},
             DataId{100},
-            ResourceId{2002},
+            ResourceRef{DeviceId{200}, ResourceId{2002}},
             "duplicate-id",
         },
     };
 
     GERDOS_CHECK(
         !data.add_residency(std::move(duplicate_residency)));
-    GERDOS_CHECK(data.residency_count() == 2);
+    GERDOS_CHECK(data.residency_count() == 4);
 
     GERDOS_CHECK(
         data.remove_residency(DataResidencyId{10}));
-    GERDOS_CHECK(data.residency_count() == 1);
+    GERDOS_CHECK(data.residency_count() == 3);
     GERDOS_CHECK(
         data.find_residency(DataResidencyId{10}) == nullptr);
     GERDOS_CHECK(
@@ -630,27 +723,27 @@ int main() {
         DataResidencyDescription{
             DataResidencyId{10},
             DataId{100},
-            ResourceId{2003},
+            ResourceRef{DeviceId{200}, ResourceId{2003}},
             "reused-id",
         },
     };
 
     GERDOS_CHECK(
         !data.add_residency(std::move(reused_residency)));
-    GERDOS_CHECK(data.residency_count() == 1);
+    GERDOS_CHECK(data.residency_count() == 3);
 
     DataResidency surviving_residency{
         DataResidencyDescription{
             DataResidencyId{12},
             DataId{100},
-            ResourceId{2004},
+            ResourceRef{DeviceId{200}, ResourceId{2004}},
             "surviving",
         },
     };
 
     GERDOS_CHECK(
         data.add_residency(std::move(surviving_residency)));
-    GERDOS_CHECK(data.residency_count() == 2);
+    GERDOS_CHECK(data.residency_count() == 4);
 
     DataRegistry data_registry;
 

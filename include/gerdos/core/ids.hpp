@@ -43,6 +43,17 @@ using DataResidencyId = StrongId<DataResidencyIdTag>;
 using OperationId = StrongId<OperationIdTag>;
 using ExecutionId = StrongId<ExecutionIdTag>;
 
+struct ResourceRef {
+    DeviceId device;
+    ResourceId resource;
+
+    [[nodiscard]] constexpr bool valid() const noexcept {
+        return device.valid() && resource.valid();
+    }
+
+    friend constexpr bool operator==(ResourceRef, ResourceRef) = default;
+};
+
 } // namespace gerdos
 
 namespace std {
