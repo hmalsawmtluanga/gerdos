@@ -23,22 +23,15 @@ public:
         for (const auto& data_binding : binding.data) {
             const auto data = data_binding.residency.data;
 
-            switch (data_binding.role) {
-            case DataBindingRole::INPUT:
-            case DataBindingRole::SOURCE:
+            if (is_consuming(data_binding.role)) {
                 if (!contains(description.inputs, data)) {
                     return false;
                 }
-                break;
-
-            case DataBindingRole::OUTPUT:
-            case DataBindingRole::DESTINATION:
+            } else if (is_producing(data_binding.role)) {
                 if (!contains(description.outputs, data)) {
                     return false;
                 }
-                break;
-
-            default:
+            } else {
                 return false;
             }
         }
@@ -71,12 +64,6 @@ public:
     }
 
 private:
-    [[nodiscard]] static constexpr bool consumes_data(
-        DataBindingRole role) noexcept {
-        return role == DataBindingRole::INPUT ||
-               role == DataBindingRole::SOURCE;
-    }
-
     [[nodiscard]] static bool contains(
         const std::vector<DataId>& references,
         DataId id) noexcept {
@@ -100,13 +87,8 @@ private:
 
             const auto role = data_binding.role;
 
-            if (role == DataBindingRole::INPUT ||
-                role == DataBindingRole::SOURCE ||
-                role == DataBindingRole::OUTPUT ||
-                role == DataBindingRole::DESTINATION) {
-                if (consumes_data(role) == consuming) {
-                    return true;
-                }
+            if (consuming ? is_consuming(role) : is_producing(role)) {
+                return true;
             }
         }
 

@@ -73,12 +73,6 @@ public:
     }
 
 private:
-    [[nodiscard]] static constexpr bool consumes_data(
-        DataBindingRole role) noexcept {
-        return role == DataBindingRole::INPUT ||
-               role == DataBindingRole::SOURCE;
-    }
-
     [[nodiscard]] bool resource_available(
         ResourceRef ref) const noexcept {
         const auto* device = devices_.find_device(ref.device);
@@ -105,7 +99,7 @@ private:
                 return false;
             }
 
-            if (consumes_data(data_binding.role) && !residency->usable()) {
+            if (is_consuming(data_binding.role) && !residency->usable()) {
                 return false;
             }
         }
