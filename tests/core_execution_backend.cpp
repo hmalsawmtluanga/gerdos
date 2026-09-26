@@ -38,6 +38,7 @@ public:
                 BackendCompletion{
                     submitted_,
                     true,
+                    1'000'000,
                 });
 
             submitted_ = ExecutionId{};

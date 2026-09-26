@@ -57,6 +57,9 @@ int main() {
     GERDOS_CHECK(completed.size() == 1);
     GERDOS_CHECK(completed.front().execution == ExecutionId{801});
     GERDOS_CHECK(!completed.front().succeeded);
+    GERDOS_CHECK(
+        completed.front().duration_ns ==
+        2 * SimulatedBackend::ns_per_step);
     GERDOS_CHECK(backend.in_flight_count() == 1);
 
     backend.poll(completed);
@@ -66,6 +69,9 @@ int main() {
     GERDOS_CHECK(completed.size() == 2);
     GERDOS_CHECK(completed.back().execution == ExecutionId{800});
     GERDOS_CHECK(completed.back().succeeded);
+    GERDOS_CHECK(
+        completed.back().duration_ns ==
+        4 * SimulatedBackend::ns_per_step);
     GERDOS_CHECK(backend.in_flight_count() == 0);
 
     // Completions are reported once.

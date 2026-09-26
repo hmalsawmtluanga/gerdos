@@ -9,6 +9,8 @@
 #include "gerdos/core/execution_backend.hpp"
 #include "gerdos/core/execution_effects.hpp"
 #include "gerdos/core/execution_registry.hpp"
+#include "gerdos/core/measurement.hpp"
+#include "gerdos/core/measurement_collector.hpp"
 #include "gerdos/core/operation_registry.hpp"
 
 namespace gerdos {
@@ -24,10 +26,12 @@ public:
         OperationRegistry& operations,
         DeviceRegistry& devices,
         DataRegistry& data,
-        ExecutionBackend& backend) noexcept
+        ExecutionBackend& backend,
+        MeasurementRegistry* measurements = nullptr) noexcept
         : executions_(executions),
           operations_(operations),
           backend_(backend),
+          measurements_(measurements),
           admission_(devices, data),
           effects_(data) {}
 
@@ -104,14 +108,42 @@ public:
                     {},
                 });
 
+            if (measurements_ != nullptr) {
+                const auto* operation = operations_.find_operation(
+                    execution->description().operation);
+
+                if (operation != nullptr) {
+                    MeasurementCollector::capture(
+                        *measurements_,
+                        *execution,
+                        *operation,
+                        completion.duration_ns,
+                        count_running());
+                }
+            }
+
             completed.push_back(completion.execution);
         }
     }
 
 private:
+    [[nodiscard]] std::size_t count_running() const noexcept {
+        std::size_t running = 0;
+
+        executions_.for_each_execution(
+            [&](const Execution* execution) {
+                if (execution->state() == ExecutionState::RUNNING) {
+                    ++running;
+                }
+            });
+
+        return running;
+    }
+
     ExecutionRegistry& executions_;
     OperationRegistry& operations_;
     ExecutionBackend& backend_;
+    MeasurementRegistry* measurements_;
     ExecutionAdmissionValidator admission_;
     BindingAdmissibilityValidator admissibility_;
     ExecutionEffects effects_;

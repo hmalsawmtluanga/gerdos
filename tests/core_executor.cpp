@@ -524,5 +524,57 @@ int main() {
         GERDOS_CHECK(fixture.input->state() == DataResidencyState::VALID);
     }
 
+    // ---------------------------------------------------------------------
+    // 6. Completions leave measured evidence
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        SimulatedBackend backend{3};
+        MeasurementRegistry measurements;
+
+        Executor executor(
+            fixture.executions,
+            fixture.operations,
+            fixture.devices,
+            fixture.data,
+            backend,
+            &measurements);
+
+        auto* execution = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{806},
+                OperationId{700},
+            });
+
+        GERDOS_CHECK(
+            execution->bind(
+                compute_binding(DataId{301}, DataResidencyId{410})));
+
+        backend.set_work(ExecutionId{806}, 3);
+        GERDOS_CHECK(executor.start(ExecutionId{806}));
+
+        std::vector<ExecutionId> completed;
+        for (int step = 0; step < 3; ++step) {
+            executor.advance(completed);
+        }
+
+        GERDOS_CHECK(completed.size() == 1);
+        GERDOS_CHECK(measurements.count() == 1);
+
+        const auto summary = measurements.summarize(
+            ResourceRef{
+                DeviceId{100},
+                ResourceId{200},
+            },
+            MeasurementQuantity::DURATION_NS);
+
+        GERDOS_CHECK(summary.observations == 1);
+        GERDOS_CHECK(
+            summary.latest_value ==
+            3 * SimulatedBackend::ns_per_step);
+        GERDOS_CHECK(summary.latest.valid());
+    }
+
     return 0;
 }

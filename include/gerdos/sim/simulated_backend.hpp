@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -16,6 +17,10 @@ namespace gerdos {
 // behaviour is reproducible without threads or hardware.
 class SimulatedBackend final : public ExecutionBackend {
 public:
+    // The simulated clock ticks nanoseconds: one virtual step is one
+    // simulated millisecond of work.
+    static constexpr std::uint64_t ns_per_step = 1'000'000;
+
     explicit SimulatedBackend(std::size_t default_work = 1) noexcept
         : default_work_(default_work) {}
 
@@ -47,6 +52,7 @@ public:
                 id,
                 work,
                 !failures_.contains(id),
+                work * ns_per_step,
             });
 
         submitted_.insert(id);
@@ -64,6 +70,7 @@ public:
                     BackendCompletion{
                         entry.id,
                         entry.succeeded,
+                        entry.duration_ns,
                     });
             } else {
                 --entry.remaining;
@@ -87,6 +94,7 @@ private:
         ExecutionId id;
         std::size_t remaining;
         bool succeeded;
+        std::uint64_t duration_ns;
     };
 
     std::size_t default_work_;

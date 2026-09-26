@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
 #include "gerdos/core/execution.hpp"
@@ -9,12 +10,14 @@
 namespace gerdos {
 
 // The outcome of one attempt as reported by a backend. A completion carries
-// only the attempt identity and whether the work succeeded; terminal state
-// transitions, execution effects, and result recording are applied by the
-// runtime integration layer.
+// the attempt identity, whether the work succeeded, and the observed
+// duration of the work; the duration is evidence measured where the work
+// happened. Terminal state transitions, execution effects, result recording,
+// and measurement capture are applied by the runtime integration layer.
 struct BackendCompletion {
     ExecutionId execution;
     bool succeeded;
+    std::uint64_t duration_ns;
 };
 
 // The single seam between the core runtime and hardware-specific execution.
