@@ -91,4 +91,7 @@ gerdos_add_test(gerdos_core_simulated_backend
 gerdos_add_test(gerdos_core_executor
     tests/core_executor.cpp)
 
+gerdos_add_test(gerdos_core_vertical_slice
+    tests/core_vertical_slice.cpp)
+
 
