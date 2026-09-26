@@ -55,3 +55,51 @@ add_test(
     NAME gerdos_core_ids
     COMMAND gerdos_core_ids_test
 )
+
+add_executable(gerdos_core_operation_test
+    tests/core_operation.cpp
+)
+
+target_include_directories(gerdos_core_operation_test
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(MSVC)
+    target_compile_options(gerdos_core_operation_test PRIVATE /W4)
+else()
+    target_compile_options(gerdos_core_operation_test PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+    )
+endif()
+
+add_test(
+    NAME gerdos_core_operation
+    COMMAND gerdos_core_operation_test
+)
+
+add_executable(gerdos_core_operation_registry_test
+    tests/core_operation_registry.cpp
+)
+
+target_include_directories(gerdos_core_operation_registry_test
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(MSVC)
+    target_compile_options(gerdos_core_operation_registry_test PRIVATE /W4)
+else()
+    target_compile_options(gerdos_core_operation_registry_test PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+    )
+endif()
+
+add_test(
+    NAME gerdos_core_operation_registry
+    COMMAND gerdos_core_operation_registry_test
+)
