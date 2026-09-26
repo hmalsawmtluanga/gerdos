@@ -1022,8 +1022,52 @@ of that attempt. Result recording is independent of retry policy: a retry is a
 new Execution with its own result.
 
 The runtime effects of an attempt — the residency state changes applied
-through its binding roles when the attempt completes or fails — are defined by
-the execution effects contract.
+through its binding roles as the attempt starts, completes, or fails — are
+defined by the execution effects rules.
+
+## Execution Effects
+
+The execution effects rules define the runtime state changes an attempt applies
+to the physical representations it produces. Effects are expressed through the
+binding roles of the attempt and apply only to data bindings in producing roles
+(`OUTPUT`, `DESTINATION`). Consuming bindings are not modified by the attempt.
+
+The effects lifecycle is paired to the attempt:
+
+- when the attempt starts, every producing residency enters the
+  update-in-progress state (`TRANSFERRING`); the representation must not be
+  assumed usable while it is being created or rewritten
+- when the attempt completes, every producing residency becomes `VALID`
+- when the attempt fails or is cancelled after it started, every producing
+  residency becomes `UNAVAILABLE`
+
+Failure and cancellation effects are deliberately pessimistic: after an
+interrupted rewrite the runtime cannot assert that the previous representation
+is intact, so the residency is recorded as existing but not usable.
+
+Effects application is transactional: a call either applies all of its state
+changes or leaves every residency unchanged and reports rejection. Starting
+effects are rejected when the attempt is already terminal, when a producing
+residency cannot be resolved, or when a binding role value lies outside the
+binding role domains. Finishing effects are rejected when the attempt is not
+terminal, when a producing residency cannot be resolved, when a producing
+residency is not in the update-in-progress state — the update did not start or
+has already finished — or when a binding role value lies outside the binding
+domain. Starting effects are idempotent; finishing effects are single-shot.
+
+Effects do not apply to attempts that never started: a cancelled PENDING
+attempt has not touched any representation.
+
+Effects are applied by the runtime integration layer in the intended
+sequence: admission, start effects, `RUNNING`, backend work, terminal
+transition, finish effects, result recording. Effects do not record results,
+do not change execution state, and do not consult availability, admissibility,
+topology, or measurements.
+
+Concurrent updates to one residency are not arbitrated by these rules. The
+residency state machine's self-transitions make repeated start effects
+harmless; conflict avoidance belongs to semantic execution admissibility and
+planning.
 
 ---
 
