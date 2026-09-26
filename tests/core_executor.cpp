@@ -170,6 +170,20 @@ struct Fixture {
                     },
                 },
             });
+
+        (void)operations.create_operation(
+            OperationDescription{
+                OperationId{703},
+                {DataId{300}},
+                {DataId{301}, DataId{302}},
+                {},
+                {
+                    ResourceRequirement{
+                        ResourceBindingRole::COMPUTE,
+                        1,
+                    },
+                },
+            });
     }
 };
 
@@ -239,16 +253,16 @@ int main() {
             fixture.output_a->state() == DataResidencyState::TRANSFERRING);
         GERDOS_CHECK(fixture.input->state() == DataResidencyState::VALID);
 
-        std::vector<ExecutionId> completed;
-        executor.advance(completed);
-        GERDOS_CHECK(completed.empty());
+        std::vector<AttemptStatus> outcomes;
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.empty());
 
-        executor.advance(completed);
-        GERDOS_CHECK(completed.empty());
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.empty());
 
-        executor.advance(completed);
-        GERDOS_CHECK(completed.size() == 1);
-        GERDOS_CHECK(completed.front() == ExecutionId{800});
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(outcomes.front().execution == ExecutionId{800});
 
         GERDOS_CHECK(execution->state() == ExecutionState::COMPLETED);
         GERDOS_CHECK(fixture.output_a->state() == DataResidencyState::VALID);
@@ -257,9 +271,9 @@ int main() {
             execution->result()->outcome == ExecutionState::COMPLETED);
 
         // Completions are reported once.
-        completed.clear();
-        executor.advance(completed);
-        GERDOS_CHECK(completed.empty());
+        outcomes.clear();
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.empty());
     }
 
     // ---------------------------------------------------------------------
@@ -288,10 +302,10 @@ int main() {
             execution->bind(compute_binding(DataId{301}, DataResidencyId{410})));
         GERDOS_CHECK(executor.start(ExecutionId{801}));
 
-        std::vector<ExecutionId> completed;
-        executor.advance(completed);
+        std::vector<AttemptStatus> outcomes;
+        executor.advance(outcomes);
 
-        GERDOS_CHECK(completed.size() == 1);
+        GERDOS_CHECK(outcomes.size() == 1);
         GERDOS_CHECK(execution->state() == ExecutionState::FAILED);
         GERDOS_CHECK(
             fixture.output_a->state() == DataResidencyState::UNAVAILABLE);
@@ -494,15 +508,15 @@ int main() {
         GERDOS_CHECK(executor.start(ExecutionId{811}));
         GERDOS_CHECK(backend.in_flight_count() == 2);
 
-        std::vector<ExecutionId> completed;
-        executor.advance(completed);
-        executor.advance(completed);
-        GERDOS_CHECK(completed.empty());
+        std::vector<AttemptStatus> outcomes;
+        executor.advance(outcomes);
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.empty());
 
         // The compute attempt finishes first while the movement continues.
-        executor.advance(completed);
-        GERDOS_CHECK(completed.size() == 1);
-        GERDOS_CHECK(completed.front() == ExecutionId{811});
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(outcomes.front().execution == ExecutionId{811});
         GERDOS_CHECK(compute->state() == ExecutionState::COMPLETED);
         GERDOS_CHECK(fixture.output_b->state() == DataResidencyState::VALID);
         GERDOS_CHECK(movement->state() == ExecutionState::RUNNING);
@@ -510,13 +524,13 @@ int main() {
             fixture.output_a->state() == DataResidencyState::TRANSFERRING);
 
         // The movement completes later.
-        completed.clear();
-        executor.advance(completed);
-        GERDOS_CHECK(completed.empty());
+        outcomes.clear();
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.empty());
 
-        executor.advance(completed);
-        GERDOS_CHECK(completed.size() == 1);
-        GERDOS_CHECK(completed.front() == ExecutionId{810});
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(outcomes.front().execution == ExecutionId{810});
         GERDOS_CHECK(movement->state() == ExecutionState::COMPLETED);
         GERDOS_CHECK(fixture.output_a->state() == DataResidencyState::VALID);
 
@@ -554,12 +568,12 @@ int main() {
         backend.set_work(ExecutionId{806}, 3);
         GERDOS_CHECK(executor.start(ExecutionId{806}));
 
-        std::vector<ExecutionId> completed;
+        std::vector<AttemptStatus> outcomes;
         for (int step = 0; step < 3; ++step) {
-            executor.advance(completed);
+            executor.advance(outcomes);
         }
 
-        GERDOS_CHECK(completed.size() == 1);
+        GERDOS_CHECK(outcomes.size() == 1);
         GERDOS_CHECK(measurements.count() == 1);
 
         const auto summary = measurements.summarize(
@@ -574,6 +588,215 @@ int main() {
             summary.latest_value ==
             3 * SimulatedBackend::ns_per_step);
         GERDOS_CHECK(summary.latest.valid());
+    }
+
+    // ---------------------------------------------------------------------
+    // 7. In-flight objects cannot be removed underneath an attempt
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        SimulatedBackend backend{4};
+        Executor executor(
+            fixture.executions,
+            fixture.operations,
+            fixture.devices,
+            fixture.data,
+            backend);
+
+        // A two-output attempt: both producing residencies must survive to
+        // the completion effects.
+        auto* dual = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{820},
+                OperationId{703},
+            });
+
+        PhysicalBinding dual_binding;
+        dual_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{
+                    DataId{300},
+                    DataResidencyId{400},
+                },
+            });
+
+        dual_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{
+                    DataId{301},
+                    DataResidencyId{410},
+                },
+            });
+
+        dual_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{
+                    DataId{302},
+                    DataResidencyId{420},
+                },
+            });
+
+        dual_binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{
+                    DeviceId{100},
+                    ResourceId{200},
+                },
+            });
+
+        GERDOS_CHECK(dual->bind(std::move(dual_binding)));
+        GERDOS_CHECK(executor.start(ExecutionId{820}));
+
+        // The mid-attempt removal route is closed at the ownership layer.
+        GERDOS_CHECK(!fixture.data.remove_data(DataId{301}));
+
+        auto* output_owner = fixture.data.find_data(DataId{301});
+        GERDOS_CHECK(output_owner != nullptr);
+        GERDOS_CHECK(
+            !output_owner->remove_residency(DataResidencyId{410}));
+
+        // The attempt is equally unremovable while in flight.
+        GERDOS_CHECK(
+            !fixture.executions.remove_execution(ExecutionId{820}));
+
+        std::vector<AttemptStatus> outcomes;
+        for (int step = 0; step < 4; ++step) {
+            executor.advance(outcomes);
+        }
+
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(
+            outcomes.front().integrity == AttemptIntegrity::COHERENT);
+        GERDOS_CHECK(
+            fixture.output_a->state() == DataResidencyState::VALID);
+        GERDOS_CHECK(
+            fixture.output_b->state() == DataResidencyState::VALID);
+
+        // Terminal attempts become removable again.
+        GERDOS_CHECK(
+            fixture.executions.remove_execution(ExecutionId{820}));
+    }
+
+    // ---------------------------------------------------------------------
+    // 8. A rejected completion effect is reported, never discarded
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        SimulatedBackend backend{2};
+        Executor executor(
+            fixture.executions,
+            fixture.operations,
+            fixture.devices,
+            fixture.data,
+            backend);
+
+        auto* execution = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{821},
+                OperationId{700},
+            });
+
+        GERDOS_CHECK(
+            execution->bind(
+                compute_binding(DataId{301}, DataResidencyId{410})));
+        GERDOS_CHECK(executor.start(ExecutionId{821}));
+
+        // Interference: the producing residency's update state is resolved
+        // externally mid-attempt, so the finishing effects cannot apply.
+        GERDOS_CHECK(
+            fixture.output_a->set_state(DataResidencyState::VALID));
+
+        std::vector<AttemptStatus> outcomes;
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.empty());
+
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(outcomes.front().execution == ExecutionId{821});
+
+        // The disagreement is part of the attempt's history.
+        GERDOS_CHECK(
+            outcomes.front().integrity ==
+            AttemptIntegrity::EFFECTS_REJECTED);
+        GERDOS_CHECK(execution->state() == ExecutionState::COMPLETED);
+        GERDOS_CHECK(
+            execution->result()->integrity ==
+            AttemptIntegrity::EFFECTS_REJECTED);
+        GERDOS_CHECK(
+            fixture.output_a->state() == DataResidencyState::VALID);
+    }
+
+    // ---------------------------------------------------------------------
+    // 9. Cancellation applies the documented effects mapping
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        SimulatedBackend backend{4};
+        Executor executor(
+            fixture.executions,
+            fixture.operations,
+            fixture.devices,
+            fixture.data,
+            backend);
+
+        // An in-flight attempt receives failed-or-cancelled finishing
+        // effects before its result is recorded.
+        auto* in_flight = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{822},
+                OperationId{700},
+            });
+
+        GERDOS_CHECK(
+            in_flight->bind(
+                compute_binding(DataId{301}, DataResidencyId{410})));
+        GERDOS_CHECK(executor.start(ExecutionId{822}));
+        GERDOS_CHECK(executor.cancel(ExecutionId{822}));
+
+        GERDOS_CHECK(in_flight->state() == ExecutionState::CANCELLED);
+        GERDOS_CHECK(
+            fixture.output_a->state() == DataResidencyState::UNAVAILABLE);
+        GERDOS_CHECK(in_flight->has_result());
+        GERDOS_CHECK(
+            in_flight->result()->outcome == ExecutionState::CANCELLED);
+        GERDOS_CHECK(
+            in_flight->result()->integrity == AttemptIntegrity::COHERENT);
+
+        // A PENDING attempt is cancelled without effects.
+        auto* pending = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{823},
+                OperationId{700},
+            });
+
+        GERDOS_CHECK(
+            pending->bind(
+                compute_binding(DataId{302}, DataResidencyId{420})));
+
+        GERDOS_CHECK(executor.cancel(ExecutionId{823}));
+        GERDOS_CHECK(pending->state() == ExecutionState::CANCELLED);
+        GERDOS_CHECK(
+            fixture.output_b->state() == DataResidencyState::UNAVAILABLE);
+        GERDOS_CHECK(pending->has_result());
+
+        // Unknown and already-terminal attempts cannot be cancelled.
+        GERDOS_CHECK(!executor.cancel(ExecutionId{999}));
+        GERDOS_CHECK(!executor.cancel(ExecutionId{823}));
+
+        // The backend's late completion of a cancelled attempt is discarded.
+        std::vector<AttemptStatus> outcomes;
+        for (int step = 0; step < 4; ++step) {
+            executor.advance(outcomes);
+        }
+
+        GERDOS_CHECK(outcomes.empty());
     }
 
     return 0;

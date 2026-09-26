@@ -1,5 +1,6 @@
 #pragma once
 
+#include <unordered_set>
 #include <vector>
 
 #include "gerdos/core/binding_admissibility.hpp"
@@ -70,20 +71,29 @@ public:
             return false;
         }
 
-        // Given admission succeeded, start effects and the RUNNING
-        // transition cannot be rejected: every producing residency resolves
-        // and can enter the update-in-progress state, and a PENDING attempt
-        // with a binding may enter RUNNING.
-        (void)effects_.start(*execution);
-        (void)execution->set_state(ExecutionState::RUNNING);
+        // Pinned invariants (tests/core_executor.cpp): given admission,
+        // start effects and the RUNNING transition cannot reject — every
+        // producing residency resolves and can enter the update-in-progress
+        // state, and a PENDING attempt with a binding may enter RUNNING. If
+        // either ever rejects, the attempt is in flight but incoherent: the
+        // rejection is remembered and reported with its completion instead of
+        // being discarded.
+        const bool coherent = effects_.start(*execution) &&
+                              execution->set_state(ExecutionState::RUNNING);
+
+        if (!coherent) {
+            incoherent_.insert(id);
+        }
 
         return true;
     }
 
     // Advances backend work and applies the completion sequence — terminal
-    // transition, finish effects, result recording — for attempts that
-    // finished since the previous call.
-    void advance(std::vector<ExecutionId>& completed) {
+    // transition, finish effects, result recording, measurement capture —
+    // for attempts that finished since the previous call. Every completion
+    // is reported with its integrity; an effects rejection is recorded in
+    // the attempt's result and reported here, never discarded.
+    void advance(std::vector<AttemptStatus>& outcomes) {
         std::vector<BackendCompletion> finished;
         backend_.poll(finished);
 
@@ -101,11 +111,21 @@ public:
                                      : ExecutionState::FAILED;
 
             (void)execution->set_state(outcome);
-            (void)effects_.finish(*execution);
+
+            const bool effects_ok = effects_.finish(*execution);
+            const bool started_coherent =
+                incoherent_.erase(completion.execution) == 0;
+
+            const auto integrity =
+                effects_ok && started_coherent
+                    ? AttemptIntegrity::COHERENT
+                    : AttemptIntegrity::EFFECTS_REJECTED;
+
             (void)execution->record_result(
                 ExecutionResult{
                     outcome,
                     {},
+                    integrity,
                 });
 
             if (measurements_ != nullptr) {
@@ -122,8 +142,51 @@ public:
                 }
             }
 
-            completed.push_back(completion.execution);
+            outcomes.push_back(
+                AttemptStatus{
+                    completion.execution,
+                    integrity,
+                });
         }
+    }
+
+    // Cancels one attempt: a PENDING attempt is cancelled without effects;
+    // an in-flight attempt receives the failed-or-cancelled finishing
+    // effects before its result is recorded. Rejected when the attempt is
+    // unknown or already terminal.
+    [[nodiscard]] bool cancel(ExecutionId id) {
+        auto* execution = executions_.find_execution(id);
+
+        if (execution == nullptr) {
+            return false;
+        }
+
+        const bool started =
+            execution->state() == ExecutionState::RUNNING;
+
+        if (is_terminal(execution->state())) {
+            return false;
+        }
+
+        if (!execution->set_state(ExecutionState::CANCELLED)) {
+            return false;
+        }
+
+        const bool effects_ok =
+            !started || effects_.finish(*execution);
+
+        const bool started_coherent = incoherent_.erase(id) == 0;
+
+        (void)execution->record_result(
+            ExecutionResult{
+                ExecutionState::CANCELLED,
+                {},
+                effects_ok && started_coherent
+                    ? AttemptIntegrity::COHERENT
+                    : AttemptIntegrity::EFFECTS_REJECTED,
+            });
+
+        return true;
     }
 
 private:
@@ -142,6 +205,7 @@ private:
 
     ExecutionRegistry& executions_;
     OperationRegistry& operations_;
+    std::unordered_set<ExecutionId> incoherent_;
     ExecutionBackend& backend_;
     MeasurementRegistry* measurements_;
     ExecutionAdmissionValidator admission_;

@@ -37,6 +37,8 @@ int main() {
     GERDOS_CHECK(execution.has_result());
     GERDOS_CHECK(
         execution.result()->outcome == ExecutionState::COMPLETED);
+    GERDOS_CHECK(
+        execution.result()->integrity == AttemptIntegrity::COHERENT);
 
     // Result recording is rejected before a terminal state is reached and
     // for an outcome other than the one reached.
@@ -70,6 +72,29 @@ int main() {
             ExecutionResult{ExecutionState::FAILED, "rewritten"}));
     GERDOS_CHECK(failed_attempt.result()->detail == "device reset");
     GERDOS_CHECK(failed_attempt.result()->outcome == ExecutionState::FAILED);
+
+    // An attempt whose effects were rejected records its incoherence.
+    Execution incoherent_attempt{
+        ExecutionDescription{
+            ExecutionId{103},
+            OperationId{42},
+        }};
+
+    GERDOS_CHECK(incoherent_attempt.bind(PhysicalBinding{}));
+    GERDOS_CHECK(incoherent_attempt.set_state(ExecutionState::RUNNING));
+    GERDOS_CHECK(incoherent_attempt.set_state(ExecutionState::COMPLETED));
+
+    GERDOS_CHECK(
+        incoherent_attempt.record_result(
+            ExecutionResult{
+                ExecutionState::COMPLETED,
+                {},
+                AttemptIntegrity::EFFECTS_REJECTED,
+            }));
+
+    GERDOS_CHECK(
+        incoherent_attempt.result()->integrity ==
+        AttemptIntegrity::EFFECTS_REJECTED);
 
     // A cancelled attempt records its own result.
     Execution cancelled_attempt{

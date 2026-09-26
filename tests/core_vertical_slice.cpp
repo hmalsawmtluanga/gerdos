@@ -382,7 +382,7 @@ int main() {
     // 5. The run: staging and compute overlap
     // ---------------------------------------------------------------------
 
-    std::vector<ExecutionId> trace;
+    std::vector<AttemptStatus> trace;
 
     GERDOS_CHECK(executor.start(ExecutionId{900}));
     GERDOS_CHECK(executor.start(ExecutionId{902}));
@@ -402,7 +402,7 @@ int main() {
 
     // Step 4: staging completed; the source copy remains usable.
     GERDOS_CHECK(trace.size() == 1);
-    GERDOS_CHECK(trace.front() == ExecutionId{900});
+    GERDOS_CHECK(trace.front().execution == ExecutionId{900});
     GERDOS_CHECK(stage->state() == ExecutionState::COMPLETED);
     GERDOS_CHECK(staged->state() == DataResidencyState::VALID);
     GERDOS_CHECK(disk->state() == DataResidencyState::VALID);
@@ -420,7 +420,7 @@ int main() {
 
     executor.advance(trace);
     GERDOS_CHECK(trace.size() == 1);
-    GERDOS_CHECK(trace.front() == ExecutionId{902});
+    GERDOS_CHECK(trace.front().execution == ExecutionId{902});
     GERDOS_CHECK(compute->state() == ExecutionState::COMPLETED);
     GERDOS_CHECK(output_device->state() == DataResidencyState::VALID);
     GERDOS_CHECK(install->state() == ExecutionState::RUNNING);
@@ -430,7 +430,7 @@ int main() {
     trace.clear();
     executor.advance(trace);
     GERDOS_CHECK(trace.size() == 1);
-    GERDOS_CHECK(trace.front() == ExecutionId{901});
+    GERDOS_CHECK(trace.front().execution == ExecutionId{901});
     GERDOS_CHECK(install->state() == ExecutionState::COMPLETED);
     GERDOS_CHECK(resident->state() == DataResidencyState::VALID);
 

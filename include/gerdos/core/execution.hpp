@@ -15,12 +15,28 @@ struct ExecutionDescription {
     OperationId operation;
 };
 
+// Whether an attempt's execution effects were applied coherently. An attempt
+// whose finishing effects were rejected leaves its result and its residency
+// state free to disagree; the disagreement is recorded, never discarded.
+enum class AttemptIntegrity {
+    COHERENT,
+    EFFECTS_REJECTED,
+};
+
 // The result of one attempt. The outcome identifies the terminal state the
-// attempt reached; the detail is an opaque non-semantic diagnostic. The
+// attempt reached; the integrity records whether the attempt's execution
+// effects were applied; the detail is an opaque non-semantic diagnostic. The
 // result carries no measurements, output data, or backend state.
 struct ExecutionResult {
     ExecutionState outcome;
     std::string detail;
+    AttemptIntegrity integrity{AttemptIntegrity::COHERENT};
+};
+
+// The runtime integration layer's report for one completed attempt.
+struct AttemptStatus {
+    ExecutionId execution;
+    AttemptIntegrity integrity;
 };
 
 class Execution {
