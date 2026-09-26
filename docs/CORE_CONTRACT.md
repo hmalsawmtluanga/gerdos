@@ -383,7 +383,7 @@ Examples:
 - storage I/O engine
 - host-to-device transfer capability
 
-Transfers may compete for:
+Data movement may consume or contend for:
 
 - bandwidth
 - copy engines
@@ -391,7 +391,7 @@ Transfers may compete for:
 - memory bandwidth
 - storage queues
 
-Therefore transfers must be visible to the execution planner.
+Therefore transfer-related work must remain visible to the execution planner.
 
 ---
 
