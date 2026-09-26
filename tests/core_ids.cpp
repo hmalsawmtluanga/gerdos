@@ -1,5 +1,3 @@
-#include <cstdio>
-#include <cstdlib>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -12,18 +10,7 @@
 #include "gerdos/core/resource.hpp"
 #include "gerdos/core/topology.hpp"
 
-namespace {
-
-void check(bool condition, const char* expression) {
-    if (!condition) {
-        std::fprintf(stderr, "TEST FAILURE: %s\n", expression);
-        std::abort();
-    }
-}
-
-} // namespace
-
-#define GERDOS_CHECK(condition) check((condition), #condition)
+#include "test_check.hpp"
 
 int main() {
     using namespace gerdos;

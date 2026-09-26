@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_check.hpp"
 
 #include "gerdos/core/data_registry.hpp"
 #include "gerdos/core/device_registry.hpp"
@@ -17,9 +17,9 @@ int main() {
             DeviceId{100},
             "Synthetic Device",
         });
-    assert(device != nullptr);
+    GERDOS_CHECK(device != nullptr);
 
-    assert(device->add_resource(
+    GERDOS_CHECK(device->add_resource(
         Resource{
             ResourceDescription{
                 ResourceId{200},
@@ -29,7 +29,7 @@ int main() {
             },
         }));
 
-    assert(device->add_resource(
+    GERDOS_CHECK(device->add_resource(
         Resource{
             ResourceDescription{
                 ResourceId{201},
@@ -44,9 +44,9 @@ int main() {
             DataId{300},
             "Synthetic Data",
         });
-    assert(data != nullptr);
+    GERDOS_CHECK(data != nullptr);
 
-    assert(data->add_residency(
+    GERDOS_CHECK(data->add_residency(
         DataResidency{
             DataResidencyDescription{
                 DataResidencyId{400},
@@ -66,9 +66,9 @@ int main() {
         const PhysicalBinding binding;
         const auto resolution = resolver.resolve(binding);
 
-        assert(resolution.data.empty());
-        assert(resolution.resources.empty());
-        assert(resolution.fully_resolved());
+        GERDOS_CHECK(resolution.data.empty());
+        GERDOS_CHECK(resolution.resources.empty());
+        GERDOS_CHECK(resolution.fully_resolved());
     }
 
     // Existing resources and residencies resolve through their owning
@@ -105,40 +105,40 @@ int main() {
 
         const auto resolution = resolver.resolve(binding);
 
-        assert(resolution.fully_resolved());
+        GERDOS_CHECK(resolution.fully_resolved());
 
-        assert(resolution.data.size() == 1);
-        assert(resolution.data.front().role == DataBindingRole::INPUT);
+        GERDOS_CHECK(resolution.data.size() == 1);
+        GERDOS_CHECK(resolution.data.front().role == DataBindingRole::INPUT);
         const DataResidencyRef expected_residency{
             DataId{300},
             DataResidencyId{400},
         };
-        assert(resolution.data.front().residency == expected_residency);
-        assert(resolution.data.front().resolved ==
+        GERDOS_CHECK(resolution.data.front().residency == expected_residency);
+        GERDOS_CHECK(resolution.data.front().resolved ==
                data->find_residency(DataResidencyId{400}));
 
-        assert(resolution.resources.size() == 2);
+        GERDOS_CHECK(resolution.resources.size() == 2);
 
-        assert(resolution.resources[0].role ==
+        GERDOS_CHECK(resolution.resources[0].role ==
                ResourceBindingRole::COMPUTE);
         const ResourceRef expected_compute_resource{
             DeviceId{100},
             ResourceId{200},
         };
-        assert(resolution.resources[0].resource ==
+        GERDOS_CHECK(resolution.resources[0].resource ==
                expected_compute_resource);
-        assert(resolution.resources[0].resolved ==
+        GERDOS_CHECK(resolution.resources[0].resolved ==
                device->find_resource(ResourceId{200}));
 
-        assert(resolution.resources[1].role ==
+        GERDOS_CHECK(resolution.resources[1].role ==
                ResourceBindingRole::TRANSFER);
         const ResourceRef expected_transfer_resource{
             DeviceId{100},
             ResourceId{201},
         };
-        assert(resolution.resources[1].resource ==
+        GERDOS_CHECK(resolution.resources[1].resource ==
                expected_transfer_resource);
-        assert(resolution.resources[1].resolved ==
+        GERDOS_CHECK(resolution.resources[1].resolved ==
                device->find_resource(ResourceId{201}));
     }
 
@@ -147,7 +147,7 @@ int main() {
     // operationally unavailable.
     {
         auto* resource = device->find_resource(ResourceId{200});
-        assert(resource != nullptr);
+        GERDOS_CHECK(resource != nullptr);
 
         resource->set_availability(ResourceAvailability::FAILED);
 
@@ -164,9 +164,9 @@ int main() {
 
         const auto resolution = resolver.resolve(binding);
 
-        assert(resolution.resources.size() == 1);
-        assert(resolution.resources.front().resolved == resource);
-        assert(resolution.fully_resolved());
+        GERDOS_CHECK(resolution.resources.size() == 1);
+        GERDOS_CHECK(resolution.resources.front().resolved == resource);
+        GERDOS_CHECK(resolution.fully_resolved());
 
         resource->set_availability(ResourceAvailability::AVAILABLE);
     }
@@ -214,15 +214,15 @@ int main() {
 
         const auto resolution = resolver.resolve(binding);
 
-        assert(resolution.resources.size() == 2);
-        assert(resolution.resources[0].resolved != nullptr);
-        assert(resolution.resources[1].resolved == nullptr);
+        GERDOS_CHECK(resolution.resources.size() == 2);
+        GERDOS_CHECK(resolution.resources[0].resolved != nullptr);
+        GERDOS_CHECK(resolution.resources[1].resolved == nullptr);
 
-        assert(resolution.data.size() == 2);
-        assert(resolution.data[0].resolved != nullptr);
-        assert(resolution.data[1].resolved == nullptr);
+        GERDOS_CHECK(resolution.data.size() == 2);
+        GERDOS_CHECK(resolution.data[0].resolved != nullptr);
+        GERDOS_CHECK(resolution.data[1].resolved == nullptr);
 
-        assert(!resolution.fully_resolved());
+        GERDOS_CHECK(!resolution.fully_resolved());
     }
 
     // A missing device leaves the resource unresolved.
@@ -240,9 +240,9 @@ int main() {
 
         const auto resolution = resolver.resolve(binding);
 
-        assert(resolution.resources.size() == 1);
-        assert(resolution.resources.front().resolved == nullptr);
-        assert(!resolution.fully_resolved());
+        GERDOS_CHECK(resolution.resources.size() == 1);
+        GERDOS_CHECK(resolution.resources.front().resolved == nullptr);
+        GERDOS_CHECK(!resolution.fully_resolved());
     }
 
     // An existing device with a missing resource leaves the resource
@@ -261,9 +261,9 @@ int main() {
 
         const auto resolution = resolver.resolve(binding);
 
-        assert(resolution.resources.size() == 1);
-        assert(resolution.resources.front().resolved == nullptr);
-        assert(!resolution.fully_resolved());
+        GERDOS_CHECK(resolution.resources.size() == 1);
+        GERDOS_CHECK(resolution.resources.front().resolved == nullptr);
+        GERDOS_CHECK(!resolution.fully_resolved());
     }
 
     // A missing DataId leaves the residency unresolved.
@@ -281,9 +281,9 @@ int main() {
 
         const auto resolution = resolver.resolve(binding);
 
-        assert(resolution.data.size() == 1);
-        assert(resolution.data.front().resolved == nullptr);
-        assert(!resolution.fully_resolved());
+        GERDOS_CHECK(resolution.data.size() == 1);
+        GERDOS_CHECK(resolution.data.front().resolved == nullptr);
+        GERDOS_CHECK(!resolution.fully_resolved());
     }
 
     // An existing DataId with a missing residency remains unresolved.
@@ -301,9 +301,9 @@ int main() {
 
         const auto resolution = resolver.resolve(binding);
 
-        assert(resolution.data.size() == 1);
-        assert(resolution.data.front().resolved == nullptr);
-        assert(!resolution.fully_resolved());
+        GERDOS_CHECK(resolution.data.size() == 1);
+        GERDOS_CHECK(resolution.data.front().resolved == nullptr);
+        GERDOS_CHECK(!resolution.fully_resolved());
     }
 
     // Removing a previously bound resource does not rewrite the binding;
@@ -321,13 +321,13 @@ int main() {
             });
 
         const auto before_removal = resolver.resolve(binding);
-        assert(before_removal.resources.front().resolved != nullptr);
+        GERDOS_CHECK(before_removal.resources.front().resolved != nullptr);
 
-        assert(device->remove_resource(ResourceId{200}));
+        GERDOS_CHECK(device->remove_resource(ResourceId{200}));
 
         const auto after_removal = resolver.resolve(binding);
-        assert(after_removal.resources.front().resolved == nullptr);
-        assert(!after_removal.fully_resolved());
+        GERDOS_CHECK(after_removal.resources.front().resolved == nullptr);
+        GERDOS_CHECK(!after_removal.fully_resolved());
     }
 
     // Removing a previously bound residency has the same semantics.
@@ -344,13 +344,13 @@ int main() {
             });
 
         const auto before_removal = resolver.resolve(binding);
-        assert(before_removal.data.front().resolved != nullptr);
+        GERDOS_CHECK(before_removal.data.front().resolved != nullptr);
 
-        assert(data->remove_residency(DataResidencyId{400}));
+        GERDOS_CHECK(data->remove_residency(DataResidencyId{400}));
 
         const auto after_removal = resolver.resolve(binding);
-        assert(after_removal.data.front().resolved == nullptr);
-        assert(!after_removal.fully_resolved());
+        GERDOS_CHECK(after_removal.data.front().resolved == nullptr);
+        GERDOS_CHECK(!after_removal.fully_resolved());
     }
 
     return 0;

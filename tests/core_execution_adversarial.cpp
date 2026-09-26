@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_check.hpp"
 
 #include "gerdos/core/data_registry.hpp"
 #include "gerdos/core/device_registry.hpp"
@@ -28,10 +28,10 @@ int main() {
             "accelerator",
         });
 
-    assert(host != nullptr);
-    assert(accelerator != nullptr);
+    GERDOS_CHECK(host != nullptr);
+    GERDOS_CHECK(accelerator != nullptr);
 
-    assert(host->add_resource(
+    GERDOS_CHECK(host->add_resource(
         Resource{
             ResourceDescription{
                 ResourceId{100},
@@ -41,7 +41,7 @@ int main() {
             },
         }));
 
-    assert(host->add_resource(
+    GERDOS_CHECK(host->add_resource(
         Resource{
             ResourceDescription{
                 ResourceId{101},
@@ -51,7 +51,7 @@ int main() {
             },
         }));
 
-    assert(accelerator->add_resource(
+    GERDOS_CHECK(accelerator->add_resource(
         Resource{
             ResourceDescription{
                 ResourceId{200},
@@ -61,7 +61,7 @@ int main() {
             },
         }));
 
-    assert(accelerator->add_resource(
+    GERDOS_CHECK(accelerator->add_resource(
         Resource{
             ResourceDescription{
                 ResourceId{201},
@@ -71,7 +71,7 @@ int main() {
             },
         }));
 
-    assert(accelerator->add_resource(
+    GERDOS_CHECK(accelerator->add_resource(
         Resource{
             ResourceDescription{
                 ResourceId{202},
@@ -81,8 +81,8 @@ int main() {
             },
         }));
 
-    assert(host->resource_count() == 2);
-    assert(accelerator->resource_count() == 3);
+    GERDOS_CHECK(host->resource_count() == 2);
+    GERDOS_CHECK(accelerator->resource_count() == 3);
 
     // ---------------------------------------------------------------------
     // 2. Topology is separate from Resource identity
@@ -90,7 +90,7 @@ int main() {
 
     Topology topology;
 
-    assert(topology.add_link(
+    GERDOS_CHECK(topology.add_link(
         TopologyLink{
             TopologyLinkDescription{
                 TopologyLinkId{1},
@@ -104,7 +104,7 @@ int main() {
             },
         }));
 
-    assert(topology.add_link(
+    GERDOS_CHECK(topology.add_link(
         TopologyLink{
             TopologyLinkDescription{
                 TopologyLinkId{2},
@@ -118,7 +118,7 @@ int main() {
             },
         }));
 
-    assert(topology.add_link(
+    GERDOS_CHECK(topology.add_link(
         TopologyLink{
             TopologyLinkDescription{
                 TopologyLinkId{3},
@@ -132,7 +132,7 @@ int main() {
             },
         }));
 
-    assert(topology.link_count() == 3);
+    GERDOS_CHECK(topology.link_count() == 3);
 
     // ---------------------------------------------------------------------
     // 3. One logical Data object with multiple physical residencies
@@ -146,9 +146,9 @@ int main() {
             "synthetic-workload-data",
         });
 
-    assert(data != nullptr);
+    GERDOS_CHECK(data != nullptr);
 
-    assert(data->add_residency(
+    GERDOS_CHECK(data->add_residency(
         DataResidency{
             DataResidencyDescription{
                 DataResidencyId{5000},
@@ -161,7 +161,7 @@ int main() {
             },
         }));
 
-    assert(data->add_residency(
+    GERDOS_CHECK(data->add_residency(
         DataResidency{
             DataResidencyDescription{
                 DataResidencyId{5001},
@@ -174,7 +174,7 @@ int main() {
             },
         }));
 
-    assert(data->add_residency(
+    GERDOS_CHECK(data->add_residency(
         DataResidency{
             DataResidencyDescription{
                 DataResidencyId{5002},
@@ -187,10 +187,10 @@ int main() {
             },
         }));
 
-    assert(data->residency_count() == 3);
+    GERDOS_CHECK(data->residency_count() == 3);
 
     // Multiple representations of one logical Data coexist.
-    assert(data->add_residency(
+    GERDOS_CHECK(data->add_residency(
         DataResidency{
             DataResidencyDescription{
                 DataResidencyId{5003},
@@ -203,10 +203,10 @@ int main() {
             },
         }));
 
-    assert(data->residency_count() == 4);
+    GERDOS_CHECK(data->residency_count() == 4);
 
     // The residency identity remains qualified by its Device.
-    assert(
+    GERDOS_CHECK(
         data->find_residency(DataResidencyId{5002})
             ->description()
             .resource ==
@@ -215,7 +215,7 @@ int main() {
             ResourceId{200},
         }));
 
-    assert(
+    GERDOS_CHECK(
         data->find_residency(DataResidencyId{5003})
             ->description()
             .resource ==
@@ -224,12 +224,12 @@ int main() {
             ResourceId{200},
         }));
 
-    assert(
+    GERDOS_CHECK(
         data->find_residency(DataResidencyId{5002})
             ->description()
             .representation == "compute");
 
-    assert(
+    GERDOS_CHECK(
         data->find_residency(DataResidencyId{5003})
             ->description()
             .representation == "alternate-compute");
@@ -247,29 +247,29 @@ int main() {
     auto* device_residency =
         data->find_residency(DataResidencyId{5002});
 
-    assert(storage_residency != nullptr);
-    assert(host_residency != nullptr);
-    assert(device_residency != nullptr);
+    GERDOS_CHECK(storage_residency != nullptr);
+    GERDOS_CHECK(host_residency != nullptr);
+    GERDOS_CHECK(device_residency != nullptr);
 
-    assert(storage_residency->set_state(DataResidencyState::VALID));
-    assert(host_residency->set_state(DataResidencyState::VALID));
-    assert(device_residency->set_state(DataResidencyState::VALID));
+    GERDOS_CHECK(storage_residency->set_state(DataResidencyState::VALID));
+    GERDOS_CHECK(host_residency->set_state(DataResidencyState::VALID));
+    GERDOS_CHECK(device_residency->set_state(DataResidencyState::VALID));
 
     // A residency can be in TRANSFERRING state while another usable
     // residency still exists.
-    assert(device_residency->set_state(
+    GERDOS_CHECK(device_residency->set_state(
         DataResidencyState::TRANSFERRING));
 
-    assert(!device_residency->usable());
-    assert(host_residency->usable());
+    GERDOS_CHECK(!device_residency->usable());
+    GERDOS_CHECK(host_residency->usable());
 
     // Another residency can become unavailable independently.
-    assert(storage_residency->set_state(DataResidencyState::STALE));
-    assert(storage_residency->set_state(
+    GERDOS_CHECK(storage_residency->set_state(DataResidencyState::STALE));
+    GERDOS_CHECK(storage_residency->set_state(
         DataResidencyState::UNAVAILABLE));
 
-    assert(!storage_residency->usable());
-    assert(host_residency->usable());
+    GERDOS_CHECK(!storage_residency->usable());
+    GERDOS_CHECK(host_residency->usable());
 
     // ---------------------------------------------------------------------
     // 5. Resource availability is distinct from residency state
@@ -278,22 +278,22 @@ int main() {
     Resource* device_memory =
         accelerator->find_resource(ResourceId{200});
 
-    assert(device_memory != nullptr);
-    assert(!device_memory->available());
+    GERDOS_CHECK(device_memory != nullptr);
+    GERDOS_CHECK(!device_memory->available());
 
     device_memory->set_availability(ResourceAvailability::AVAILABLE);
-    assert(device_memory->available());
+    GERDOS_CHECK(device_memory->available());
 
     // A resource can become unavailable while its Data residency record
     // still exists.
     device_memory->set_availability(ResourceAvailability::DRAINING);
-    assert(!device_memory->available());
+    GERDOS_CHECK(!device_memory->available());
 
-    assert(
+    GERDOS_CHECK(
         data->find_residency(DataResidencyId{5002}) ==
         device_residency);
 
-    assert(
+    GERDOS_CHECK(
         device_residency->state() ==
         DataResidencyState::TRANSFERRING);
 
@@ -311,14 +311,14 @@ int main() {
             {},
         });
 
-    assert(operation != nullptr);
-    assert(operation->description().inputs.size() == 1);
-    assert(operation->description().inputs[0] == DataId{500});
-    assert(operation->description().outputs.size() == 1);
-    assert(operation->description().outputs[0] == DataId{500});
+    GERDOS_CHECK(operation != nullptr);
+    GERDOS_CHECK(operation->description().inputs.size() == 1);
+    GERDOS_CHECK(operation->description().inputs[0] == DataId{500});
+    GERDOS_CHECK(operation->description().outputs.size() == 1);
+    GERDOS_CHECK(operation->description().outputs[0] == DataId{500});
 
     // Operation contains no selected ResourceRef or DataResidencyId.
-    assert(operation->description().dependencies.empty());
+    GERDOS_CHECK(operation->description().dependencies.empty());
 
     // ---------------------------------------------------------------------
     // 7. Physical binding is orthogonal to Execution lifecycle
@@ -332,17 +332,17 @@ int main() {
             OperationId{700},
         });
 
-    assert(unbound_cancelled != nullptr);
-    assert(unbound_cancelled->state() == ExecutionState::PENDING);
-    assert(!unbound_cancelled->has_binding());
-    assert(unbound_cancelled->binding() == nullptr);
+    GERDOS_CHECK(unbound_cancelled != nullptr);
+    GERDOS_CHECK(unbound_cancelled->state() == ExecutionState::PENDING);
+    GERDOS_CHECK(!unbound_cancelled->has_binding());
+    GERDOS_CHECK(unbound_cancelled->binding() == nullptr);
 
     // A PENDING execution cannot enter RUNNING without a physical binding.
-    assert(!unbound_cancelled->set_state(ExecutionState::RUNNING));
+    GERDOS_CHECK(!unbound_cancelled->set_state(ExecutionState::RUNNING));
 
     // Cancellation does not require a physical binding.
-    assert(unbound_cancelled->set_state(ExecutionState::CANCELLED));
-    assert(!unbound_cancelled->has_binding());
+    GERDOS_CHECK(unbound_cancelled->set_state(ExecutionState::CANCELLED));
+    GERDOS_CHECK(!unbound_cancelled->has_binding());
 
     // ---------------------------------------------------------------------
     // 8. Binding is established once and becomes immutable
@@ -382,42 +382,42 @@ int main() {
             OperationId{700},
         });
 
-    assert(failed_attempt != nullptr);
-    assert(!failed_attempt->has_binding());
+    GERDOS_CHECK(failed_attempt != nullptr);
+    GERDOS_CHECK(!failed_attempt->has_binding());
 
-    assert(failed_attempt->bind(std::move(binding_a)));
-    assert(failed_attempt->has_binding());
-    assert(failed_attempt->binding() != nullptr);
-    assert(failed_attempt->binding()->data.size() == 2);
-    assert(failed_attempt->binding()->resources.size() == 1);
+    GERDOS_CHECK(failed_attempt->bind(std::move(binding_a)));
+    GERDOS_CHECK(failed_attempt->has_binding());
+    GERDOS_CHECK(failed_attempt->binding() != nullptr);
+    GERDOS_CHECK(failed_attempt->binding()->data.size() == 2);
+    GERDOS_CHECK(failed_attempt->binding()->resources.size() == 1);
 
-    assert(
+    GERDOS_CHECK(
         failed_attempt->binding()->data[0].role ==
         DataBindingRole::INPUT);
 
-    assert(
+    GERDOS_CHECK(
         failed_attempt->binding()->data[0].residency ==
         (DataResidencyRef{
             DataId{500},
             DataResidencyId{5001},
         }));
 
-    assert(
+    GERDOS_CHECK(
         failed_attempt->binding()->data[1].role ==
         DataBindingRole::OUTPUT);
 
-    assert(
+    GERDOS_CHECK(
         failed_attempt->binding()->data[1].residency ==
         (DataResidencyRef{
             DataId{500},
             DataResidencyId{5002},
         }));
 
-    assert(
+    GERDOS_CHECK(
         failed_attempt->binding()->resources[0].role ==
         ResourceBindingRole::COMPUTE);
 
-    assert(
+    GERDOS_CHECK(
         failed_attempt->binding()->resources[0].resource ==
         (ResourceRef{
             DeviceId{200},
@@ -446,17 +446,17 @@ int main() {
         },
     };
 
-    assert(!failed_attempt->bind(std::move(replacement_binding)));
+    GERDOS_CHECK(!failed_attempt->bind(std::move(replacement_binding)));
 
     // The original binding remains unchanged.
-    assert(failed_attempt->binding()->data.size() == 2);
-    assert(failed_attempt->binding()->resources.size() == 1);
-    assert(
+    GERDOS_CHECK(failed_attempt->binding()->data.size() == 2);
+    GERDOS_CHECK(failed_attempt->binding()->resources.size() == 1);
+    GERDOS_CHECK(
         failed_attempt->binding()->resources[0].role ==
         ResourceBindingRole::COMPUTE);
 
     // A bound PENDING execution may enter RUNNING.
-    assert(failed_attempt->set_state(ExecutionState::RUNNING));
+    GERDOS_CHECK(failed_attempt->set_state(ExecutionState::RUNNING));
 
     // Binding remains immutable while RUNNING.
     PhysicalBinding running_replacement{
@@ -472,14 +472,14 @@ int main() {
         },
     };
 
-    assert(!failed_attempt->bind(std::move(running_replacement)));
-    assert(
+    GERDOS_CHECK(!failed_attempt->bind(std::move(running_replacement)));
+    GERDOS_CHECK(
         failed_attempt->binding()->resources[0].role ==
         ResourceBindingRole::COMPUTE);
 
     // A failed attempt retains its historical physical binding.
-    assert(failed_attempt->set_state(ExecutionState::FAILED));
-    assert(failed_attempt->has_binding());
+    GERDOS_CHECK(failed_attempt->set_state(ExecutionState::FAILED));
+    GERDOS_CHECK(failed_attempt->has_binding());
 
     PhysicalBinding failed_replacement{
         {},
@@ -494,8 +494,8 @@ int main() {
         },
     };
 
-    assert(!failed_attempt->bind(std::move(failed_replacement)));
-    assert(failed_attempt->has_binding());
+    GERDOS_CHECK(!failed_attempt->bind(std::move(failed_replacement)));
+    GERDOS_CHECK(failed_attempt->has_binding());
 
     // ---------------------------------------------------------------------
     // 9. Retry is a new Execution with an independent physical binding
@@ -535,32 +535,32 @@ int main() {
             OperationId{700},
         });
 
-    assert(retry_attempt != nullptr);
-    assert(retry_attempt->state() == ExecutionState::PENDING);
-    assert(!retry_attempt->has_binding());
+    GERDOS_CHECK(retry_attempt != nullptr);
+    GERDOS_CHECK(retry_attempt->state() == ExecutionState::PENDING);
+    GERDOS_CHECK(!retry_attempt->has_binding());
 
-    assert(retry_attempt->bind(std::move(binding_b)));
-    assert(retry_attempt->has_binding());
-    assert(retry_attempt->set_state(ExecutionState::RUNNING));
+    GERDOS_CHECK(retry_attempt->bind(std::move(binding_b)));
+    GERDOS_CHECK(retry_attempt->has_binding());
+    GERDOS_CHECK(retry_attempt->set_state(ExecutionState::RUNNING));
 
-    assert(
+    GERDOS_CHECK(
         failed_attempt->description().operation ==
         retry_attempt->description().operation);
 
-    assert(
+    GERDOS_CHECK(
         failed_attempt->description().id !=
         retry_attempt->description().id);
 
     // The retry has a different physical realization.
-    assert(
+    GERDOS_CHECK(
         retry_attempt->binding()->data[0].role ==
         DataBindingRole::SOURCE);
 
-    assert(
+    GERDOS_CHECK(
         retry_attempt->binding()->resources[0].role ==
         ResourceBindingRole::TRANSFER);
 
-    assert(
+    GERDOS_CHECK(
         retry_attempt->binding()->resources[0].resource ==
         (ResourceRef{
             DeviceId{200},
@@ -568,11 +568,11 @@ int main() {
         }));
 
     // The failed attempt retains its original compute binding.
-    assert(
+    GERDOS_CHECK(
         failed_attempt->binding()->resources[0].role ==
         ResourceBindingRole::COMPUTE);
 
-    assert(
+    GERDOS_CHECK(
         failed_attempt->binding()->resources[0].resource ==
         (ResourceRef{
             DeviceId{200},
@@ -589,13 +589,13 @@ int main() {
             OperationId{700},
         });
 
-    assert(completed_attempt != nullptr);
+    GERDOS_CHECK(completed_attempt != nullptr);
 
-    assert(completed_attempt->bind(PhysicalBinding{}));
-    assert(completed_attempt->set_state(ExecutionState::RUNNING));
-    assert(completed_attempt->set_state(ExecutionState::COMPLETED));
+    GERDOS_CHECK(completed_attempt->bind(PhysicalBinding{}));
+    GERDOS_CHECK(completed_attempt->set_state(ExecutionState::RUNNING));
+    GERDOS_CHECK(completed_attempt->set_state(ExecutionState::COMPLETED));
 
-    assert(
+    GERDOS_CHECK(
         !completed_attempt->bind(
             PhysicalBinding{
                 {},
@@ -616,11 +616,11 @@ int main() {
             OperationId{700},
         });
 
-    assert(cancelled_attempt != nullptr);
-    assert(cancelled_attempt->bind(PhysicalBinding{}));
-    assert(cancelled_attempt->set_state(ExecutionState::CANCELLED));
+    GERDOS_CHECK(cancelled_attempt != nullptr);
+    GERDOS_CHECK(cancelled_attempt->bind(PhysicalBinding{}));
+    GERDOS_CHECK(cancelled_attempt->set_state(ExecutionState::CANCELLED));
 
-    assert(
+    GERDOS_CHECK(
         !cancelled_attempt->bind(
             PhysicalBinding{
                 {},
@@ -639,22 +639,22 @@ int main() {
     // 11. Identity boundaries remain intact
     // ---------------------------------------------------------------------
 
-    assert(operation->description().id == OperationId{700});
-    assert(data->description().id == DataId{500});
+    GERDOS_CHECK(operation->description().id == OperationId{700});
+    GERDOS_CHECK(data->description().id == DataId{500});
 
-    assert(
+    GERDOS_CHECK(
         failed_attempt->description().operation ==
         operation->description().id);
 
-    assert(
+    GERDOS_CHECK(
         retry_attempt->description().operation ==
         operation->description().id);
 
-    assert(
+    GERDOS_CHECK(
         device_residency->description().data ==
         data->description().id);
 
-    assert(
+    GERDOS_CHECK(
         device_residency->description().resource ==
         (ResourceRef{
             DeviceId{200},
@@ -662,14 +662,14 @@ int main() {
         }));
 
     // Binding references do not rewrite logical or runtime identities.
-    assert(
+    GERDOS_CHECK(
         failed_attempt->binding()->data[0].residency ==
         (DataResidencyRef{
             DataId{500},
             DataResidencyId{5001},
         }));
 
-    assert(
+    GERDOS_CHECK(
         failed_attempt->binding()->resources[0].resource ==
         (ResourceRef{
             DeviceId{200},

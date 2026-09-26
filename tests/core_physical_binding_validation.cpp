@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_check.hpp"
 
 #include "gerdos/core/physical_binding_validation.hpp"
 
@@ -10,7 +10,7 @@ void test_empty_binding_is_valid() {
     PhysicalBindingValidator validator;
     const PhysicalBinding binding{};
 
-    assert(validator.validate(binding));
+    GERDOS_CHECK(validator.validate(binding));
 }
 
 void test_valid_data_roles() {
@@ -32,7 +32,7 @@ void test_valid_data_roles() {
                 },
             });
 
-        assert(validator.validate(binding));
+        GERDOS_CHECK(validator.validate(binding));
     }
 }
 
@@ -53,7 +53,7 @@ void test_valid_resource_roles() {
                 },
             });
 
-        assert(validator.validate(binding));
+        GERDOS_CHECK(validator.validate(binding));
     }
 }
 
@@ -94,7 +94,7 @@ void test_multiple_same_role_bindings_are_valid() {
             },
         });
 
-    assert(validator.validate(binding));
+    GERDOS_CHECK(validator.validate(binding));
 }
 
 void test_mixed_data_and_resource_bindings_are_valid() {
@@ -118,7 +118,7 @@ void test_mixed_data_and_resource_bindings_are_valid() {
             },
         });
 
-    assert(validator.validate(binding));
+    GERDOS_CHECK(validator.validate(binding));
 }
 
 void test_zero_data_id_is_invalid() {
@@ -134,7 +134,7 @@ void test_zero_data_id_is_invalid() {
             },
         });
 
-    assert(!validator.validate(binding));
+    GERDOS_CHECK(!validator.validate(binding));
 }
 
 void test_zero_data_residency_id_is_invalid() {
@@ -150,7 +150,7 @@ void test_zero_data_residency_id_is_invalid() {
             },
         });
 
-    assert(!validator.validate(binding));
+    GERDOS_CHECK(!validator.validate(binding));
 }
 
 void test_zero_device_id_is_invalid() {
@@ -166,7 +166,7 @@ void test_zero_device_id_is_invalid() {
             },
         });
 
-    assert(!validator.validate(binding));
+    GERDOS_CHECK(!validator.validate(binding));
 }
 
 void test_zero_resource_id_is_invalid() {
@@ -182,7 +182,7 @@ void test_zero_resource_id_is_invalid() {
             },
         });
 
-    assert(!validator.validate(binding));
+    GERDOS_CHECK(!validator.validate(binding));
 }
 
 void test_invalid_data_role_is_invalid() {
@@ -198,7 +198,7 @@ void test_invalid_data_role_is_invalid() {
             },
         });
 
-    assert(!validator.validate(binding));
+    GERDOS_CHECK(!validator.validate(binding));
 }
 
 void test_invalid_resource_role_is_invalid() {
@@ -214,7 +214,7 @@ void test_invalid_resource_role_is_invalid() {
             },
         });
 
-    assert(!validator.validate(binding));
+    GERDOS_CHECK(!validator.validate(binding));
 }
 
 } // namespace

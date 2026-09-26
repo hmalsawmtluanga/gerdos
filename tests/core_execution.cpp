@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_check.hpp"
 
 #include "gerdos/core/execution.hpp"
 #include "gerdos/core/physical_binding.hpp"
@@ -13,19 +13,19 @@ int main() {
 
     Execution execution(description);
 
-    assert(execution.description().id == ExecutionId{100});
-    assert(execution.description().operation == OperationId{42});
-    assert(execution.state() == ExecutionState::PENDING);
+    GERDOS_CHECK(execution.description().id == ExecutionId{100});
+    GERDOS_CHECK(execution.description().operation == OperationId{42});
+    GERDOS_CHECK(execution.state() == ExecutionState::PENDING);
 
-    assert(execution.bind(PhysicalBinding{}));
-    assert(execution.set_state(ExecutionState::RUNNING));
-    assert(execution.state() == ExecutionState::RUNNING);
+    GERDOS_CHECK(execution.bind(PhysicalBinding{}));
+    GERDOS_CHECK(execution.set_state(ExecutionState::RUNNING));
+    GERDOS_CHECK(execution.state() == ExecutionState::RUNNING);
 
-    assert(execution.set_state(ExecutionState::COMPLETED));
-    assert(execution.state() == ExecutionState::COMPLETED);
+    GERDOS_CHECK(execution.set_state(ExecutionState::COMPLETED));
+    GERDOS_CHECK(execution.state() == ExecutionState::COMPLETED);
 
-    assert(!execution.set_state(ExecutionState::RUNNING));
-    assert(execution.state() == ExecutionState::COMPLETED);
+    GERDOS_CHECK(!execution.set_state(ExecutionState::RUNNING));
+    GERDOS_CHECK(execution.state() == ExecutionState::COMPLETED);
 
     return 0;
 }
