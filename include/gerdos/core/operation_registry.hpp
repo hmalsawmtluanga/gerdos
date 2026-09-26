@@ -45,6 +45,24 @@ public:
             }
         }
 
+        for (std::size_t i = 0;
+             i < description.resource_requirements.size();
+             ++i) {
+            const auto& requirement =
+                description.resource_requirements[i];
+
+            if (!requirement.valid()) {
+                return nullptr;
+            }
+
+            for (std::size_t j = 0; j < i; ++j) {
+                if (description.resource_requirements[j].role ==
+                    requirement.role) {
+                    return nullptr;
+                }
+            }
+        }
+
         if (operations_.contains(id) || retired_ids_.contains(id)) {
             return nullptr;
         }

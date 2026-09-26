@@ -44,6 +44,69 @@ int main() {
     GERDOS_CHECK(duplicate_operation.description().inputs.size() == 2);
     GERDOS_CHECK(duplicate_operation.description().outputs.size() == 2);
     GERDOS_CHECK(duplicate_operation.description().dependencies.size() == 2);
+    GERDOS_CHECK(
+        duplicate_operation.description().resource_requirements.empty());
+
+    // Resource requirements are declarative role/minimum pairs and are
+    // preserved verbatim.
+    OperationDescription required_participation{
+        OperationId{102},
+        {DataId{50}},
+        {DataId{60}},
+        {},
+        {
+            ResourceRequirement{ResourceBindingRole::COMPUTE, 1},
+            ResourceRequirement{ResourceBindingRole::TRANSFER, 2},
+        },
+    };
+
+    Operation required_operation(std::move(required_participation));
+
+    GERDOS_CHECK(
+        required_operation.description().resource_requirements.size() == 2);
+
+    GERDOS_CHECK(
+        required_operation.description().resource_requirements[0].role ==
+        ResourceBindingRole::COMPUTE);
+
+    GERDOS_CHECK(
+        required_operation.description().resource_requirements[0].minimum ==
+        1);
+
+    GERDOS_CHECK(
+        required_operation.description().resource_requirements[1].role ==
+        ResourceBindingRole::TRANSFER);
+
+    GERDOS_CHECK(
+        required_operation.description().resource_requirements[1].minimum ==
+        2);
+
+    // Requirement structural validity: a requirement must require at least
+    // one entry of a role in the binding role domain.
+    const ResourceRequirement compute_requirement{
+        ResourceBindingRole::COMPUTE,
+        1,
+    };
+
+    const ResourceRequirement transfer_requirement{
+        ResourceBindingRole::TRANSFER,
+        4,
+    };
+
+    const ResourceRequirement vacuous_requirement{
+        ResourceBindingRole::COMPUTE,
+        0,
+    };
+
+    const ResourceRequirement unknown_requirement{
+        static_cast<ResourceBindingRole>(255),
+        1,
+    };
+
+    GERDOS_CHECK(compute_requirement.valid());
+    GERDOS_CHECK(transfer_requirement.valid());
+    GERDOS_CHECK(!vacuous_requirement.valid());
+    GERDOS_CHECK(!unknown_requirement.valid());
 
     return 0;
 }

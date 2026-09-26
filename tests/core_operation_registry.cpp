@@ -131,5 +131,84 @@ int main() {
     GERDOS_CHECK(registry.find_operation(OperationId{101}) == operation_b);
     GERDOS_CHECK(operation_b->description().id == OperationId{101});
 
+    // Declared resource requirements are accepted when every requirement is
+    // structurally valid and roles do not repeat.
+    GERDOS_CHECK(
+        registry.create_operation(
+            OperationDescription{
+                OperationId{110},
+                {DataId{70}},
+                {DataId{71}},
+                {},
+                {
+                    ResourceRequirement{
+                        ResourceBindingRole::COMPUTE,
+                        1,
+                    },
+                    ResourceRequirement{
+                        ResourceBindingRole::TRANSFER,
+                        1,
+                    },
+                },
+            }) != nullptr);
+
+    GERDOS_CHECK(registry.operation_count() == 2);
+
+    // A requirement must require at least one entry.
+    GERDOS_CHECK(
+        registry.create_operation(
+            OperationDescription{
+                OperationId{111},
+                {},
+                {},
+                {},
+                {
+                    ResourceRequirement{
+                        ResourceBindingRole::COMPUTE,
+                        0,
+                    },
+                },
+            }) == nullptr);
+
+    // Requirement roles must belong to the resource binding role domain.
+    GERDOS_CHECK(
+        registry.create_operation(
+            OperationDescription{
+                OperationId{111},
+                {},
+                {},
+                {},
+                {
+                    ResourceRequirement{
+                        static_cast<ResourceBindingRole>(255),
+                        1,
+                    },
+                },
+            }) == nullptr);
+
+    // At most one requirement exists per resource binding role.
+    GERDOS_CHECK(
+        registry.create_operation(
+            OperationDescription{
+                OperationId{111},
+                {},
+                {},
+                {},
+                {
+                    ResourceRequirement{
+                        ResourceBindingRole::COMPUTE,
+                        1,
+                    },
+                    ResourceRequirement{
+                        ResourceBindingRole::COMPUTE,
+                        2,
+                    },
+                },
+            }) == nullptr);
+
+    // Rejected descriptions do not register or consume identities.
+    GERDOS_CHECK(registry.operation_count() == 2);
+    GERDOS_CHECK(registry.find_operation(OperationId{110}) != nullptr);
+
     return 0;
 }
