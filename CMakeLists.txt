@@ -223,3 +223,27 @@ add_test(
     NAME gerdos_core_physical_binding_resolution
     COMMAND gerdos_core_physical_binding_resolution_test
 )
+
+add_executable(gerdos_core_physical_binding_validation_test
+    tests/core_physical_binding_validation.cpp
+)
+
+target_include_directories(gerdos_core_physical_binding_validation_test
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(MSVC)
+    target_compile_options(gerdos_core_physical_binding_validation_test PRIVATE /W4)
+else()
+    target_compile_options(gerdos_core_physical_binding_validation_test PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+    )
+endif()
+
+add_test(
+    NAME gerdos_core_physical_binding_validation
+    COMMAND gerdos_core_physical_binding_validation_test
+)
