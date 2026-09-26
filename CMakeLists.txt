@@ -199,3 +199,27 @@ add_test(
     NAME gerdos_core_execution_adversarial
     COMMAND gerdos_core_execution_adversarial_test
 )
+
+add_executable(gerdos_core_physical_binding_resolution_test
+    tests/core_physical_binding_resolution.cpp
+)
+
+target_include_directories(gerdos_core_physical_binding_resolution_test
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(MSVC)
+    target_compile_options(gerdos_core_physical_binding_resolution_test PRIVATE /W4)
+else()
+    target_compile_options(gerdos_core_physical_binding_resolution_test PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+    )
+endif()
+
+add_test(
+    NAME gerdos_core_physical_binding_resolution
+    COMMAND gerdos_core_physical_binding_resolution_test
+)
