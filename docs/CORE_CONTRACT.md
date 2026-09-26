@@ -1098,9 +1098,11 @@ report when attempts complete.
   attempt
 - polling appends attempts completed since the previous call; polling never
   blocks the runtime on hardware
-- a completion reports only the attempt identity and whether the work
-  succeeded; terminal state transitions, execution effects, and result
-  recording remain the responsibility of the runtime integration layer
+- a completion reports the attempt identity, whether the work succeeded, and
+  the observed duration of the work; the observed duration is evidence
+  measured where the work happened. Terminal state transitions, execution
+  effects, result recording, and measurement capture remain the
+  responsibility of the runtime integration layer
 
 Backend-specific state — vendor handles, queues, streams, events, device
 pointers, and addresses — remains behind this interface and must never appear
@@ -1129,6 +1131,7 @@ as mandatory steps rather than optional advice:
         -> terminal transition
         -> finish effects
         -> result recording
+        -> measurement capture
 
 Beginning an attempt is rejection-atomic: unless the backend accepts the
 attempt, no gate verdict, residency state, execution state, or result is
@@ -1136,9 +1139,9 @@ changed. Given admission succeeded, start effects and the RUNNING transition
 cannot be rejected.
 
 Completion is applied in the fixed sequence: terminal transition, finish
-effects, result recording. Completions for attempts that are not `RUNNING`
-are discarded. Cancellation policy for attempts that have started is a later
-concern.
+effects, result recording, measurement capture. Completions for attempts that
+are not `RUNNING` are discarded. Cancellation policy for attempts that have
+started is a later concern.
 
 The executor holds no scheduling, placement, or retry policy: it advances
 attempts that have already been given a physical binding. Choosing bindings
@@ -1353,6 +1356,42 @@ Measurements should retain sufficient context to establish:
 - measurement confidence
 
 The scheduler should increasingly prefer measured behavior when reliable data
+exists.
+
+## Measurement Records
+
+A measurement record is evidence of one observation. Records are append-only
+and immutable: the measurement registry exposes no removal or mutation of
+recorded evidence.
+
+A record establishes:
+
+- what was measured — the measured quantity
+- where it was measured — the observed Resource
+- under what conditions — the measurement conditions, currently the number
+  of attempts running concurrently at observation
+- when it was measured — the record's position in observation order
+- measurement confidence — the number and recency of supporting
+  observations, reported by queries rather than stored per record
+
+`MeasurementId` values are allocated by the owning Measurement Registry in
+observation order and are never reused; identifier order is observation order.
+Measurement identity is distinct from all other runtime identity.
+
+The first measured quantity is the observed duration of one execution attempt,
+expressed in nanoseconds. Further quantities — such as byte counts — are
+introduced together with the producers that can measure them. Static
+specifications never appear as measurement records.
+
+Measurement capture observes completed attempts: one duration observation is
+recorded for each Resource the attempt bound, carrying the Operation that was
+attempted and the conditions observed at completion. The backend execution
+interface supplies the observed duration, because work is measured where it
+is performed.
+
+Queries summarize observations by subject and quantity and report the
+supporting observation count, the accumulated value, and the most recent
+observation. Planning may prefer measured behavior where sufficient evidence
 exists.
 
 ---
