@@ -1056,12 +1056,14 @@ is intact, so the residency is recorded as existing but not usable.
 Effects application is transactional: a call either applies all of its state
 changes or leaves every residency unchanged and reports rejection. Starting
 effects are rejected when the attempt is already terminal, when a producing
-residency cannot be resolved, or when a binding role value lies outside the
-binding role domains. Finishing effects are rejected when the attempt is not
+residency cannot be resolved, when another live attempt holds a claim on a
+producing residency, or when a binding role value lies outside the binding
+role domains. Finishing effects are rejected when the attempt is not
 terminal, when a producing residency cannot be resolved, when a producing
 residency is not in the update-in-progress state — the update did not start or
-has already finished — or when a binding role value lies outside the binding
-domain. Starting effects are idempotent; finishing effects are single-shot.
+has already finished — when the claim is held by another attempt, or when a
+binding role value lies outside the binding domain. Starting effects are
+idempotent for the claiming attempt; finishing effects are single-shot.
 
 Effects do not apply to attempts that never started: a cancelled PENDING
 attempt has not touched any representation.
@@ -1077,10 +1079,13 @@ external-synchronization rules. Effects do not record results, do not change
 execution state, and do not consult availability, admissibility, topology, or
 measurements.
 
-Concurrent updates to one residency are not arbitrated by these rules. The
-residency state machine's self-transitions make repeated start effects
-harmless; conflict avoidance belongs to semantic execution admissibility and
-planning.
+An update-in-progress is owned by exactly one attempt. Starting effects
+claim the attempt's producing residencies and are rejected while another
+live attempt holds a claim on one of them; repeated starting effects for the
+claiming attempt itself remain idempotent. Finishing effects apply only to
+residencies claimed by the attempt. A claim held by a terminal attempt is
+stale and may be claimed by a later attempt, whose update then governs the
+representation. Leaving the update-in-progress state releases the claim.
 
 ## Representation Movement and Lifetime
 
