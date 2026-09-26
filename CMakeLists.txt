@@ -247,3 +247,25 @@ add_test(
     NAME gerdos_core_physical_binding_validation
     COMMAND gerdos_core_physical_binding_validation_test
 )
+
+add_executable(gerdos_core_execution_admission_test
+    tests/core_execution_admission.cpp
+)
+
+target_include_directories(gerdos_core_execution_admission_test
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(MSVC)
+    target_compile_options(gerdos_core_execution_admission_test PRIVATE /W4)
+else()
+    target_compile_options(gerdos_core_execution_admission_test PRIVATE
+        -Wall -Wextra -Wpedantic
+    )
+endif()
+
+add_test(
+    NAME gerdos_core_execution_admission
+    COMMAND gerdos_core_execution_admission_test
+)
