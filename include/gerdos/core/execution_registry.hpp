@@ -65,10 +65,17 @@ public:
         return it->second.get();
     }
 
+    // Removal is preconditioned on lifecycle state: an in-flight attempt
+    // must be cancelled first, so that its finishing effects remain
+    // applicable.
     [[nodiscard]] bool remove_execution(ExecutionId id) {
         const auto it = executions_.find(id);
 
         if (it == executions_.end()) {
+            return false;
+        }
+
+        if (!is_terminal(it->second->state())) {
             return false;
         }
 

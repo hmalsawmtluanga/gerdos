@@ -843,5 +843,56 @@ int main() {
     GERDOS_CHECK(
         data_registry.find_data(DataId{501}) == data_b);
 
+    // ---------------------------------------------------------------------
+    // Removal preconditions: an updating residency cannot be removed, and
+    // its Data object cannot be removed while the update is in progress.
+    // ---------------------------------------------------------------------
+
+    {
+        DataRegistry guarded_registry;
+
+        Data* guarded = guarded_registry.create_data(
+            DataDescription{
+                DataId{800},
+                "guarded",
+            });
+
+        GERDOS_CHECK(guarded != nullptr);
+
+        GERDOS_CHECK(guarded->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{900},
+                    DataId{800},
+                    ResourceRef{
+                        DeviceId{1},
+                        ResourceId{1},
+                    },
+                    "guard",
+                },
+            }));
+
+        GERDOS_CHECK(!guarded->has_updating_residency());
+
+        auto* guard_record =
+            guarded->find_residency(DataResidencyId{900});
+        GERDOS_CHECK(guard_record != nullptr);
+
+        GERDOS_CHECK(
+            guard_record->set_state(DataResidencyState::TRANSFERRING));
+        GERDOS_CHECK(guarded->has_updating_residency());
+
+        GERDOS_CHECK(!guarded->remove_residency(DataResidencyId{900}));
+        GERDOS_CHECK(!guarded_registry.remove_data(DataId{800}));
+        GERDOS_CHECK(guarded->residency_count() == 1);
+
+        // Resolving the update restores removal.
+        GERDOS_CHECK(guard_record->set_state(DataResidencyState::VALID));
+        GERDOS_CHECK(!guarded->has_updating_residency());
+
+        GERDOS_CHECK(guarded->remove_residency(DataResidencyId{900}));
+        GERDOS_CHECK(guarded_registry.remove_data(DataId{800}));
+    }
+
     return 0;
 }

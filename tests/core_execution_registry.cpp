@@ -83,6 +83,13 @@ int main() {
     GERDOS_CHECK(!registry.remove_execution(ExecutionId{500}));
     GERDOS_CHECK(registry.execution_count() == 3);
 
+    // Removal is preconditioned on lifecycle state: an in-flight attempt
+    // must be cancelled first.
+    GERDOS_CHECK(!registry.remove_execution(ExecutionId{100}));
+    GERDOS_CHECK(registry.execution_count() == 3);
+
+    GERDOS_CHECK(execution->set_state(ExecutionState::CANCELLED));
+
     // Remove and permanently retire an identity.
     GERDOS_CHECK(registry.remove_execution(ExecutionId{100}));
     GERDOS_CHECK(registry.execution_count() == 2);

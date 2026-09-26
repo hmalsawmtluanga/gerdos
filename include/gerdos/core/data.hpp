@@ -134,15 +134,34 @@ public:
         return true;
     }
 
+    // Removal is preconditioned on lifecycle state: a residency whose
+    // update is in progress must be resolved first, so that the attempt
+    // updating it can still apply its finishing effects.
     [[nodiscard]] bool remove_residency(DataResidencyId id) {
         const auto it = residencies_.find(id);
         if (it == residencies_.end()) {
             return false;
         }
 
+        if (it->second->state() == DataResidencyState::TRANSFERRING) {
+            return false;
+        }
+
         retired_residency_ids_.insert(id);
         residencies_.erase(it);
         return true;
+    }
+
+    [[nodiscard]] bool has_updating_residency() const noexcept {
+        for (const auto& [id, residency] : residencies_) {
+            (void)id;
+
+            if (residency->state() == DataResidencyState::TRANSFERRING) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     [[nodiscard]] std::size_t residency_count() const noexcept {
