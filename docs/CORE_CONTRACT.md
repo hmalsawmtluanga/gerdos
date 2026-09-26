@@ -1018,7 +1018,7 @@ Those belong behind backend boundaries.
 
 ---
 
-# 18. Execution Planning
+# 19. Execution Planning
 
 The planner receives:
 
@@ -1052,7 +1052,7 @@ The planner must be able to consider computation and movement together.
 
 ---
 
-# 19. Computation and Movement
+# 20. Computation and Movement
 
 Computation and movement are separate but interacting resources.
 
@@ -1080,7 +1080,7 @@ These are execution mechanisms, not assumptions about a particular model.
 
 ---
 
-# 20. Resource Capacity and Performance
+# 21. Resource Capacity and Performance
 
 GERDOS must distinguish:
 
@@ -1108,7 +1108,7 @@ Measurements must be represented independently from static specifications.
 
 ---
 
-# 21. Measurement
+# 22. Measurement
 
 Measurement represents observed system behavior.
 
@@ -1137,7 +1137,7 @@ exists.
 
 ---
 
-# 22. Resource Graph vs Topology Graph
+# 23. Resource Graph vs Topology Graph
 
 These concepts are related but distinct.
 
@@ -1166,7 +1166,7 @@ The separation allows topology to change without redefining resource identity.
 
 ---
 
-# 23. No Hidden Global State
+# 24. No Hidden Global State
 
 Core runtime state must have explicit ownership and lifetime.
 
@@ -1183,7 +1183,7 @@ This is necessary for:
 
 ---
 
-# 24. No Vendor Leakage
+# 25. No Vendor Leakage
 
 Forbidden:
 
@@ -1199,7 +1199,7 @@ Allowed:
 
 ---
 
-# 25. No Model Leakage
+# 26. No Model Leakage
 
 Forbidden:
 
@@ -1216,7 +1216,7 @@ Allowed:
 
 ---
 
-# 26. Dependency Direction
+# 27. Dependency Direction
 
 The intended dependency direction is:
 
@@ -1238,7 +1238,7 @@ They do not redefine the runtime's fundamental abstractions.
 
 ---
 
-# 27. Architectural Test
+# 28. Architectural Test
 
 Before introducing a subsystem, ask:
 
@@ -1255,7 +1255,7 @@ If these questions cannot be answered, the abstraction is not ready.
 
 ---
 
-# 28. Initial Non-Goals
+# 29. Initial Non-Goals
 
 The following are deliberately not part of the first implementation:
 
@@ -1277,7 +1277,7 @@ These will be introduced only after the core contracts are established.
 
 ---
 
-# 29. Architectural Objective
+# 30. Architectural Objective
 
 The resulting runtime should be capable of representing an execution environment
 such as:
