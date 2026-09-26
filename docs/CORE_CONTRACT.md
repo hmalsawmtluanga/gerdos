@@ -740,6 +740,23 @@ Therefore:
 This distinction is fundamental to scheduling, retries, profiling, and
 reproducibility.
 
+The initial core implementation establishes Execution identity, its
+association with an Operation, and its lifecycle state only.
+
+The initial Execution object does not yet select concrete Resources or Data
+Residencies and does not yet contain backend handles, physical placement,
+transfer paths, execution queues, timing, measurements, result payloads, or
+failure metadata. Those concerns require subsequent contracts.
+
+Execution state transitions are explicit and must be validated by the
+Execution state machine. An Execution may transition from PENDING to RUNNING,
+and from RUNNING to COMPLETED, FAILED, or CANCELLED. PENDING may transition
+directly to CANCELLED. State-preserving transitions are permitted. Terminal
+states are not resurrected into non-terminal states.
+
+A retry is represented by a new Execution associated with the same Operation;
+retry policy and retry limits are outside the initial Execution contract.
+
 ---
 
 # 16. Workload
