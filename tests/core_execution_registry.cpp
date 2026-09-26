@@ -1,6 +1,7 @@
 #include <cassert>
 
 #include "gerdos/core/execution_registry.hpp"
+#include "gerdos/core/physical_binding.hpp"
 
 int main() {
     using namespace gerdos;
@@ -58,6 +59,7 @@ int main() {
     assert(execution != nullptr);
     assert(execution->description().operation == OperationId{42});
 
+    assert(execution->bind(PhysicalBinding{}));
     assert(execution->set_state(ExecutionState::RUNNING));
     assert(execution->state() == ExecutionState::RUNNING);
 
