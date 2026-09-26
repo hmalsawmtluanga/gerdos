@@ -76,3 +76,6 @@ gerdos_add_test(gerdos_core_physical_binding_validation
 gerdos_add_test(gerdos_core_execution_admission
     tests/core_execution_admission.cpp)
 
+gerdos_add_test(gerdos_core_binding_admissibility
+    tests/core_binding_admissibility.cpp)
+
