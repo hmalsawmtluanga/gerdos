@@ -88,6 +88,50 @@ public:
             }
         }
 
+        // Engine-first ordering: compute mechanisms are chosen before
+        // data placement (with no hops — movement hops derive from
+        // placements below), so consuming-copy choice can prefer
+        // engine-local records. Transfer mechanisms follow placement.
+        std::vector<const TopologyLink*> no_hops;
+        for (const auto& requirement :
+             description.resource_requirements) {
+            if (!requirement.valid()) {
+                return std::nullopt;
+            }
+
+            if (requirement.role != ResourceBindingRole::COMPUTE) {
+                continue;
+            }
+
+            const auto chosen = choose_mechanisms(
+                requirement,
+                no_hops,
+                binding);
+
+            if (chosen < requirement.minimum) {
+                return std::nullopt;
+            }
+        }
+
+        std::vector<DeviceId> engines;
+        for (const auto& entry : binding.resources) {
+            if (entry.role != ResourceBindingRole::COMPUTE) {
+                continue;
+            }
+
+            bool known = false;
+            for (const auto engine : engines) {
+                if (engine == entry.resource.device) {
+                    known = true;
+                    break;
+                }
+            }
+
+            if (!known) {
+                engines.push_back(entry.resource.device);
+            }
+        }
+
         for (const auto id : declared) {
             const bool is_input = contains(description.inputs, id);
             const bool is_output = contains(description.outputs, id);
@@ -96,7 +140,7 @@ public:
             const DataResidency* target = nullptr;
 
             if (is_input) {
-                source = choose_source(id);
+                source = choose_source(id, engines);
 
                 if (source == nullptr) {
                     return std::nullopt;
@@ -188,6 +232,12 @@ public:
              description.resource_requirements) {
             if (!requirement.valid()) {
                 return std::nullopt;
+            }
+
+            // Compute mechanisms were chosen before placement; the
+            // remaining roles follow with movement hops.
+            if (requirement.role == ResourceBindingRole::COMPUTE) {
+                continue;
             }
 
             const auto chosen = choose_mechanisms(
@@ -619,8 +669,13 @@ private:
         return resource != nullptr && resource->available();
     }
 
-    [[nodiscard]] const DataResidency* choose_source(DataId id) const
-        noexcept {
+    // Engine-local consuming-copy choice: usable records with
+    // available hosts, ranked engine-local first (home device among the
+    // chosen compute engines — zero staging), then lowest identifiers.
+    // Empty engines (no compute requirement) keep pure identifier order.
+    [[nodiscard]] const DataResidency* choose_source(
+        DataId id,
+        const std::vector<DeviceId>& engines) const noexcept {
         const DataResidency* best = nullptr;
 
         data_.for_each_data(
@@ -637,13 +692,43 @@ private:
                             return;
                         }
 
-                        if (better_record(record, best)) {
+                        if (better_source(record, engines, best)) {
                             best = record;
                         }
                     });
             });
 
         return best;
+    }
+
+    [[nodiscard]] static bool source_local(
+        const DataResidency* record,
+        const std::vector<DeviceId>& engines) noexcept {
+        for (const auto engine : engines) {
+            if (record->description().resource.device == engine) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    [[nodiscard]] static bool better_source(
+        const DataResidency* record,
+        const std::vector<DeviceId>& engines,
+        const DataResidency* best) noexcept {
+        if (best == nullptr) {
+            return true;
+        }
+
+        const bool record_local = source_local(record, engines);
+        const bool best_local = source_local(best, engines);
+
+        if (record_local != best_local) {
+            return record_local;
+        }
+
+        return better_record(record, best);
     }
 
     [[nodiscard]] const DataResidency* choose_target(
