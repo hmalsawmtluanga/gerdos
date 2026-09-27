@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <future>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -25,6 +26,13 @@ namespace gerdos {
 // given.
 class CpuBackend final : public ExecutionBackend {
 public:
+    // Destruction waits for outstanding work: the futures own it.
+    ~CpuBackend() {
+        for (auto& job : jobs_) {
+            (void)job.result.get();
+        }
+    }
+
     // Scenario configuration: the attempt completes unsuccessfully.
     void set_failure(ExecutionId id) {
         failures_.insert(id);
@@ -50,26 +58,31 @@ public:
         }
 
         const bool succeeded = !failures_.contains(id);
-        const auto bytes = work.elements * sizeof(float);
 
-        // Rejection-atomic submission: allocations created here are rolled
-        // back if the work cannot be launched, so a refused submit leaves
-        // nothing behind.
-        std::vector<DataResidencyRef> created;
+        // Rejection-atomic submission: workers hold shared ownership of
+        // their storage, so replacements cannot dangle under a live job,
+        // and a failed launch restores exactly what it changed.
+        std::vector<std::pair<DataResidencyRef, Buffer>> undo;
         jobs_.reserve(jobs_.size() + 1);
 
         try {
-            // Real allocations exist before the work begins, and the
-            // worker receives buffer pointers only.
-            std::vector<float*> buffers;
+            std::vector<Buffer> keeps;
 
             for (const auto& entry : binding->data) {
-                if (!allocations_.contains(entry.residency)) {
-                    created.push_back(entry.residency);
+                const auto& ref = entry.residency;
+                const auto it = allocations_.find(ref);
+
+                if (it == allocations_.end() ||
+                    it->second->size() != work.elements) {
+                    undo.emplace_back(
+                        ref,
+                        it == allocations_.end() ? Buffer{}
+                                                 : it->second);
+                    allocations_[ref] = std::make_shared<
+                        std::vector<float>>(work.elements, 1.0f);
                 }
 
-                buffers.push_back(
-                    allocation(entry.residency, bytes).data());
+                keeps.push_back(allocations_[ref]);
             }
 
             jobs_.push_back(
@@ -78,18 +91,28 @@ public:
                     std::async(
                         std::launch::async,
                         [binding_copy = *binding,
-                         buffers = std::move(buffers),
+                         keeps = std::move(keeps),
                          work,
                          succeeded]() {
+                            std::vector<float*> buffers;
+
+                            for (const auto& keep : keeps) {
+                                buffers.push_back(keep->data());
+                            }
+
                             return run(
                                 binding_copy, buffers, work, succeeded);
                         }),
                 });
         } catch (...) {
-            // The launch failed: nothing was enqueued, and allocations
-            // created for it are released.
-            for (const auto& ref : created) {
-                (void)allocations_.erase(ref);
+            // The launch failed: nothing was enqueued, and every change
+            // made for it is undone.
+            for (const auto& [ref, previous] : undo) {
+                if (previous) {
+                    allocations_[ref] = previous;
+                } else {
+                    (void)allocations_.erase(ref);
+                }
             }
 
             return false;
@@ -131,18 +154,18 @@ public:
         DataResidencyRef ref) const noexcept {
         const auto it = allocations_.find(ref);
 
-        return it == allocations_.end() ? 0 : it->second.size();
+        return it == allocations_.end() ? 0 : it->second->size();
     }
 
     [[nodiscard]] float sample(DataResidencyRef ref, std::size_t index) {
         const auto it = allocations_.find(ref);
 
         if (it == allocations_.end() ||
-            it->second.size() <= index) {
+            it->second->size() <= index) {
             return 0.0f;
         }
 
-        return it->second[index];
+        return (*it->second)[index];
     }
 
     [[nodiscard]] bool allocations_equal(
@@ -153,7 +176,7 @@ public:
 
         return left_it != allocations_.end() &&
                right_it != allocations_.end() &&
-               left_it->second == right_it->second;
+               *left_it->second == *right_it->second;
     }
 
 private:
@@ -167,18 +190,7 @@ private:
         std::future<Outcome> result;
     };
 
-    [[nodiscard]] std::vector<float>& allocation(
-        DataResidencyRef ref,
-        std::size_t bytes) {
-        auto& buffer = allocations_[ref];
-        const auto elements = bytes / sizeof(float);
-
-        if (buffer.size() != elements) {
-            buffer.assign(elements, 1.0f);
-        }
-
-        return buffer;
-    }
+    using Buffer = std::shared_ptr<std::vector<float>>;
 
     // The declared work over the bound representations: exact copying when
     // the description says so, otherwise the affine elementwise transform.
@@ -246,7 +258,7 @@ private:
     }
 
     std::unordered_set<ExecutionId> failures_;
-    std::unordered_map<DataResidencyRef, std::vector<float>> allocations_;
+    std::unordered_map<DataResidencyRef, Buffer> allocations_;
     std::vector<Job> jobs_;
     std::unordered_set<ExecutionId> submitted_;
 };

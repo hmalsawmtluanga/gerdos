@@ -38,6 +38,13 @@ namespace gerdos {
 // are in flight, and destruction waits for outstanding work.
 class HeterogeneousBackend final : public ExecutionBackend {
 public:
+    // Destruction waits for outstanding work: the futures own it.
+    ~HeterogeneousBackend() {
+        for (auto& job : jobs_) {
+            (void)job.result.get();
+        }
+    }
+
     HeterogeneousBackend(
         const DataRegistry& data,
         DeviceId accelerator)
@@ -139,21 +146,30 @@ public:
         const bool succeeded = !failures_.contains(id);
         const auto bytes = work.elements * sizeof(float);
 
-        // Rejection-atomic submission: allocations created here are rolled
-        // back if the work cannot be launched. Workers receive copied
-        // OpenCL handles and storage slots only — never this object's maps.
-        std::vector<DataResidencyRef> created;
+        // Rejection-atomic submission: workers hold shared ownership of
+        // their storage and copied OpenCL handles — never this object's
+        // maps — and a failed launch restores exactly what it changed.
+        std::vector<std::pair<DataResidencyRef, std::optional<Allocation>>>
+            undo;
         jobs_.reserve(jobs_.size() + 1);
 
         try {
             std::vector<Slot> slots;
 
             for (const auto& entry : binding->data) {
-                if (!allocations_.contains(entry.residency)) {
-                    created.push_back(entry.residency);
+                const auto& ref = entry.residency;
+                const auto it = allocations_.find(ref);
+
+                if (it == allocations_.end() ||
+                    it->second.bytes != bytes) {
+                    undo.emplace_back(
+                        ref,
+                        it == allocations_.end()
+                            ? std::optional<Allocation>{}
+                            : std::optional<Allocation>{it->second});
                 }
 
-                slots.push_back(slot_for(entry.residency, bytes));
+                slots.push_back(slot_for(ref, bytes));
             }
 
             jobs_.push_back(
@@ -181,10 +197,14 @@ public:
                         }),
                 });
         } catch (...) {
-            // The launch failed: nothing was enqueued, and allocations
-            // created for it are released.
-            for (const auto& ref : created) {
-                (void)allocations_.erase(ref);
+            // The launch failed: nothing was enqueued, and every change
+            // made for it is undone.
+            for (const auto& [ref, previous] : undo) {
+                if (previous.has_value()) {
+                    allocations_[ref] = *previous;
+                } else {
+                    (void)allocations_.erase(ref);
+                }
             }
 
             return false;
@@ -273,10 +293,12 @@ private:
         std::future<Outcome> result;
     };
 
-    // One real allocation per representation, at its declared home.
+    // One real allocation per representation, at its declared home. Host
+    // storage is shared-owning: workers hold their buffers alive for as
+    // long as they run, so a replacement can never dangle under them.
     struct Allocation {
         bool on_device;
-        std::vector<float> host;
+        std::shared_ptr<std::vector<float>> host;
         cl::Buffer device;
         std::size_t bytes;
     };
@@ -284,7 +306,7 @@ private:
     // What a worker needs, resolved before it starts.
     struct Slot {
         bool on_device;
-        float* host;
+        std::shared_ptr<std::vector<float>> host;
         cl::Buffer device;
         std::size_t bytes;
     };
@@ -324,16 +346,17 @@ private:
             fresh.on_device = on_device;
             fresh.bytes = bytes;
 
-            std::vector<float> initial(bytes / sizeof(float), 1.0f);
+            fresh.host =
+                std::make_shared<std::vector<float>>(
+                    bytes / sizeof(float),
+                    1.0f);
 
             if (on_device) {
                 fresh.device = cl::Buffer(
                     context_,
                     CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
                     bytes,
-                    initial.data());
-            } else {
-                fresh.host = std::move(initial);
+                    fresh.host->data());
             }
 
             it = allocations_.insert_or_assign(ref, std::move(fresh)).first;
@@ -343,7 +366,7 @@ private:
 
         return Slot{
             allocation.on_device,
-            allocation.host.empty() ? nullptr : allocation.host.data(),
+            allocation.host,
             allocation.on_device ? allocation.device : cl::Buffer(),
             allocation.bytes,
         };
@@ -363,7 +386,7 @@ private:
         }
 
         if (!it->second.on_device) {
-            std::memcpy(out, it->second.host.data(), it->second.bytes);
+            std::memcpy(out, it->second.host->data(), it->second.bytes);
             return;
         }
 
@@ -451,7 +474,8 @@ private:
                                              : destination.bytes;
 
         if (!origin.on_device && !destination.on_device) {
-            std::memcpy(destination.host, origin.host, bytes);
+            std::memcpy(
+                destination.host->data(), origin.host->data(), bytes);
             return;
         }
 
@@ -463,10 +487,10 @@ private:
 
         if (destination.on_device) {
             queue.enqueueWriteBuffer(
-                destination.device, CL_TRUE, 0, bytes, origin.host);
+                destination.device, CL_TRUE, 0, bytes, origin.host->data());
         } else {
             queue.enqueueReadBuffer(
-                origin.device, CL_TRUE, 0, bytes, destination.host);
+                origin.device, CL_TRUE, 0, bytes, destination.host->data());
         }
     }
 
@@ -492,7 +516,7 @@ private:
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
                     origin.bytes,
-                    origin.host);
+                    origin.host->data());
             }
 
             if (!destination.on_device) {
@@ -516,7 +540,7 @@ private:
                     CL_TRUE,
                     0,
                     destination.bytes,
-                    destination.host);
+                    destination.host->data());
             }
 
             return;
@@ -536,7 +560,7 @@ private:
                 staged_origin.data());
         } else {
             std::memcpy(
-                staged_origin.data(), origin.host, origin.bytes);
+                staged_origin.data(), origin.host->data(), origin.bytes);
         }
 
         if (destination.on_device) {
@@ -550,7 +574,7 @@ private:
         } else {
             std::memcpy(
                 staged_destination.data(),
-                destination.host,
+                destination.host->data(),
                 destination.bytes);
         }
 
@@ -574,7 +598,7 @@ private:
                 staged_destination.data());
         } else {
             std::memcpy(
-                destination.host,
+                destination.host->data(),
                 staged_destination.data(),
                 destination.bytes);
         }
@@ -610,7 +634,7 @@ private:
 
             if (!destination.on_device) {
                 queue.enqueueReadBuffer(
-                    staged, CL_TRUE, 0, destination.bytes, destination.host);
+                    staged, CL_TRUE, 0, destination.bytes, destination.host->data());
             }
 
             return;
@@ -646,8 +670,8 @@ private:
 
         for (std::size_t pass = 0; pass < work.passes; ++pass) {
             for (std::size_t i = 0; i < elements; ++i) {
-                destination.host[i] =
-                    destination.host[i] * work.destination_scale +
+                (*destination.host)[i] =
+                    (*destination.host)[i] * work.destination_scale +
                     work.constant;
             }
         }
