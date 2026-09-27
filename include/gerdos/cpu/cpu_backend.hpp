@@ -310,6 +310,136 @@ private:
                 continue;
             }
 
+            if (work.form == WorkForm::REDUCE_MIN) {
+                if (!has_source) {
+                    continue;
+                }
+
+                const float* origin = buffers[source_index];
+
+                for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                    float floor = origin[0];
+
+                    for (std::size_t i = 1; i < work.elements; ++i) {
+                        if (origin[i] < floor) {
+                            floor = origin[i];
+                        }
+                    }
+
+                    destination[0] =
+                        destination[0] * work.destination_scale +
+                        floor * work.source_scale + work.constant;
+                }
+
+                continue;
+            }
+
+            if (work.form == WorkForm::ELEMENTWISE_MIN ||
+                work.form == WorkForm::ELEMENTWISE_MAX) {
+                if (consuming.size() < 2 ||
+                    binding.data[consuming[0]].residency.data ==
+                        binding.data[out].residency.data ||
+                    binding.data[consuming[1]].residency.data ==
+                        binding.data[out].residency.data) {
+                    continue;
+                }
+
+                const float* left = buffers[consuming[0]];
+                const float* right = buffers[consuming[1]];
+                const bool take_min =
+                    work.form == WorkForm::ELEMENTWISE_MIN;
+
+                for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                    for (std::size_t i = 0; i < work.elements; ++i) {
+                        const float chosen = take_min
+                            ? (left[i] < right[i] ? left[i] : right[i])
+                            : (left[i] > right[i] ? left[i] : right[i]);
+                        destination[i] =
+                            destination[i] * work.destination_scale +
+                            chosen * work.source_scale + work.constant;
+                    }
+                }
+
+                continue;
+            }
+
+            if (work.form == WorkForm::MASK_SELECT) {
+                if (consuming.size() < 3 ||
+                    binding.data[consuming[0]].residency.data ==
+                        binding.data[out].residency.data ||
+                    binding.data[consuming[1]].residency.data ==
+                        binding.data[out].residency.data ||
+                    binding.data[consuming[2]].residency.data ==
+                        binding.data[out].residency.data) {
+                    continue;
+                }
+
+                const float* predicate = buffers[consuming[0]];
+                const float* first = buffers[consuming[1]];
+                const float* second = buffers[consuming[2]];
+
+                for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                    for (std::size_t i = 0; i < work.elements; ++i) {
+                        const float chosen =
+                            predicate[i] != 0.0f ? first[i] : second[i];
+                        destination[i] =
+                            destination[i] * work.destination_scale +
+                            chosen * work.source_scale + work.constant;
+                    }
+                }
+
+                continue;
+            }
+
+            if (work.form == WorkForm::GATHER) {
+                if (consuming.size() < 2 ||
+                    binding.data[consuming[0]].residency.data ==
+                        binding.data[out].residency.data ||
+                    binding.data[consuming[1]].residency.data ==
+                        binding.data[out].residency.data) {
+                    continue;
+                }
+
+                const float* table = buffers[consuming[0]];
+                const float* indices = buffers[consuming[1]];
+                const auto last =
+                    static_cast<std::int64_t>(work.elements - 1);
+                const float last_float = static_cast<float>(
+                    work.elements - 1);
+
+                for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                    std::vector<float> staged(
+                        table, table + work.elements);
+
+                    for (std::size_t i = 0; i < work.elements; ++i) {
+                        // Hostile index content can never read out of
+                        // bounds: range-check in float first (which also
+                        // folds NaN to zero), cast only inside the range,
+                        // then clamp the integer again against rounding.
+                        const float raw = indices[i];
+                        std::int64_t position = 0;
+
+                        if (raw >= 0.0f && raw <= last_float) {
+                            position = static_cast<std::int64_t>(raw);
+
+                            if (position > last) {
+                                position = last;
+                            }
+                        } else if (raw > last_float) {
+                            position = last;
+                        }
+
+                        destination[i] =
+                            destination[i] * work.destination_scale +
+                            staged[static_cast<std::size_t>(position)] *
+                                work.source_scale +
+                            work.constant;
+                    }
+                }
+
+                continue;
+            }
+
             if (work.form == WorkForm::EXPONENTIAL) {
                 if (!has_source) {
                     continue;

@@ -22,6 +22,16 @@ enum class ModelOp {
     EXPONENTIAL,
     // dst[0] accumulates the maximum of an operand.
     REDUCE_MAX,
+    // dst[0] accumulates the minimum of an operand.
+    REDUCE_MIN,
+    // dst selects the elementwise minimum of two operands.
+    ELEMENTWISE_MIN,
+    // dst selects the elementwise maximum of two operands.
+    ELEMENTWISE_MAX,
+    // dst selects between two values by a nonzero predicate.
+    MASK_SELECT,
+    // dst gathers table values by a clamped index table.
+    GATHER,
     // Move a representation to another home.
     MOVE,
     // Refused by the current algebra — kept so refusal is explicit.
@@ -33,6 +43,7 @@ struct ModelStep {
     ModelOp op;
     std::uint64_t operand_a{0};
     std::uint64_t operand_b{0};
+    std::uint64_t operand_c{0};
     std::uint64_t result{0};
     std::size_t rows{0};
     std::size_t inner{0};
@@ -201,6 +212,165 @@ struct Adaptation {
                         1.0f,
                         0.0f,
                         WorkForm::REDUCE_MAX,
+                    },
+                });
+            break;
+        }
+
+        case ModelOp::REDUCE_MIN: {
+            if (step.rows == 0) {
+                adaptation.refused.push_back(
+                    "REDUCE_MIN without an element count");
+                continue;
+            }
+
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}},
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        0.0f,
+                        1.0f,
+                        0.0f,
+                        WorkForm::REDUCE_MIN,
+                    },
+                });
+            break;
+        }
+
+        case ModelOp::ELEMENTWISE_MIN: {
+            if (step.rows == 0) {
+                adaptation.refused.push_back(
+                    "ELEMENTWISE_MIN without an element count");
+                continue;
+            }
+
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}, DataId{step.operand_b}},
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        0.0f,
+                        1.0f,
+                        0.0f,
+                        WorkForm::ELEMENTWISE_MIN,
+                    },
+                });
+            break;
+        }
+
+        case ModelOp::ELEMENTWISE_MAX: {
+            if (step.rows == 0) {
+                adaptation.refused.push_back(
+                    "ELEMENTWISE_MAX without an element count");
+                continue;
+            }
+
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}, DataId{step.operand_b}},
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        0.0f,
+                        1.0f,
+                        0.0f,
+                        WorkForm::ELEMENTWISE_MAX,
+                    },
+                });
+            break;
+        }
+
+        case ModelOp::MASK_SELECT: {
+            if (step.rows == 0) {
+                adaptation.refused.push_back(
+                    "MASK_SELECT without an element count");
+                continue;
+            }
+
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {
+                        DataId{step.operand_a},
+                        DataId{step.operand_b},
+                        DataId{step.operand_c},
+                    },
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        0.0f,
+                        1.0f,
+                        0.0f,
+                        WorkForm::MASK_SELECT,
+                    },
+                });
+            break;
+        }
+
+        case ModelOp::GATHER: {
+            if (step.rows == 0) {
+                adaptation.refused.push_back(
+                    "GATHER without an element count");
+                continue;
+            }
+
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}, DataId{step.operand_b}},
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        0.0f,
+                        1.0f,
+                        0.0f,
+                        WorkForm::GATHER,
                     },
                 });
             break;

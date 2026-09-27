@@ -74,14 +74,14 @@ public:
             " const __global float* o, float dscale, float sscale,"
             " float bias, ulong passes) {"
             "  size_t i = get_global_id(0);"
-            "  for (ulong p = 0; p < passes; ++p) {"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
             "    d[i] = d[i] * dscale + o[i] * sscale + bias;"
             "  }"
             "}"
             "__kernel void fill(__global float* d, float dscale,"
             " float bias, ulong passes) {"
             "  size_t i = get_global_id(0);"
-            "  for (ulong p = 0; p < passes; ++p) {"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
             "    d[i] = d[i] * dscale + bias;"
             "  }"
             "}"
@@ -92,7 +92,7 @@ public:
             "  size_t index = get_global_id(0);"
             "  ulong i = index / columns;"
             "  ulong j = index % columns;"
-            "  for (ulong p = 0; p < passes; ++p) {"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
             "    float acc = 0.0f;"
             "    for (ulong k = 0; k < inner; ++k) {"
             "      acc += a[i * inner + k] * b[k * columns + j];"
@@ -104,7 +104,7 @@ public:
             " const __global float* o, ulong n, float dscale,"
             " float sscale, float bias, ulong passes) {"
             "  if (get_global_id(0) != 0) { return; }"
-            "  for (ulong p = 0; p < passes; ++p) {"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
             "    float sum = 0.0f;"
             "    for (ulong k = 0; k < n; ++k) { sum += o[k]; }"
             "    d[0] = d[0] * dscale + sum * sscale + bias;"
@@ -114,7 +114,7 @@ public:
             " const __global float* o, float dscale, float sscale,"
             " float bias, ulong passes) {"
             "  size_t i = get_global_id(0);"
-            "  for (ulong p = 0; p < passes; ++p) {"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
             "    d[i] = d[i] * dscale + exp(o[i]) * sscale + bias;"
             "  }"
             "}"
@@ -122,12 +122,69 @@ public:
             " const __global float* o, ulong n, float dscale,"
             " float sscale, float bias, ulong passes) {"
             "  if (get_global_id(0) != 0) { return; }"
-            "  for (ulong p = 0; p < passes; ++p) {"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
             "    float peak = o[0];"
             "    for (ulong k = 1; k < n; ++k) {"
             "      peak = fmax(peak, o[k]);"
             "    }"
             "    d[0] = d[0] * dscale + peak * sscale + bias;"
+            "  }"
+            "}"
+            "__kernel void reduce_min(__global float* d,"
+            " const __global float* o, ulong n, float dscale,"
+            " float sscale, float bias, ulong passes) {"
+            "  if (get_global_id(0) != 0) { return; }"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
+            "    float floor_value = o[0];"
+            "    for (ulong k = 1; k < n; ++k) {"
+            "      floor_value = fmin(floor_value, o[k]);"
+            "    }"
+            "    d[0] = d[0] * dscale + floor_value * sscale + bias;"
+            "  }"
+            "}"
+            "__kernel void elementwise_min(__global float* d,"
+            " const __global float* a, const __global float* b,"
+            " float dscale, float sscale, float bias, ulong passes) {"
+            "  size_t i = get_global_id(0);"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
+            "    d[i] = d[i] * dscale + fmin(a[i], b[i]) * sscale + bias;"
+            "  }"
+            "}"
+            "__kernel void elementwise_max(__global float* d,"
+            " const __global float* a, const __global float* b,"
+            " float dscale, float sscale, float bias, ulong passes) {"
+            "  size_t i = get_global_id(0);"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
+            "    d[i] = d[i] * dscale + fmax(a[i], b[i]) * sscale + bias;"
+            "  }"
+            "}"
+            "__kernel void mask_select(__global float* d,"
+            " const __global float* m, const __global float* a,"
+            " const __global float* b,"
+            " float dscale, float sscale, float bias, ulong passes) {"
+            "  size_t i = get_global_id(0);"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
+            "    float chosen = (m[i] != 0.0f) ? a[i] : b[i];"
+            "    d[i] = d[i] * dscale + chosen * sscale + bias;"
+            "  }"
+            "}"
+            "__kernel void gather(__global float* d,"
+            " const __global float* v, const __global float* idx,"
+            " ulong n, float dscale, float sscale, float bias,"
+            " ulong passes) {"
+            "  size_t i = get_global_id(0);"
+            "  float last_value = (float) (n - 1);"
+            "  long last = (long) (n - 1);"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
+            "    float raw = idx[i];"
+            "    long position = 0;"
+            "    if (raw >= 0.0f && raw <= last_value) {"
+            "      position = (long) raw;"
+            "      position = position > last ? last : position;"
+            "    } else if (raw > last_value) {"
+            "      position = last;"
+            "    }"
+            "    d[i] = d[i] * dscale + v[position] * sscale + bias;"
             "  }"
             "}");
 
@@ -518,6 +575,80 @@ private:
                     device,
                     program,
                     slots[source_index],
+                    destination,
+                    queue,
+                    gpu,
+                    work);
+                continue;
+            }
+
+            if (work.form == WorkForm::REDUCE_MIN && has_source) {
+                reduce_min(
+                    context,
+                    device,
+                    program,
+                    slots[source_index],
+                    destination,
+                    queue,
+                    gpu,
+                    work);
+                continue;
+            }
+
+            if ((work.form == WorkForm::ELEMENTWISE_MIN ||
+                 work.form == WorkForm::ELEMENTWISE_MAX) &&
+                consuming.size() >= 2 &&
+                binding.data[consuming[0]].residency.data !=
+                    binding.data[out].residency.data &&
+                binding.data[consuming[1]].residency.data !=
+                    binding.data[out].residency.data) {
+                elementwise_select(
+                    context,
+                    device,
+                    program,
+                    slots[consuming[0]],
+                    slots[consuming[1]],
+                    destination,
+                    queue,
+                    gpu,
+                    work);
+                continue;
+            }
+
+            if (work.form == WorkForm::MASK_SELECT &&
+                consuming.size() >= 3 &&
+                binding.data[consuming[0]].residency.data !=
+                    binding.data[out].residency.data &&
+                binding.data[consuming[1]].residency.data !=
+                    binding.data[out].residency.data &&
+                binding.data[consuming[2]].residency.data !=
+                    binding.data[out].residency.data) {
+                mask_select(
+                    context,
+                    device,
+                    program,
+                    slots[consuming[0]],
+                    slots[consuming[1]],
+                    slots[consuming[2]],
+                    destination,
+                    queue,
+                    gpu,
+                    work);
+                continue;
+            }
+
+            if (work.form == WorkForm::GATHER &&
+                consuming.size() >= 2 &&
+                binding.data[consuming[0]].residency.data !=
+                    binding.data[out].residency.data &&
+                binding.data[consuming[1]].residency.data !=
+                    binding.data[out].residency.data) {
+                gather(
+                    context,
+                    device,
+                    program,
+                    slots[consuming[0]],
+                    slots[consuming[1]],
                     destination,
                     queue,
                     gpu,
@@ -1174,6 +1305,502 @@ private:
                 destination.host->data(),
                 staged_destination.data(),
                 destination.bytes);
+        }
+    }
+
+    // The min-reduction form: dst[0] = dst[0] * destination_scale +
+    // source_scale * min(src) + constant.
+    static void reduce_min(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
+        const Slot& origin,
+        const Slot& destination,
+        cl::CommandQueue& queue,
+        bool gpu,
+        const WorkDescription& work) {
+        const auto count = work.elements;
+
+        if (gpu) {
+            cl::Buffer staged_origin = origin.device;
+            cl::Buffer staged_destination = destination.device;
+
+            if (!origin.on_device) {
+                staged_origin = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    origin.bytes,
+                    origin.host->data());
+            }
+
+            if (!destination.on_device) {
+                staged_destination = cl::Buffer(
+                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+            }
+
+            cl::Kernel kernel(program, "reduce_min");
+            kernel.setArg(0, staged_destination);
+            kernel.setArg(1, staged_origin);
+            kernel.setArg(2, static_cast<cl_ulong>(count));
+            kernel.setArg(3, work.destination_scale);
+            kernel.setArg(4, work.source_scale);
+            kernel.setArg(5, work.constant);
+            kernel.setArg(6, static_cast<cl_ulong>(work.passes));
+            queue.enqueueNDRangeKernel(
+                kernel, cl::NullRange, cl::NDRange(1));
+
+            if (!destination.on_device) {
+                queue.enqueueReadBuffer(
+                    staged_destination,
+                    CL_TRUE,
+                    0,
+                    destination.bytes,
+                    destination.host->data());
+            }
+
+            return;
+        }
+
+        std::vector<float> staged_origin(count, 1.0f);
+        std::vector<float> staged_destination(1, 1.0f);
+
+        if (origin.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueReadBuffer(
+                origin.device,
+                CL_TRUE,
+                0,
+                count * sizeof(float),
+                staged_origin.data());
+        } else {
+            std::memcpy(
+                staged_origin.data(),
+                origin.host->data(),
+                count * sizeof(float));
+        }
+
+        if (destination.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueReadBuffer(
+                destination.device,
+                CL_TRUE,
+                0,
+                sizeof(float),
+                staged_destination.data());
+        } else {
+            staged_destination[0] = (*destination.host)[0];
+        }
+
+        for (std::size_t pass = 0; pass < work.passes; ++pass) {
+            float floor_value = staged_origin[0];
+
+            for (std::size_t i = 1; i < count; ++i) {
+                if (staged_origin[i] < floor_value) {
+                    floor_value = staged_origin[i];
+                }
+            }
+
+            staged_destination[0] =
+                staged_destination[0] * work.destination_scale +
+                floor_value * work.source_scale + work.constant;
+        }
+
+        if (destination.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueWriteBuffer(
+                destination.device,
+                CL_TRUE,
+                0,
+                sizeof(float),
+                staged_destination.data());
+        } else {
+            (*destination.host)[0] = staged_destination[0];
+        }
+    }
+
+    // The two-operand elementwise selection: min or max of A and B under
+    // the affine wrapper.
+    static void elementwise_select(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
+        const Slot& left,
+        const Slot& right,
+        const Slot& destination,
+        cl::CommandQueue& queue,
+        bool gpu,
+        const WorkDescription& work) {
+        const auto elements = work.elements;
+        const char* name = work.form == WorkForm::ELEMENTWISE_MIN
+            ? "elementwise_min"
+            : "elementwise_max";
+
+        if (gpu) {
+            cl::Buffer staged_left = left.device;
+            cl::Buffer staged_right = right.device;
+            cl::Buffer staged_destination = destination.device;
+
+            if (!left.on_device) {
+                staged_left = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    left.bytes,
+                    left.host->data());
+            }
+
+            if (!right.on_device) {
+                staged_right = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    right.bytes,
+                    right.host->data());
+            }
+
+            if (!destination.on_device) {
+                staged_destination = cl::Buffer(
+                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+            }
+
+            cl::Kernel kernel(program, name);
+            kernel.setArg(0, staged_destination);
+            kernel.setArg(1, staged_left);
+            kernel.setArg(2, staged_right);
+            kernel.setArg(3, work.destination_scale);
+            kernel.setArg(4, work.source_scale);
+            kernel.setArg(5, work.constant);
+            kernel.setArg(6, static_cast<cl_ulong>(work.passes));
+            queue.enqueueNDRangeKernel(
+                kernel, cl::NullRange, cl::NDRange(elements));
+
+            if (!destination.on_device) {
+                queue.enqueueReadBuffer(
+                    staged_destination,
+                    CL_TRUE,
+                    0,
+                    destination.bytes,
+                    destination.host->data());
+            }
+
+            return;
+        }
+
+        std::vector<float> staged_left(elements, 1.0f);
+        std::vector<float> staged_right(elements, 1.0f);
+        std::vector<float> staged_destination(elements, 1.0f);
+        stage_pair(
+            context,
+            device,
+            left,
+            right,
+            destination,
+            staged_left,
+            staged_right,
+            staged_destination);
+
+        const bool take_min = work.form == WorkForm::ELEMENTWISE_MIN;
+
+        for (std::size_t pass = 0; pass < work.passes; ++pass) {
+            for (std::size_t i = 0; i < elements; ++i) {
+                const float chosen = take_min
+                    ? (staged_left[i] < staged_right[i] ? staged_left[i]
+                                                       : staged_right[i])
+                    : (staged_left[i] > staged_right[i] ? staged_left[i]
+                                                       : staged_right[i]);
+                staged_destination[i] =
+                    staged_destination[i] * work.destination_scale +
+                    chosen * work.source_scale + work.constant;
+            }
+        }
+
+        write_back(context, device, destination, staged_destination);
+    }
+
+    // The three-operand predicate selection: P != 0 ? A : B under the
+    // affine wrapper.
+    static void mask_select(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
+        const Slot& predicate,
+        const Slot& first,
+        const Slot& second,
+        const Slot& destination,
+        cl::CommandQueue& queue,
+        bool gpu,
+        const WorkDescription& work) {
+        const auto elements = work.elements;
+
+        if (gpu) {
+            cl::Buffer staged_predicate = predicate.device;
+            cl::Buffer staged_first = first.device;
+            cl::Buffer staged_second = second.device;
+            cl::Buffer staged_destination = destination.device;
+
+            if (!predicate.on_device) {
+                staged_predicate = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    predicate.bytes,
+                    predicate.host->data());
+            }
+
+            if (!first.on_device) {
+                staged_first = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    first.bytes,
+                    first.host->data());
+            }
+
+            if (!second.on_device) {
+                staged_second = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    second.bytes,
+                    second.host->data());
+            }
+
+            if (!destination.on_device) {
+                staged_destination = cl::Buffer(
+                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+            }
+
+            cl::Kernel kernel(program, "mask_select");
+            kernel.setArg(0, staged_destination);
+            kernel.setArg(1, staged_predicate);
+            kernel.setArg(2, staged_first);
+            kernel.setArg(3, staged_second);
+            kernel.setArg(4, work.destination_scale);
+            kernel.setArg(5, work.source_scale);
+            kernel.setArg(6, work.constant);
+            kernel.setArg(7, static_cast<cl_ulong>(work.passes));
+            queue.enqueueNDRangeKernel(
+                kernel, cl::NullRange, cl::NDRange(elements));
+
+            if (!destination.on_device) {
+                queue.enqueueReadBuffer(
+                    staged_destination,
+                    CL_TRUE,
+                    0,
+                    destination.bytes,
+                    destination.host->data());
+            }
+
+            return;
+        }
+
+        std::vector<float> staged_predicate(elements, 1.0f);
+        std::vector<float> staged_first(elements, 1.0f);
+        std::vector<float> staged_second(elements, 1.0f);
+        std::vector<float> staged_destination(elements, 1.0f);
+        stage_triple(
+            context,
+            device,
+            predicate,
+            first,
+            second,
+            destination,
+            staged_predicate,
+            staged_first,
+            staged_second,
+            staged_destination);
+
+        for (std::size_t pass = 0; pass < work.passes; ++pass) {
+            for (std::size_t i = 0; i < elements; ++i) {
+                const float chosen = staged_predicate[i] != 0.0f
+                    ? staged_first[i]
+                    : staged_second[i];
+                staged_destination[i] =
+                    staged_destination[i] * work.destination_scale +
+                    chosen * work.source_scale + work.constant;
+            }
+        }
+
+        write_back(context, device, destination, staged_destination);
+    }
+
+    // The gather form: the value table indexed by the truncated and
+    // clamped index table, under the affine wrapper.
+    static void gather(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
+        const Slot& table,
+        const Slot& indices,
+        const Slot& destination,
+        cl::CommandQueue& queue,
+        bool gpu,
+        const WorkDescription& work) {
+        const auto elements = work.elements;
+
+        if (gpu) {
+            cl::Buffer staged_table = table.device;
+            cl::Buffer staged_indices = indices.device;
+            cl::Buffer staged_destination = destination.device;
+
+            if (!table.on_device) {
+                staged_table = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    table.bytes,
+                    table.host->data());
+            }
+
+            if (!indices.on_device) {
+                staged_indices = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    indices.bytes,
+                    indices.host->data());
+            }
+
+            if (!destination.on_device) {
+                staged_destination = cl::Buffer(
+                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+            }
+
+            cl::Kernel kernel(program, "gather");
+            kernel.setArg(0, staged_destination);
+            kernel.setArg(1, staged_table);
+            kernel.setArg(2, staged_indices);
+            kernel.setArg(3, static_cast<cl_ulong>(elements));
+            kernel.setArg(4, work.destination_scale);
+            kernel.setArg(5, work.source_scale);
+            kernel.setArg(6, work.constant);
+            kernel.setArg(7, static_cast<cl_ulong>(work.passes));
+            queue.enqueueNDRangeKernel(
+                kernel, cl::NullRange, cl::NDRange(elements));
+
+            if (!destination.on_device) {
+                queue.enqueueReadBuffer(
+                    staged_destination,
+                    CL_TRUE,
+                    0,
+                    destination.bytes,
+                    destination.host->data());
+            }
+
+            return;
+        }
+
+        std::vector<float> staged_table(elements, 1.0f);
+        std::vector<float> staged_indices(elements, 1.0f);
+        std::vector<float> staged_destination(elements, 1.0f);
+        stage_pair(
+            context,
+            device,
+            table,
+            indices,
+            destination,
+            staged_table,
+            staged_indices,
+            staged_destination);
+
+        const auto last = static_cast<std::int64_t>(elements - 1);
+        const float last_float = static_cast<float>(elements - 1);
+
+        for (std::size_t pass = 0; pass < work.passes; ++pass) {
+            const std::vector<float> values = staged_table;
+
+            for (std::size_t i = 0; i < elements; ++i) {
+                const float raw = staged_indices[i];
+                std::int64_t position = 0;
+
+                if (raw >= 0.0f && raw <= last_float) {
+                    position = static_cast<std::int64_t>(raw);
+
+                    if (position > last) {
+                        position = last;
+                    }
+                } else if (raw > last_float) {
+                    position = last;
+                }
+
+                staged_destination[i] =
+                    staged_destination[i] * work.destination_scale +
+                    values[static_cast<std::size_t>(position)] *
+                        work.source_scale +
+                    work.constant;
+            }
+        }
+
+        write_back(context, device, destination, staged_destination);
+    }
+
+    // Stage one operand pair plus the destination into host scratch.
+    static void stage_pair(
+        const cl::Context& context,
+        const cl::Device& device,
+        const Slot& left,
+        const Slot& right,
+        const Slot& destination,
+        std::vector<float>& staged_left,
+        std::vector<float>& staged_right,
+        std::vector<float>& staged_destination) {
+        stage_one(context, device, left, staged_left);
+        stage_one(context, device, right, staged_right);
+        stage_one(context, device, destination, staged_destination);
+    }
+
+    // Stage a predicate triple plus the destination into host scratch.
+    static void stage_triple(
+        const cl::Context& context,
+        const cl::Device& device,
+        const Slot& predicate,
+        const Slot& first,
+        const Slot& second,
+        const Slot& destination,
+        std::vector<float>& staged_predicate,
+        std::vector<float>& staged_first,
+        std::vector<float>& staged_second,
+        std::vector<float>& staged_destination) {
+        stage_one(context, device, predicate, staged_predicate);
+        stage_one(context, device, first, staged_first);
+        stage_one(context, device, second, staged_second);
+        stage_one(context, device, destination, staged_destination);
+    }
+
+    // Stage one slot into host scratch.
+    static void stage_one(
+        const cl::Context& context,
+        const cl::Device& device,
+        const Slot& slot,
+        std::vector<float>& staged) {
+        if (slot.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueReadBuffer(
+                slot.device,
+                CL_TRUE,
+                0,
+                staged.size() * sizeof(float),
+                staged.data());
+        } else {
+            std::memcpy(
+                staged.data(),
+                slot.host->data(),
+                staged.size() * sizeof(float));
+        }
+    }
+
+    // Write host scratch back to the destination home.
+    static void write_back(
+        const cl::Context& context,
+        const cl::Device& device,
+        const Slot& destination,
+        const std::vector<float>& staged) {
+        if (destination.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueWriteBuffer(
+                destination.device,
+                CL_TRUE,
+                0,
+                staged.size() * sizeof(float),
+                staged.data());
+        } else {
+            std::memcpy(
+                destination.host->data(),
+                staged.data(),
+                staged.size() * sizeof(float));
         }
     }
 

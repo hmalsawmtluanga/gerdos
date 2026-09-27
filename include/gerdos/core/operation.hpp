@@ -50,6 +50,24 @@ enum class WorkForm : std::uint8_t {
     // dst[0] = dst[0] * destination_scale + source_scale * max(src) +
     // constant; the remaining elements are left alone.
     REDUCE_MAX,
+    // dst[0] = dst[0] * destination_scale + source_scale * min(src) +
+    // constant; the remaining elements are left alone.
+    REDUCE_MIN,
+    // dst = dst * destination_scale + source_scale * min(A, B) +
+    // constant, elementwise over the first two consuming entries.
+    ELEMENTWISE_MIN,
+    // dst = dst * destination_scale + source_scale * max(A, B) +
+    // constant, elementwise over the first two consuming entries.
+    ELEMENTWISE_MAX,
+    // dst = dst * destination_scale + source_scale * (P != 0 ? A : B)
+    // + constant, elementwise over the first three consuming entries
+    // (predicate, value A, value B).
+    MASK_SELECT,
+    // dst = dst * destination_scale + source_scale * V[clamp(I)] +
+    // constant, elementwise over the first two consuming entries (value
+    // table, index table). Indices truncate toward zero and clamp into
+    // the table range.
+    GATHER,
 };
 
 // The declared computation of an attempt, expressed as generic data-parallel
@@ -59,8 +77,12 @@ enum class WorkForm : std::uint8_t {
 // or, for compute shapes, the first consuming entry. Shape fields are
 // interpreted by form. The exponential form applies the affine wrapper
 // around exp(src); the max-reduction form folds the operand maximum into
-// dst[0] and leaves the remaining elements alone. Gates never inspect the
-// work; backends interpret it at the seam.
+// dst[0] and leaves the remaining elements alone. The min-reduction form
+// mirrors it; the two-operand min/max forms read the first two consuming
+// entries; the predicate selection reads the first three (predicate, A,
+// B); the gather form reads the value table and the index table from the
+// first two. Gates never inspect the work; backends interpret it at the
+// seam.
 struct WorkDescription {
     std::size_t elements{0};
     std::size_t passes{0};
@@ -84,6 +106,11 @@ struct WorkDescription {
         case WorkForm::REDUCE_SUM:
         case WorkForm::EXPONENTIAL:
         case WorkForm::REDUCE_MAX:
+        case WorkForm::REDUCE_MIN:
+        case WorkForm::ELEMENTWISE_MIN:
+        case WorkForm::ELEMENTWISE_MAX:
+        case WorkForm::MASK_SELECT:
+        case WorkForm::GATHER:
             return elements > 0 && passes > 0 && elements <= limit;
         case WorkForm::MATRIX_PRODUCT:
             return rows > 0 && inner > 0 && columns > 0 && passes > 0 &&
