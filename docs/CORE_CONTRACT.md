@@ -1256,6 +1256,13 @@ sampled ahead of a measured one, so new and never-tried mechanisms are
 not starved by a first impression — including later arrivals, which
 start at zero observations and therefore earn exactly one bounded
 re-exploration sample against measured incumbents before means decide.
+The bound is per-comparison: an unmeasured candidate wins only while
+the measured incumbent is unproven (fewer than two successes); against
+a proven incumbent the measured behavior stands and the newcomer waits.
+This closes the churn residual — an endless stream of never-tried
+mechanisms cannot steal every plan from a proven winner — at the stated
+cost of late-arrival starvation past proof, which is disclosed here
+rather than hidden in a global counter.
 Ties among unmeasured candidates break by declared attributes,
 deterministically. Once measured, candidates rank by mean observed
 successful duration: measured behavior outranks declared attributes,
@@ -1335,9 +1342,13 @@ algebra changes no gate.
 Well-formed work is executable work: the seam rejects work descriptions
 with zero elements, zero passes, or sizing that cannot be allocated —
 hostile arithmetic must never reach an allocation or a kernel, and a
-vacuous success is not speed evidence. Matrix shapes additionally require
-non-zero rows, inner, and columns with products that cannot overflow.
-Identity registration accepts any declared work because registration is not
+vacuous success is not speed evidence. Sizing is bounded by the F32
+compute scratch every engine stages (four bytes per element), not just
+by stored bytes: element counts that would overflow the scratch are
+ill-formed even where a narrow stored width could address them.
+Matrix shapes additionally require non-zero rows, inner, and columns
+with products that cannot overflow the same scratch bound. Identity
+registration accepts any declared work because registration is not
 execution.
 
 When the source is the destination record, the transform is defined as the
@@ -1528,7 +1539,11 @@ free update claims, the RUNNING transition cannot be rejected.
 
 Completion is applied in the fixed sequence: terminal transition, finish
 effects, result recording, measurement capture. Completions for attempts that
-are not `RUNNING` are discarded. Every applied completion is reported with
+are not `RUNNING` are discarded. A worker that throws instead of
+returning an outcome (allocation failure under pressure, however
+rare) is contained at the seam: its completion is reported as failed
+with zero duration, bookkeeping intact — exceptions never escape the
+backend's poll or destructor. Every applied completion is reported with
 its integrity: a completion whose finishing effects were rejected is reported
 as incoherent and its result is recorded as `EFFECTS_REJECTED`; nothing in the
 completion path discards an effects verdict.
