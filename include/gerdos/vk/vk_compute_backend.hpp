@@ -17,6 +17,7 @@
 
 #include "gerdos/core/data_registry.hpp"
 #include "gerdos/core/dtype.hpp"
+#include "gerdos/core/work_pool.hpp"
 #include "gerdos/core/execution_backend.hpp"
 #include "gerdos/vk/vk_shaders.hpp"
 
@@ -138,24 +139,25 @@ public:
                 slots.push_back(slot_for(ref, bytes, work.dtype));
             }
 
-            jobs_.push_back(
-                Job{
-                    id,
-                    std::async(
-                        std::launch::async,
-                        [context = context_,
-                         binding_copy = *binding,
-                         slots = std::move(slots),
-                         work,
-                         succeeded]() {
-                            return run(
-                                context,
-                                binding_copy,
-                                slots,
-                                work,
-                                succeeded);
-                        }),
+            auto launched = pool_.try_submit(
+                [context = context_,
+                 binding_copy = *binding,
+                 slots = std::move(slots),
+                 work,
+                 succeeded]() {
+                    return run(
+                        context,
+                        binding_copy,
+                        slots,
+                        work,
+                        succeeded);
                 });
+
+            if (!launched.has_value()) {
+                throw std::bad_alloc();
+            }
+
+            jobs_.push_back(Job{id, std::move(*launched)});
         } catch (...) {
             for (const auto& [ref, previous] : undo) {
                 if (previous.has_value()) {
@@ -1784,6 +1786,7 @@ private:
 
     std::unordered_set<ExecutionId> failures_;
     std::unordered_map<DataResidencyRef, Allocation> allocations_;
+    WorkPool pool_;
     std::vector<Job> jobs_;
     std::unordered_set<ExecutionId> submitted_;
 };

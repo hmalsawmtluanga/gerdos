@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "gerdos/core/dtype.hpp"
+#include "gerdos/core/work_pool.hpp"
 #include "gerdos/core/execution_backend.hpp"
 #include "gerdos/core/physical_binding.hpp"
 
@@ -119,26 +120,27 @@ public:
                 dtypes.push_back(it->second.dtype);
             }
 
-            jobs_.push_back(
-                Job{
-                    id,
-                    std::async(
-                        std::launch::async,
-                        [binding_copy = *binding,
-                         keeps = std::move(keeps),
-                         dtypes = std::move(dtypes),
-                         work,
-                         succeeded]() {
-                            std::vector<unsigned char*> buffers;
+            auto launched = pool_.try_submit(
+                [binding_copy = *binding,
+                 keeps = std::move(keeps),
+                 dtypes = std::move(dtypes),
+                 work,
+                 succeeded]() {
+                    std::vector<unsigned char*> buffers;
 
-                            for (const auto& keep : keeps) {
-                                buffers.push_back(keep->data());
-                            }
+                    for (const auto& keep : keeps) {
+                        buffers.push_back(keep->data());
+                    }
 
-                            return run(
-                                binding_copy, buffers, dtypes, work, succeeded);
-                        }),
+                    return run(
+                        binding_copy, buffers, dtypes, work, succeeded);
                 });
+
+            if (!launched.has_value()) {
+                throw std::bad_alloc();
+            }
+
+            jobs_.push_back(Job{id, std::move(*launched)});
         } catch (...) {
             // The launch failed: nothing was enqueued, and every change
             // made for it is undone.
@@ -596,6 +598,7 @@ private:
 
     std::unordered_set<ExecutionId> failures_;
     std::unordered_map<DataResidencyRef, Allocation> allocations_;
+    WorkPool pool_;
     std::vector<Job> jobs_;
     std::unordered_set<ExecutionId> submitted_;
 };

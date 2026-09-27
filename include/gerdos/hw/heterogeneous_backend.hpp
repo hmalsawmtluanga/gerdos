@@ -13,6 +13,7 @@
 #include <CL/opencl.hpp>
 
 #include "gerdos/core/data_registry.hpp"
+#include "gerdos/core/work_pool.hpp"
 #include "gerdos/core/dtype.hpp"
 #include "gerdos/core/execution_backend.hpp"
 
@@ -375,32 +376,33 @@ public:
                 slots.push_back(slot_for(ref, bytes, work.dtype));
             }
 
-            jobs_.push_back(
-                Job{
-                    id,
-                    std::async(
-                        std::launch::async,
-                        [context = context_,
-                         device = device_,
-                         program = program_,
-                         binding_copy = *binding,
-                         slots = std::move(slots),
-                         work,
-                         succeeded,
-                         gpu,
-                         tiled = tiled_ok_]() {
-                            return run(
-                                context,
-                                device,
-                                program,
-                                binding_copy,
-                                slots,
-                                work,
-                                succeeded,
-                                gpu,
-                                tiled);
-                        }),
+            auto launched = pool_.try_submit(
+                [context = context_,
+                 device = device_,
+                 program = program_,
+                 binding_copy = *binding,
+                 slots = std::move(slots),
+                 work,
+                 succeeded,
+                 gpu,
+                 tiled = tiled_ok_]() {
+                    return run(
+                        context,
+                        device,
+                        program,
+                        binding_copy,
+                        slots,
+                        work,
+                        succeeded,
+                        gpu,
+                        tiled);
                 });
+
+            if (!launched.has_value()) {
+                throw std::bad_alloc();
+            }
+
+            jobs_.push_back(Job{id, std::move(*launched)});
         } catch (...) {
             // The launch failed: nothing was enqueued, and every change
             // made for it is undone.
@@ -2189,6 +2191,7 @@ private:
 
     std::unordered_set<ExecutionId> failures_;
     std::unordered_map<DataResidencyRef, Allocation> allocations_;
+    WorkPool pool_;
     std::vector<Job> jobs_;
     std::unordered_set<ExecutionId> submitted_;
 };
