@@ -1,5 +1,7 @@
 #include "test_check.hpp"
 
+#include <cmath>
+#include <cstdio>
 #include <optional>
 #include <vector>
 
@@ -428,6 +430,209 @@ int main() {
             backend.sample(
                 DataResidencyRef{DataId{702}, DataResidencyId{7003}},
                 3) == 3.0f);
+    }
+
+    // ---------------------------------------------------------------------
+    // 6. The new normalization forms execute on the accelerator engine
+    // ---------------------------------------------------------------------
+
+    {
+        auto* source = machine.data.create_data(
+            DataDescription{DataId{710}, "source"});
+        (void)source->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7101},
+                    DataId{710},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "source",
+                },
+            });
+
+        auto* peak = machine.data.create_data(
+            DataDescription{DataId{711}, "peak"});
+        (void)peak->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7102},
+                    DataId{711},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "peak",
+                },
+            });
+
+        auto* raised = machine.data.create_data(
+            DataDescription{DataId{712}, "raised"});
+        (void)raised->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7103},
+                    DataId{712},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "raised",
+                },
+            });
+
+        // Chain the same discriminating operand as the CPU engine test:
+        // the uniform source folds to 6, the maximum of [6,1,1,1,1,1]
+        // is 6, and exp(6) differs from exp(1) by two orders of
+        // magnitude.
+        OperationDescription reduce{
+            OperationId{820},
+            {DataId{710}},
+            {DataId{711}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+        };
+
+        const Operation reduce_operation{reduce};
+        Execution reduce_attempt{
+            ExecutionDescription{ExecutionId{920}, OperationId{820}}};
+
+        PhysicalBinding reduce_binding;
+        reduce_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{710}, DataResidencyId{7101}},
+            });
+        reduce_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{711}, DataResidencyId{7102}},
+            });
+        reduce_binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{200}, ResourceId{202}},
+            });
+
+        GERDOS_CHECK(reduce_attempt.bind(reduce_binding));
+        GERDOS_CHECK(backend.submit(reduce_operation, reduce_attempt));
+
+        std::vector<BackendCompletion> completed;
+
+        while (completed.empty()) {
+            backend.poll(completed);
+        }
+
+        GERDOS_CHECK(completed.front().succeeded);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{711}, DataResidencyId{7102}},
+                0) == 6.0f);
+
+        OperationDescription maximum{
+            OperationId{821},
+            {DataId{711}},
+            {DataId{711}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_MAX},
+        };
+
+        const Operation maximum_operation{maximum};
+        Execution maximum_attempt{
+            ExecutionDescription{ExecutionId{921}, OperationId{821}}};
+
+        PhysicalBinding maximum_binding;
+        maximum_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{711}, DataResidencyId{7102}},
+            });
+        maximum_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{711}, DataResidencyId{7102}},
+            });
+        maximum_binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{200}, ResourceId{202}},
+            });
+
+        GERDOS_CHECK(maximum_attempt.bind(maximum_binding));
+        GERDOS_CHECK(backend.submit(maximum_operation, maximum_attempt));
+        completed.clear();
+
+        while (completed.empty()) {
+            backend.poll(completed);
+        }
+
+        GERDOS_CHECK(completed.front().succeeded);
+
+        const float peak_value = backend.sample(
+            DataResidencyRef{DataId{711}, DataResidencyId{7102}}, 0);
+        std::printf("gpu reduce_max peak: %f\n", peak_value);
+        GERDOS_CHECK(peak_value == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{711}, DataResidencyId{7102}},
+                1) == 1.0f);
+
+        // Six elements wide, like the CPU chain: a narrower work
+        // would reallocate the peak record and wipe the operand.
+        OperationDescription raised_work{
+            OperationId{822},
+            {DataId{711}},
+            {DataId{712}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{6, 1, 1.0f, 1.0f, 0.0f, WorkForm::EXPONENTIAL},
+        };
+
+        const Operation raised_operation{raised_work};
+        Execution raised_attempt{
+            ExecutionDescription{ExecutionId{922}, OperationId{822}}};
+
+        PhysicalBinding raised_binding;
+        raised_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{711}, DataResidencyId{7102}},
+            });
+        raised_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{712}, DataResidencyId{7103}},
+            });
+        raised_binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{200}, ResourceId{202}},
+            });
+
+        GERDOS_CHECK(raised_attempt.bind(raised_binding));
+        GERDOS_CHECK(backend.submit(raised_operation, raised_attempt));
+        completed.clear();
+
+        while (completed.empty()) {
+            backend.poll(completed);
+        }
+
+        GERDOS_CHECK(completed.front().succeeded);
+
+        // GPU floating point may differ in the last ulp from the host
+        // libm: compare against a 1e-4 relative tolerance instead of
+        // exact equality, with the expected values printed first.
+        const float raised_zero = backend.sample(
+            DataResidencyRef{DataId{712}, DataResidencyId{7103}}, 0);
+        const float raised_one = backend.sample(
+            DataResidencyRef{DataId{712}, DataResidencyId{7103}}, 1);
+        const float expected_zero = 1.0f + std::exp(6.0f);
+        const float expected_one = 1.0f + std::exp(1.0f);
+        std::printf(
+            "gpu exponential raised: %f %f (expected %f %f)\n",
+            raised_zero,
+            raised_one,
+            expected_zero,
+            expected_one);
+        GERDOS_CHECK(
+            std::fabs(raised_zero - expected_zero) <=
+            1e-4f * expected_zero);
+        GERDOS_CHECK(
+            std::fabs(raised_one - expected_one) <= 1e-4f * expected_one);
     }
 
     return 0;

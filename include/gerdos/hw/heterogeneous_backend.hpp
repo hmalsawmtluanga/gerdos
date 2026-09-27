@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -107,6 +108,26 @@ public:
             "    float sum = 0.0f;"
             "    for (ulong k = 0; k < n; ++k) { sum += o[k]; }"
             "    d[0] = d[0] * dscale + sum * sscale + bias;"
+            "  }"
+            "}"
+            "__kernel void exponential(__global float* d,"
+            " const __global float* o, float dscale, float sscale,"
+            " float bias, ulong passes) {"
+            "  size_t i = get_global_id(0);"
+            "  for (ulong p = 0; p < passes; ++p) {"
+            "    d[i] = d[i] * dscale + exp(o[i]) * sscale + bias;"
+            "  }"
+            "}"
+            "__kernel void reduce_max(__global float* d,"
+            " const __global float* o, ulong n, float dscale,"
+            " float sscale, float bias, ulong passes) {"
+            "  if (get_global_id(0) != 0) { return; }"
+            "  for (ulong p = 0; p < passes; ++p) {"
+            "    float peak = o[0];"
+            "    for (ulong k = 1; k < n; ++k) {"
+            "      peak = fmax(peak, o[k]);"
+            "    }"
+            "    d[0] = d[0] * dscale + peak * sscale + bias;"
             "  }"
             "}");
 
@@ -480,6 +501,32 @@ private:
 
             if (work.form == WorkForm::REDUCE_SUM && has_source) {
                 reduce_sum(
+                    context,
+                    device,
+                    program,
+                    slots[source_index],
+                    destination,
+                    queue,
+                    gpu,
+                    work);
+                continue;
+            }
+
+            if (work.form == WorkForm::REDUCE_MAX && has_source) {
+                reduce_max(
+                    context,
+                    device,
+                    program,
+                    slots[source_index],
+                    destination,
+                    queue,
+                    gpu,
+                    work);
+                continue;
+            }
+
+            if (work.form == WorkForm::EXPONENTIAL && has_source) {
+                exponential(
                     context,
                     device,
                     program,
@@ -908,6 +955,225 @@ private:
                 staged_destination.data());
         } else {
             (*destination.host)[0] = staged_destination[0];
+        }
+    }
+
+    // The max-reduction form: dst[0] = dst[0] * destination_scale +
+    // source_scale * max(src) + constant.
+    static void reduce_max(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
+        const Slot& origin,
+        const Slot& destination,
+        cl::CommandQueue& queue,
+        bool gpu,
+        const WorkDescription& work) {
+        const auto count = work.elements;
+
+        if (gpu) {
+            cl::Buffer staged_origin = origin.device;
+            cl::Buffer staged_destination = destination.device;
+
+            if (!origin.on_device) {
+                staged_origin = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    origin.bytes,
+                    origin.host->data());
+            }
+
+            if (!destination.on_device) {
+                staged_destination = cl::Buffer(
+                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+            }
+
+            cl::Kernel kernel(program, "reduce_max");
+            kernel.setArg(0, staged_destination);
+            kernel.setArg(1, staged_origin);
+            kernel.setArg(2, static_cast<cl_ulong>(count));
+            kernel.setArg(3, work.destination_scale);
+            kernel.setArg(4, work.source_scale);
+            kernel.setArg(5, work.constant);
+            kernel.setArg(6, static_cast<cl_ulong>(work.passes));
+            queue.enqueueNDRangeKernel(
+                kernel, cl::NullRange, cl::NDRange(1));
+
+            if (!destination.on_device) {
+                queue.enqueueReadBuffer(
+                    staged_destination,
+                    CL_TRUE,
+                    0,
+                    destination.bytes,
+                    destination.host->data());
+            }
+
+            return;
+        }
+
+        std::vector<float> staged_origin(count, 1.0f);
+        std::vector<float> staged_destination(1, 1.0f);
+
+        if (origin.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueReadBuffer(
+                origin.device,
+                CL_TRUE,
+                0,
+                count * sizeof(float),
+                staged_origin.data());
+        } else {
+            std::memcpy(
+                staged_origin.data(),
+                origin.host->data(),
+                count * sizeof(float));
+        }
+
+        if (destination.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueReadBuffer(
+                destination.device,
+                CL_TRUE,
+                0,
+                sizeof(float),
+                staged_destination.data());
+        } else {
+            staged_destination[0] = (*destination.host)[0];
+        }
+
+        for (std::size_t pass = 0; pass < work.passes; ++pass) {
+            float peak = staged_origin[0];
+
+            for (std::size_t i = 1; i < count; ++i) {
+                if (staged_origin[i] > peak) {
+                    peak = staged_origin[i];
+                }
+            }
+
+            staged_destination[0] =
+                staged_destination[0] * work.destination_scale +
+                peak * work.source_scale + work.constant;
+        }
+
+        if (destination.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueWriteBuffer(
+                destination.device,
+                CL_TRUE,
+                0,
+                sizeof(float),
+                staged_destination.data());
+        } else {
+            (*destination.host)[0] = staged_destination[0];
+        }
+    }
+
+    // The exponential form: dst = dst * destination_scale +
+    // source_scale * exp(src) + constant, elementwise.
+    static void exponential(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
+        const Slot& origin,
+        const Slot& destination,
+        cl::CommandQueue& queue,
+        bool gpu,
+        const WorkDescription& work) {
+        const auto elements = work.elements;
+
+        if (gpu) {
+            cl::Buffer staged_origin = origin.device;
+            cl::Buffer staged_destination = destination.device;
+
+            if (!origin.on_device) {
+                staged_origin = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    origin.bytes,
+                    origin.host->data());
+            }
+
+            if (!destination.on_device) {
+                staged_destination = cl::Buffer(
+                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+            }
+
+            cl::Kernel kernel(program, "exponential");
+            kernel.setArg(0, staged_destination);
+            kernel.setArg(1, staged_origin);
+            kernel.setArg(2, work.destination_scale);
+            kernel.setArg(3, work.source_scale);
+            kernel.setArg(4, work.constant);
+            kernel.setArg(5, static_cast<cl_ulong>(work.passes));
+            queue.enqueueNDRangeKernel(
+                kernel, cl::NullRange, cl::NDRange(elements));
+
+            if (!destination.on_device) {
+                queue.enqueueReadBuffer(
+                    staged_destination,
+                    CL_TRUE,
+                    0,
+                    destination.bytes,
+                    destination.host->data());
+            }
+
+            return;
+        }
+
+        // CPU engine, staging device homes as needed.
+        std::vector<float> staged_origin(elements, 1.0f);
+        std::vector<float> staged_destination(elements, 1.0f);
+
+        if (origin.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueReadBuffer(
+                origin.device,
+                CL_TRUE,
+                0,
+                origin.bytes,
+                staged_origin.data());
+        } else {
+            std::memcpy(
+                staged_origin.data(), origin.host->data(), origin.bytes);
+        }
+
+        if (destination.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueReadBuffer(
+                destination.device,
+                CL_TRUE,
+                0,
+                destination.bytes,
+                staged_destination.data());
+        } else {
+            std::memcpy(
+                staged_destination.data(),
+                destination.host->data(),
+                destination.bytes);
+        }
+
+        for (std::size_t pass = 0; pass < work.passes; ++pass) {
+            for (std::size_t i = 0; i < elements; ++i) {
+                staged_destination[i] =
+                    staged_destination[i] * work.destination_scale +
+                    std::exp(staged_origin[i]) * work.source_scale +
+                    work.constant;
+            }
+        }
+
+        if (destination.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueWriteBuffer(
+                destination.device,
+                CL_TRUE,
+                0,
+                destination.bytes,
+                staged_destination.data());
+        } else {
+            std::memcpy(
+                destination.host->data(),
+                staged_destination.data(),
+                destination.bytes);
         }
     }
 

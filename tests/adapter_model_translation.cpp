@@ -32,13 +32,15 @@ int main() {
         ModelStep{ModelOp::SOFTMAX, 702, 0, 702},
         ModelStep{ModelOp::ATTENTION, 701, 700, 702},
         ModelStep{ModelOp::REDUCE_SUM, 700, 0, 701, 6},
+        ModelStep{ModelOp::EXPONENTIAL, 700, 0, 701, 6},
+        ModelStep{ModelOp::REDUCE_MAX, 700, 0, 701, 6},
         ModelStep{ModelOp::MOVE, 700, 0, 0, 6},
     };
 
     const Adaptation adaptation = adapt("decoder fragment", fragment);
 
     GERDOS_CHECK(adaptation.workload.name == "decoder fragment");
-    GERDOS_CHECK(adaptation.workload.operations.size() == 3);
+    GERDOS_CHECK(adaptation.workload.operations.size() == 5);
 
     // Fail-closed translation: what the algebra cannot express exactly is
     // refused by name, never approximated silently.
@@ -59,7 +61,15 @@ int main() {
     GERDOS_CHECK(reduce.work.form == WorkForm::REDUCE_SUM);
     GERDOS_CHECK(reduce.work.elements == 6);
 
-    const auto& move = adaptation.workload.operations[2];
+    const auto& raised = adaptation.workload.operations[2];
+    GERDOS_CHECK(raised.work.form == WorkForm::EXPONENTIAL);
+    GERDOS_CHECK(raised.work.elements == 6);
+
+    const auto& peak = adaptation.workload.operations[3];
+    GERDOS_CHECK(peak.work.form == WorkForm::REDUCE_MAX);
+    GERDOS_CHECK(peak.work.elements == 6);
+
+    const auto& move = adaptation.workload.operations[4];
     GERDOS_CHECK(
         move.work.form == WorkForm::ELEMENTWISE_AFFINE);
     GERDOS_CHECK(move.work.source_scale == 1.0f);

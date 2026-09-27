@@ -1,5 +1,7 @@
 #include "test_check.hpp"
 
+#include <cmath>
+#include <cstdio>
 #include <optional>
 #include <vector>
 
@@ -240,7 +242,8 @@ int main() {
         };
 
         // The same realization with absurd work: enormous sizes, hostile
-        // scales. Every gate must judge it identically.
+        // scales, and a different declared form. Every gate must judge it
+        // identically — no gate inspects the work.
         auto loud = quiet;
         loud.id = OperationId{803};
         loud.work = WorkDescription{
@@ -249,6 +252,7 @@ int main() {
             -440.0f,
             1e30f,
             -1e30f,
+            WorkForm::REDUCE_MAX,
         };
 
         const Operation quiet_operation{quiet};
@@ -715,6 +719,266 @@ int main() {
             backend.sample(
                 DataResidencyRef{DataId{702}, DataResidencyId{7003}},
                 3) == 3.0f);
+    }
+
+    // ---------------------------------------------------------------------
+    // 9. The exponential form computes exactly what it says
+    // ---------------------------------------------------------------------
+
+    {
+        Machine machine;
+
+        auto* source = machine.data.create_data(
+            DataDescription{DataId{700}, "source"});
+        (void)source->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7001},
+                    DataId{700},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "source",
+                },
+            });
+
+        auto* peak = machine.data.create_data(
+            DataDescription{DataId{701}, "peak"});
+        (void)peak->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7002},
+                    DataId{701},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "peak",
+                },
+            });
+
+        auto* raised = machine.data.create_data(
+            DataDescription{DataId{702}, "raised"});
+        (void)raised->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7003},
+                    DataId{702},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "raised",
+                },
+            });
+
+        CpuBackend backend;
+
+        // Chain one non-uniform operand so every check below discriminates
+        // real exponential and maximum semantics from any plausible fake:
+        // reduce the uniform source first, then take its maximum.
+        OperationDescription reduce{
+            OperationId{810},
+            {DataId{700}},
+            {DataId{701}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+        };
+
+        const Operation reduce_operation{reduce};
+        Execution reduce_attempt{
+            ExecutionDescription{ExecutionId{910}, OperationId{810}}};
+
+        PhysicalBinding reduce_binding;
+        reduce_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{700}, DataResidencyId{7001}},
+            });
+        reduce_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{701}, DataResidencyId{7002}},
+            });
+        reduce_binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{100}, ResourceId{102}},
+            });
+
+        GERDOS_CHECK(reduce_attempt.bind(reduce_binding));
+        GERDOS_CHECK(backend.submit(reduce_operation, reduce_attempt));
+
+        std::vector<BackendCompletion> completed;
+
+        while (completed.empty()) {
+            backend.poll(completed);
+        }
+
+        GERDOS_CHECK(completed.front().succeeded);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{701}, DataResidencyId{7002}},
+                0) == 6.0f);
+
+        // The partial record now holds [6,1,1,1,1,1]: its maximum is 6
+        // and its remaining elements are 1 — both facts discriminate.
+        OperationDescription maximum{
+            OperationId{811},
+            {DataId{701}},
+            {DataId{701}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_MAX},
+        };
+
+        const Operation maximum_operation{maximum};
+        Execution maximum_attempt{
+            ExecutionDescription{ExecutionId{911}, OperationId{811}}};
+
+        PhysicalBinding maximum_binding;
+        maximum_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{701}, DataResidencyId{7002}},
+            });
+        maximum_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{701}, DataResidencyId{7002}},
+            });
+        maximum_binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{100}, ResourceId{102}},
+            });
+
+        GERDOS_CHECK(maximum_attempt.bind(maximum_binding));
+        GERDOS_CHECK(backend.submit(maximum_operation, maximum_attempt));
+        completed.clear();
+
+        while (completed.empty()) {
+            backend.poll(completed);
+        }
+
+        GERDOS_CHECK(completed.front().succeeded);
+
+        const float peak_value = backend.sample(
+            DataResidencyRef{DataId{701}, DataResidencyId{7002}}, 0);
+        std::printf("reduce_max peak: %f\n", peak_value);
+        GERDOS_CHECK(peak_value == 6.0f);
+
+        // The untouched tail still reads 1.0: only the first element is
+        // written.
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{701}, DataResidencyId{7002}},
+                1) == 1.0f);
+
+        // -----------------------------------------------------------------
+        // 10. The exponential chains off the maximum, in place
+        // -----------------------------------------------------------------
+
+        // dst = dst * 1 + exp(src) * 1 + 0 over [6,1,1,1,1,1], one
+        // pass, so dst[0] = 1 + exp(6) and dst[1] = 1 + exp(1). All
+        // records stay six elements wide: allocations are sized by the
+        // work that touches them, so a narrower work would reallocate
+        // the peak record and wipe the chained operand.
+        OperationDescription raised_work{
+            OperationId{812},
+            {DataId{701}},
+            {DataId{702}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{6, 1, 1.0f, 1.0f, 0.0f, WorkForm::EXPONENTIAL},
+        };
+
+        const Operation raised_operation{raised_work};
+        Execution raised_attempt{
+            ExecutionDescription{ExecutionId{912}, OperationId{812}}};
+
+        PhysicalBinding raised_binding;
+        raised_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{701}, DataResidencyId{7002}},
+            });
+        raised_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{702}, DataResidencyId{7003}},
+            });
+        raised_binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{100}, ResourceId{102}},
+            });
+
+        GERDOS_CHECK(raised_attempt.bind(raised_binding));
+        GERDOS_CHECK(backend.submit(raised_operation, raised_attempt));
+        completed.clear();
+
+        while (completed.empty()) {
+            backend.poll(completed);
+        }
+
+        GERDOS_CHECK(completed.front().succeeded);
+
+        const float raised_zero = backend.sample(
+            DataResidencyRef{DataId{702}, DataResidencyId{7003}}, 0);
+        const float raised_one = backend.sample(
+            DataResidencyRef{DataId{702}, DataResidencyId{7003}}, 1);
+        std::printf(
+            "exponential raised: %f %f\n", raised_zero, raised_one);
+        GERDOS_CHECK(raised_zero == 1.0f + std::exp(6.0f));
+        GERDOS_CHECK(raised_one == 1.0f + std::exp(1.0f));
+
+        // -----------------------------------------------------------------
+        // 11. An in-place exponential iterates: exp(exp(x)) per pass
+        // -----------------------------------------------------------------
+
+        OperationDescription twice{
+            OperationId{813},
+            {DataId{702}},
+            {DataId{702}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{6, 2, 0.0f, 1.0f, 0.0f, WorkForm::EXPONENTIAL},
+        };
+
+        const Operation twice_operation{twice};
+        Execution twice_attempt{
+            ExecutionDescription{ExecutionId{913}, OperationId{813}}};
+
+        PhysicalBinding twice_binding;
+        twice_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{702}, DataResidencyId{7003}},
+            });
+        twice_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{702}, DataResidencyId{7003}},
+            });
+        twice_binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{100}, ResourceId{102}},
+            });
+
+        GERDOS_CHECK(twice_attempt.bind(twice_binding));
+        GERDOS_CHECK(backend.submit(twice_operation, twice_attempt));
+        completed.clear();
+
+        while (completed.empty()) {
+            backend.poll(completed);
+        }
+
+        GERDOS_CHECK(completed.front().succeeded);
+
+        // The aliased source reads the value the previous pass wrote:
+        // pass one writes exp(1 + exp(1)), pass two writes
+        // exp(exp(1 + exp(1))) — the iterated form the contract
+        // requires for aliased sources.
+        const float iterated = backend.sample(
+            DataResidencyRef{DataId{702}, DataResidencyId{7003}}, 1);
+        std::printf("exponential iterated: %f\n", iterated);
+        GERDOS_CHECK(
+            iterated == std::exp(std::exp(1.0f + std::exp(1.0f))));
     }
 
     return 0;

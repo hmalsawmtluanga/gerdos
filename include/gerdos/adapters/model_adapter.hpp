@@ -18,6 +18,10 @@ enum class ModelOp {
     AFFINE,
     // dst[0] accumulates the sum of an operand.
     REDUCE_SUM,
+    // dst transforms the elementwise exponential of an operand.
+    EXPONENTIAL,
+    // dst[0] accumulates the maximum of an operand.
+    REDUCE_MAX,
     // Move a representation to another home.
     MOVE,
     // Refused by the current algebra — kept so refusal is explicit.
@@ -140,6 +144,68 @@ struct Adaptation {
             break;
         }
 
+        case ModelOp::EXPONENTIAL: {
+            if (step.rows == 0) {
+                adaptation.refused.push_back(
+                    "EXPONENTIAL without an element count");
+                continue;
+            }
+
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}},
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        0.0f,
+                        1.0f,
+                        0.0f,
+                        WorkForm::EXPONENTIAL,
+                    },
+                });
+            break;
+        }
+
+        case ModelOp::REDUCE_MAX: {
+            if (step.rows == 0) {
+                adaptation.refused.push_back(
+                    "REDUCE_MAX without an element count");
+                continue;
+            }
+
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}},
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        0.0f,
+                        1.0f,
+                        0.0f,
+                        WorkForm::REDUCE_MAX,
+                    },
+                });
+            break;
+        }
+
         case ModelOp::MOVE: {
             adaptation.workload.operations.push_back(
                 OperationDescription{
@@ -166,8 +232,8 @@ struct Adaptation {
 
         case ModelOp::SOFTMAX:
             adaptation.refused.push_back(
-                "SOFTMAX: the algebra has no exponential or "
-                "max-reduction yet");
+                "SOFTMAX: the algebra has no normalization yet — "
+                "compose EXPONENTIAL with REDUCE_SUM instead");
             break;
 
         case ModelOp::ATTENTION:
