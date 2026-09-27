@@ -1,5 +1,6 @@
 #include "test_check.hpp"
 
+#include <cstdint>
 #include <type_traits>
 #include <vector>
 
@@ -17,11 +18,18 @@ static_assert(!std::is_copy_assignable_v<ExecutionBackend>);
 static_assert(!std::is_move_constructible_v<ExecutionBackend>);
 static_assert(!std::is_move_assignable_v<ExecutionBackend>);
 
-// A completion carries identity and outcome only.
+// A completion carries exactly the attempt identity, whether the work
+// succeeded, and the observed duration.
 static_assert(
     std::is_same_v<
         decltype(BackendCompletion::execution),
         ExecutionId>);
+static_assert(
+    std::is_same_v<decltype(BackendCompletion::succeeded), bool>);
+static_assert(
+    std::is_same_v<
+        decltype(BackendCompletion::duration_ns),
+        std::uint64_t>);
 
 class RecordingBackend final : public ExecutionBackend {
 public:

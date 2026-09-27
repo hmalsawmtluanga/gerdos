@@ -7,7 +7,7 @@ namespace gerdos_test {
 
 inline void check(bool condition, const char* expression) {
     if (!condition) {
-        std::fprintf(stderr, "TEST FAILURE: %s\\n", expression);
+        std::fprintf(stderr, "TEST FAILURE: %s\n", expression);
         std::abort();
     }
 }

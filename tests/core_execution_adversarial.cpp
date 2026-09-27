@@ -328,7 +328,8 @@ int main() {
     GERDOS_CHECK(operation->description().outputs.size() == 1);
     GERDOS_CHECK(operation->description().outputs[0] == DataId{500});
 
-    // Operation contains no selected ResourceRef or DataResidencyId.
+    // References are preserved verbatim; nothing is silently dropped or
+    // deduplicated in the declaration.
     GERDOS_CHECK(operation->description().dependencies.empty());
 
     // ---------------------------------------------------------------------

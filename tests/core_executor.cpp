@@ -277,7 +277,8 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
-    // 2. A failed attempt leaves its output unusable and records why not
+    // 2. A failed attempt leaves its output unusable and records the
+    //    failure outcome
     // ---------------------------------------------------------------------
 
     {

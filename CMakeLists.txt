@@ -97,4 +97,15 @@ gerdos_add_test(gerdos_core_vertical_slice
 gerdos_add_test(gerdos_core_measurement
     tests/core_measurement.cpp)
 
+add_executable(gerdos_core_no_leakage_test
+    tests/core_no_leakage.cpp
+)
+
+gerdos_configure_target(gerdos_core_no_leakage_test)
+
+add_test(
+    NAME gerdos_core_no_leakage
+    COMMAND gerdos_core_no_leakage_test ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 
