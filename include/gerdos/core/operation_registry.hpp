@@ -125,7 +125,7 @@ public:
     void for_each_operation(Fn&& fn) const {
         for (const auto& [id, operation] : operations_) {
             (void)id;
-            fn(operation.get());
+            fn(static_cast<const Operation*>(operation.get()));
         }
     }
 

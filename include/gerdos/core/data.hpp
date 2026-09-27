@@ -197,7 +197,7 @@ public:
     void for_each_residency(Fn&& fn) const {
         for (const auto& [id, residency] : residencies_) {
             (void)id;
-            fn(residency.get());
+            fn(static_cast<const DataResidency*>(residency.get()));
         }
     }
 

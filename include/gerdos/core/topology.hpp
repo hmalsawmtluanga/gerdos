@@ -102,6 +102,13 @@ public:
             return false;
         }
 
+        const auto direction = link.description().direction;
+
+        if (direction != TopologyLinkDirection::DIRECTED &&
+            direction != TopologyLinkDirection::BIDIRECTIONAL) {
+            return false;
+        }
+
         if (links_.contains(id) || retired_link_ids_.contains(id)) {
             return false;
         }
@@ -162,7 +169,7 @@ public:
     void for_each_link(Fn&& fn) const {
         for (const auto& [id, link] : links_) {
             (void)id;
-            fn(link.get());
+            fn(static_cast<const TopologyLink*>(link.get()));
         }
     }
 

@@ -86,7 +86,7 @@ public:
     void for_each_device(Fn&& fn) const {
         for (const auto& [id, device] : devices_) {
             (void)id;
-            fn(device.get());
+            fn(static_cast<const Device*>(device.get()));
         }
     }
 

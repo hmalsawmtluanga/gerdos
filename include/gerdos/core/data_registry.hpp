@@ -89,7 +89,7 @@ public:
     void for_each_data(Fn&& fn) const {
         for (const auto& [id, data] : data_) {
             (void)id;
-            fn(data.get());
+            fn(static_cast<const Data*>(data.get()));
         }
     }
 

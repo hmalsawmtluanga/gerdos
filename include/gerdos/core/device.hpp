@@ -102,7 +102,7 @@ public:
     void for_each_resource(Fn&& fn) const {
         for (const auto& [id, resource] : resources_) {
             (void)id;
-            fn(resource.get());
+            fn(static_cast<const Resource*>(resource.get()));
         }
     }
 

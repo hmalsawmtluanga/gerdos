@@ -100,7 +100,7 @@ public:
     void for_each_execution(Fn&& fn) const {
         for (const auto& [id, execution] : executions_) {
             (void)id;
-            fn(execution.get());
+            fn(static_cast<const Execution*>(execution.get()));
         }
     }
 
