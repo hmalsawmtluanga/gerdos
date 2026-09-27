@@ -1247,6 +1247,19 @@ evidence IS the exclusion (the same structural path as claim
 where they would corrupt means. Reservation (holding capacity across
 rounds) remains a later concern.
 
+Weight-scale pressure is handled by staging through in chunks, not by
+bigger plans: a workload whose total footprint exceeds device memory
+executes as a sequence of capacity-fitting rounds, each planned,
+admitted, executed, and measured independently. Between rounds the
+submitting layer evicts device-homed records it no longer needs —
+explicit `remove_residency`, which preserves the logical Data — and
+later rounds re-create what they need (prefetch-by-declaration: the
+artifact already names every future residency). Eviction never breaks
+lifecycle preconditions: records with claimed updates or in-flight
+attempts refuse removal loudly rather than stranding finalization.
+Over-budget single operations are still refused at plan time; chunking
+applies across operations, never within one.
+
 Measurement-informed preference is discovery before exploitation,
 decided per comparison — never by a global log-size counter (one
 mechanism's discovery must not depend on unrelated mechanisms'
