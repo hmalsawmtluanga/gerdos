@@ -33,29 +33,69 @@ struct ResourceRequirement {
     }
 };
 
+// The form of a declared computation. Forms are backend-interpreted
+// content: no gate inspects which form an Operation declares.
+enum class WorkForm : std::uint8_t {
+    // dst = dst * destination_scale + source_scale * src + constant.
+    ELEMENTWISE_AFFINE,
+    // dst = dst * destination_scale + source_scale * (A x B) + constant,
+    // row-major, with A and B the first two consuming entries.
+    MATRIX_PRODUCT,
+    // dst[0] = dst[0] * destination_scale + source_scale * sum(src) +
+    // constant; the remaining elements are left alone.
+    REDUCE_SUM,
+};
+
 // The declared computation of an attempt, expressed as generic data-parallel
-// semantics over the bound representations: each producing representation is
-// transformed toward dst * destination_scale + source_scale * src + constant,
-// repeated passes times over elements float elements. Exact copying is the
-// destination_scale 0, source_scale 1, constant 0, passes 1 case. The
-// consuming record of the same Data supplies src — or, for compute shapes,
-// the first consuming entry. Gates never inspect the work; backends
-// interpret it at the seam.
+// semantics over the bound representations, repeated passes times. Exact
+// copying is the elementwise form with destination_scale 0, source_scale 1,
+// constant 0, passes 1. The consuming record of the same Data supplies src —
+// or, for compute shapes, the first consuming entry. Shape fields are
+// interpreted by form. Gates never inspect the work; backends interpret it
+// at the seam.
 struct WorkDescription {
     std::size_t elements{0};
     std::size_t passes{0};
     float destination_scale{1.0f};
     float source_scale{0.0f};
     float constant{0.0f};
+    WorkForm form{WorkForm::ELEMENTWISE_AFFINE};
+    std::size_t rows{0};
+    std::size_t inner{0};
+    std::size_t columns{0};
 
     // Well-formed executable work: non-empty and safely sized. Gates never
     // inspect the work; the seam rejects work that is not well-formed
     // rather than executing hostile arithmetic.
     [[nodiscard]] constexpr bool valid() const noexcept {
-        return elements > 0 && passes > 0 &&
-               elements <=
-                   std::numeric_limits<std::size_t>::max() /
-                       sizeof(float);
+        constexpr auto limit =
+            std::numeric_limits<std::size_t>::max() / sizeof(float);
+
+        switch (form) {
+        case WorkForm::ELEMENTWISE_AFFINE:
+        case WorkForm::REDUCE_SUM:
+            return elements > 0 && passes > 0 && elements <= limit;
+        case WorkForm::MATRIX_PRODUCT:
+            return rows > 0 && inner > 0 && columns > 0 && passes > 0 &&
+                   rows <= limit / inner && inner <= limit / columns &&
+                   rows <= limit / columns;
+        }
+
+        return false;
+    }
+
+    // The largest operand this work touches, in float elements — the
+    // storage every bound representation needs.
+    [[nodiscard]] constexpr std::size_t storage_elements() const noexcept {
+        if (form != WorkForm::MATRIX_PRODUCT) {
+            return elements;
+        }
+
+        const auto a = rows * inner;
+        const auto b = inner * columns;
+        const auto c = rows * columns;
+
+        return a > b ? (a > c ? a : c) : (b > c ? b : c);
     }
 };
 

@@ -83,6 +83,31 @@ public:
             "  for (ulong p = 0; p < passes; ++p) {"
             "    d[i] = d[i] * dscale + bias;"
             "  }"
+            "}"
+            "__kernel void matrix_product(__global float* d,"
+            " const __global float* a, const __global float* b,"
+            " ulong rows, ulong inner, ulong columns, float dscale,"
+            " float sscale, float bias, ulong passes) {"
+            "  size_t index = get_global_id(0);"
+            "  ulong i = index / columns;"
+            "  ulong j = index % columns;"
+            "  for (ulong p = 0; p < passes; ++p) {"
+            "    float acc = 0.0f;"
+            "    for (ulong k = 0; k < inner; ++k) {"
+            "      acc += a[i * inner + k] * b[k * columns + j];"
+            "    }"
+            "    d[index] = d[index] * dscale + acc * sscale + bias;"
+            "  }"
+            "}"
+            "__kernel void reduce_sum(__global float* d,"
+            " const __global float* o, ulong n, float dscale,"
+            " float sscale, float bias, ulong passes) {"
+            "  if (get_global_id(0) != 0) { return; }"
+            "  for (ulong p = 0; p < passes; ++p) {"
+            "    float sum = 0.0f;"
+            "    for (ulong k = 0; k < n; ++k) { sum += o[k]; }"
+            "    d[0] = d[0] * dscale + sum * sscale + bias;"
+            "  }"
             "}");
 
         if (program_.build(std::vector<cl::Device>{device_}) !=
@@ -144,7 +169,7 @@ public:
         }
 
         const bool succeeded = !failures_.contains(id);
-        const auto bytes = work.elements * sizeof(float);
+        const auto bytes = work.storage_elements() * sizeof(float);
 
         // Rejection-atomic submission: workers hold shared ownership of
         // their storage and copied OpenCL handles — never this object's
@@ -413,8 +438,19 @@ private:
         cl::CommandQueue queue(context, device);
 
         const bool exact_copy =
+            work.form == WorkForm::ELEMENTWISE_AFFINE &&
             work.passes == 1 && work.destination_scale == 0.0f &&
             work.source_scale == 1.0f && work.constant == 0.0f;
+
+        // Matrix operands are the first two consuming entries, in binding
+        // order.
+        std::vector<std::size_t> consuming;
+
+        for (std::size_t in = 0; in < binding.data.size(); ++in) {
+            if (is_consuming(binding.data[in].role)) {
+                consuming.push_back(in);
+            }
+        }
 
         for (std::size_t out = 0; out < binding.data.size(); ++out) {
             if (!is_producing(binding.data[out].role)) {
@@ -424,6 +460,36 @@ private:
             const auto& destination = slots[out];
             const auto source_index = work_source_index(binding, out);
             const bool has_source = source_index < binding.data.size();
+
+            if (work.form == WorkForm::MATRIX_PRODUCT) {
+                if (consuming.size() >= 2) {
+                    matrix_product(
+                        context,
+                        device,
+                        program,
+                        slots[consuming[0]],
+                        slots[consuming[1]],
+                        destination,
+                        queue,
+                        gpu,
+                        work);
+                }
+
+                continue;
+            }
+
+            if (work.form == WorkForm::REDUCE_SUM && has_source) {
+                reduce_sum(
+                    context,
+                    device,
+                    program,
+                    slots[source_index],
+                    destination,
+                    queue,
+                    gpu,
+                    work);
+                continue;
+            }
 
             if (!has_source) {
                 fill(context, device, program, destination, queue, gpu, work);
@@ -601,6 +667,247 @@ private:
                 destination.host->data(),
                 staged_destination.data(),
                 destination.bytes);
+        }
+    }
+
+    // The matrix product form: dst = dst * destination_scale +
+    // source_scale * (A x B) + constant, row-major.
+    static void matrix_product(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
+        const Slot& left,
+        const Slot& right,
+        const Slot& destination,
+        cl::CommandQueue& queue,
+        bool gpu,
+        const WorkDescription& work) {
+        const auto rows = work.rows;
+        const auto inner = work.inner;
+        const auto columns = work.columns;
+
+        if (gpu) {
+            cl::Buffer staged_left = left.device;
+            cl::Buffer staged_right = right.device;
+            cl::Buffer staged_destination = destination.device;
+
+            if (!left.on_device) {
+                staged_left = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    left.bytes,
+                    left.host->data());
+            }
+
+            if (!right.on_device) {
+                staged_right = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    right.bytes,
+                    right.host->data());
+            }
+
+            if (!destination.on_device) {
+                staged_destination = cl::Buffer(
+                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+            }
+
+            cl::Kernel kernel(program, "matrix_product");
+            kernel.setArg(0, staged_destination);
+            kernel.setArg(1, staged_left);
+            kernel.setArg(2, staged_right);
+            kernel.setArg(3, static_cast<cl_ulong>(rows));
+            kernel.setArg(4, static_cast<cl_ulong>(inner));
+            kernel.setArg(5, static_cast<cl_ulong>(columns));
+            kernel.setArg(6, work.destination_scale);
+            kernel.setArg(7, work.source_scale);
+            kernel.setArg(8, work.constant);
+            kernel.setArg(9, static_cast<cl_ulong>(work.passes));
+            queue.enqueueNDRangeKernel(
+                kernel,
+                cl::NullRange,
+                cl::NDRange(rows * columns));
+
+            if (!destination.on_device) {
+                queue.enqueueReadBuffer(
+                    staged_destination,
+                    CL_TRUE,
+                    0,
+                    rows * columns * sizeof(float),
+                    destination.host->data());
+            }
+
+            return;
+        }
+
+        // CPU engine, staging device homes as needed.
+        std::vector<float> staged_left(rows * inner, 1.0f);
+        std::vector<float> staged_right(inner * columns, 1.0f);
+        std::vector<float> staged_destination(rows * columns, 1.0f);
+
+        const auto stage_in = [&](const Slot& slot,
+                                  std::vector<float>& target) {
+            if (slot.on_device) {
+                cl::CommandQueue staging(context, device);
+                staging.enqueueReadBuffer(
+                    slot.device,
+                    CL_TRUE,
+                    0,
+                    target.size() * sizeof(float),
+                    target.data());
+            } else {
+                std::memcpy(
+                    target.data(),
+                    slot.host->data(),
+                    target.size() * sizeof(float));
+            }
+        };
+
+        stage_in(left, staged_left);
+        stage_in(right, staged_right);
+        stage_in(destination, staged_destination);
+
+        for (std::size_t pass = 0; pass < work.passes; ++pass) {
+            for (std::size_t i = 0; i < rows; ++i) {
+                for (std::size_t j = 0; j < columns; ++j) {
+                    float accumulated = 0.0f;
+
+                    for (std::size_t k = 0; k < inner; ++k) {
+                        accumulated +=
+                            staged_left[i * inner + k] *
+                            staged_right[k * columns + j];
+                    }
+
+                    const auto index = i * columns + j;
+                    staged_destination[index] =
+                        staged_destination[index] *
+                            work.destination_scale +
+                        accumulated * work.source_scale + work.constant;
+                }
+            }
+        }
+
+        if (destination.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueWriteBuffer(
+                destination.device,
+                CL_TRUE,
+                0,
+                staged_destination.size() * sizeof(float),
+                staged_destination.data());
+        } else {
+            std::memcpy(
+                destination.host->data(),
+                staged_destination.data(),
+                staged_destination.size() * sizeof(float));
+        }
+    }
+
+    // The reduction form: dst[0] = dst[0] * destination_scale +
+    // source_scale * sum(src) + constant.
+    static void reduce_sum(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
+        const Slot& origin,
+        const Slot& destination,
+        cl::CommandQueue& queue,
+        bool gpu,
+        const WorkDescription& work) {
+        const auto count = work.elements;
+
+        if (gpu) {
+            cl::Buffer staged_origin = origin.device;
+            cl::Buffer staged_destination = destination.device;
+
+            if (!origin.on_device) {
+                staged_origin = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    origin.bytes,
+                    origin.host->data());
+            }
+
+            if (!destination.on_device) {
+                staged_destination = cl::Buffer(
+                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+            }
+
+            cl::Kernel kernel(program, "reduce_sum");
+            kernel.setArg(0, staged_destination);
+            kernel.setArg(1, staged_origin);
+            kernel.setArg(2, static_cast<cl_ulong>(count));
+            kernel.setArg(3, work.destination_scale);
+            kernel.setArg(4, work.source_scale);
+            kernel.setArg(5, work.constant);
+            kernel.setArg(6, static_cast<cl_ulong>(work.passes));
+            queue.enqueueNDRangeKernel(
+                kernel, cl::NullRange, cl::NDRange(1));
+
+            if (!destination.on_device) {
+                queue.enqueueReadBuffer(
+                    staged_destination,
+                    CL_TRUE,
+                    0,
+                    destination.bytes,
+                    destination.host->data());
+            }
+
+            return;
+        }
+
+        std::vector<float> staged_origin(count, 1.0f);
+        std::vector<float> staged_destination(1, 1.0f);
+
+        if (origin.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueReadBuffer(
+                origin.device,
+                CL_TRUE,
+                0,
+                count * sizeof(float),
+                staged_origin.data());
+        } else {
+            std::memcpy(
+                staged_origin.data(),
+                origin.host->data(),
+                count * sizeof(float));
+        }
+
+        if (destination.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueReadBuffer(
+                destination.device,
+                CL_TRUE,
+                0,
+                sizeof(float),
+                staged_destination.data());
+        } else {
+            staged_destination[0] = (*destination.host)[0];
+        }
+
+        for (std::size_t pass = 0; pass < work.passes; ++pass) {
+            float sum = 0.0f;
+
+            for (std::size_t i = 0; i < count; ++i) {
+                sum += staged_origin[i];
+            }
+
+            staged_destination[0] =
+                staged_destination[0] * work.destination_scale +
+                sum * work.source_scale + work.constant;
+        }
+
+        if (destination.on_device) {
+            cl::CommandQueue staging(context, device);
+            staging.enqueueWriteBuffer(
+                destination.device,
+                CL_TRUE,
+                0,
+                sizeof(float),
+                staged_destination.data());
+        } else {
+            (*destination.host)[0] = staged_destination[0];
         }
     }
 

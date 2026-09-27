@@ -278,5 +278,157 @@ int main() {
         GERDOS_CHECK(compute_summary.latest_value > 0);
     }
 
+    // ---------------------------------------------------------------------
+    // 5. The new work forms execute on the real accelerator engine
+    // ---------------------------------------------------------------------
+
+    {
+        auto* source = machine.data.create_data(
+            DataDescription{DataId{700}, "source"});
+        (void)source->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7001},
+                    DataId{700},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "source",
+                },
+            });
+
+        auto* partial = machine.data.create_data(
+            DataDescription{DataId{701}, "partial"});
+        (void)partial->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7002},
+                    DataId{701},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "partial",
+                },
+            });
+
+        auto* product = machine.data.create_data(
+            DataDescription{DataId{702}, "product"});
+        (void)product->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7003},
+                    DataId{702},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "product",
+                },
+            });
+
+        // Reduction on the GPU engine: sum of six 1.0 elements = 6.
+        OperationDescription reduce{
+            OperationId{810},
+            {DataId{700}},
+            {DataId{701}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+        };
+
+        const Operation reduce_operation{reduce};
+        Execution reduce_attempt{
+            ExecutionDescription{ExecutionId{910}, OperationId{810}}};
+
+        PhysicalBinding reduce_binding;
+        reduce_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{700}, DataResidencyId{7001}},
+            });
+        reduce_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{701}, DataResidencyId{7002}},
+            });
+        reduce_binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{200}, ResourceId{202}},
+            });
+
+        GERDOS_CHECK(reduce_attempt.bind(reduce_binding));
+        GERDOS_CHECK(backend.submit(reduce_operation, reduce_attempt));
+
+        std::vector<BackendCompletion> completed;
+
+        while (completed.empty()) {
+            backend.poll(completed);
+        }
+
+        GERDOS_CHECK(completed.front().succeeded);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{701}, DataResidencyId{7002}},
+                0) == 6.0f);
+
+        // The matrix form on the GPU engine: the same exact result as the
+        // CPU engine — A = [[6,1,1],[1,1,1]], B = ones(3,2).
+        OperationDescription matmul{
+            OperationId{811},
+            {DataId{701}, DataId{700}},
+            {DataId{702}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{
+                0, 1, 0.0f, 1.0f, 0.0f, WorkForm::MATRIX_PRODUCT, 2, 3, 2},
+        };
+
+        const Operation matmul_operation{matmul};
+        Execution matmul_attempt{
+            ExecutionDescription{ExecutionId{911}, OperationId{811}}};
+
+        PhysicalBinding matmul_binding;
+        matmul_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{701}, DataResidencyId{7002}},
+            });
+        matmul_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{700}, DataResidencyId{7001}},
+            });
+        matmul_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{702}, DataResidencyId{7003}},
+            });
+        matmul_binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{200}, ResourceId{202}},
+            });
+
+        GERDOS_CHECK(matmul_attempt.bind(matmul_binding));
+        GERDOS_CHECK(backend.submit(matmul_operation, matmul_attempt));
+        completed.clear();
+
+        while (completed.empty()) {
+            backend.poll(completed);
+        }
+
+        GERDOS_CHECK(completed.front().succeeded);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{702}, DataResidencyId{7003}},
+                0) == 8.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{702}, DataResidencyId{7003}},
+                1) == 8.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{702}, DataResidencyId{7003}},
+                2) == 3.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{702}, DataResidencyId{7003}},
+                3) == 3.0f);
+    }
+
     return 0;
 }

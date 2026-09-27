@@ -73,13 +73,15 @@ public:
                 const auto it = allocations_.find(ref);
 
                 if (it == allocations_.end() ||
-                    it->second->size() != work.elements) {
+                    it->second->size() != work.storage_elements()) {
                     undo.emplace_back(
                         ref,
                         it == allocations_.end() ? Buffer{}
                                                  : it->second);
                     allocations_[ref] = std::make_shared<
-                        std::vector<float>>(work.elements, 1.0f);
+                        std::vector<float>>(
+                        work.storage_elements(),
+                        1.0f);
                 }
 
                 keeps.push_back(allocations_[ref]);
@@ -202,8 +204,19 @@ private:
         const auto begin = std::chrono::steady_clock::now();
 
         const bool exact_copy =
+            work.form == WorkForm::ELEMENTWISE_AFFINE &&
             work.passes == 1 && work.destination_scale == 0.0f &&
             work.source_scale == 1.0f && work.constant == 0.0f;
+
+        // Matrix operands are the first two consuming entries, in binding
+        // order.
+        std::vector<std::size_t> consuming;
+
+        for (std::size_t in = 0; in < binding.data.size(); ++in) {
+            if (is_consuming(binding.data[in].role)) {
+                consuming.push_back(in);
+            }
+        }
 
         for (std::size_t out = 0; out < binding.data.size(); ++out) {
             if (!is_producing(binding.data[out].role)) {
@@ -214,6 +227,63 @@ private:
             const auto source_index =
                 work_source_index(binding, out);
             const bool has_source = source_index < binding.data.size();
+
+            if (work.form == WorkForm::MATRIX_PRODUCT) {
+                if (consuming.size() < 2) {
+                    continue;
+                }
+
+                const float* left = buffers[consuming[0]];
+                const float* right = buffers[consuming[1]];
+
+                for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                    for (std::size_t i = 0; i < work.rows; ++i) {
+                        for (std::size_t j = 0;
+                             j < work.columns;
+                             ++j) {
+                            float accumulated = 0.0f;
+
+                            for (std::size_t k = 0; k < work.inner; ++k) {
+                                accumulated +=
+                                    left[i * work.inner + k] *
+                                    right[k * work.columns + j];
+                            }
+
+                            const auto index =
+                                i * work.columns + j;
+                            destination[index] =
+                                destination[index] *
+                                    work.destination_scale +
+                                accumulated * work.source_scale +
+                                work.constant;
+                        }
+                    }
+                }
+
+                continue;
+            }
+
+            if (work.form == WorkForm::REDUCE_SUM) {
+                if (!has_source) {
+                    continue;
+                }
+
+                const float* origin = buffers[source_index];
+
+                for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                    float sum = 0.0f;
+
+                    for (std::size_t i = 0; i < work.elements; ++i) {
+                        sum += origin[i];
+                    }
+
+                    destination[0] =
+                        destination[0] * work.destination_scale +
+                        sum * work.source_scale + work.constant;
+                }
+
+                continue;
+            }
 
             if (!has_source) {
                 for (std::size_t pass = 0; pass < work.passes; ++pass) {
