@@ -279,8 +279,10 @@ behavior — measured effective throughput, latency, and contention — belongs
 to Measurement evidence through a future measurement subject generalization,
 and never redefines link identity. Runtime capacity accounting is derived,
 not stored: the capacity a link has committed is computed from the in-flight
-attempts that traverse it, and belongs to the planning and execution layer
-that can see them. Topology links carry no mutable runtime state.
+attempts that traverse it, and belongs to a future planning and execution
+accounting layer with visibility into in-flight attempts; the version-zero
+planner performs no capacity accounting. Topology links carry no mutable
+runtime state.
 
 Physical connectivity such as PCIe or NVLink therefore belongs to Topology,
 rather than being represented automatically as an `INTERCONNECT` resource.
@@ -971,7 +973,7 @@ Admission is mechanically enforced, not advisory: the `RUNNING` transition
 is rejected unless admission evidence has been recorded on the attempt, and
 that record can be established only from admission-gate evidence, for that
 attempt, exactly once. Rejected admission never establishes evidence, and a
-a begin rejected before the commit point leaves no evidence behind.
+begin rejected before the commit point leaves no evidence behind.
 
 Admission also enforces role and kind coherence: a `COMPUTE` resource binding
 must reference a compute resource, and a `TRANSFER` resource binding must
@@ -1186,24 +1188,32 @@ Version-zero selection rules:
   reachable from the consuming record by a covering topology link and ranked
   by that link's declared bandwidth, then latency, then identifier order
 - resource requirements are satisfied by distinct, available mechanisms whose
-  kind matches the required role; movement transfer mechanisms are chosen
-  from covering-link endpoints with the same declared-attribute preference
+  kind matches the required role; movement transfer mechanisms must sit on
+  the devices at the ends of a covering link — link endpoints are the data
+  locations, and the engines that drive hops live on those devices — with the
+  same declared-attribute preference
 - movement between distinct records requires a covering topology link
 
 Claimed producing records are never planned onto. Planning does not order
 work, resolve dependencies, produce multi-attempt plans, or reserve capacity;
 those are later planning concerns.
 
-Measurement-informed preference is discovery before exploitation. A
-mechanism with no successful evidence is sampled ahead of measured ones, so
-new and never-tried mechanisms are never starved by a first impression. Once
-measured, candidates rank by mean observed successful duration: measured
-behavior outranks declared attributes, and faster outranks slower. Failure
-evidence is not speed evidence and leaves a mechanism in the unmeasured
-class. The evidence scope is the mechanism's proven behavior across
-operations; work-shape-scoped comparison is a future refinement of the
-requirement model. Record and link selection remain declared-attribute based
-until measurement subjects generalize beyond mechanisms.
+Measurement-informed preference is discovery before exploitation, bounded
+by an exploration budget. While the evidence log is small, a mechanism with
+no successful evidence is sampled ahead of measured ones, so new and
+never-tried mechanisms are not starved by a first impression. Beyond the
+budget, measured behavior outranks unmeasured mechanisms entirely: later
+arrivals wait for a future exploration policy rather than starving proven
+engines. Once measured, candidates rank by mean observed successful
+duration: measured behavior outranks declared attributes, and faster
+outranks slower. Failure evidence is not speed evidence, and saturated
+totals cannot yield a meaningful mean — both leave a mechanism in the
+unmeasured class. The evidence scope is the mechanism's proven behavior
+across operations; means pool work shapes, so mechanisms must not be
+compared across divergent work shapes in this version. Work-shape-scoped
+comparison is a future refinement of the requirement model. Record and link
+selection remain declared-attribute based until measurement subjects
+generalize beyond mechanisms.
 
 ## Runtime Integration
 
