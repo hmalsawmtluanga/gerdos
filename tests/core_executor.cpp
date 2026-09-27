@@ -357,6 +357,7 @@ int main() {
 
         GERDOS_CHECK(inadmissible->bind(std::move(binding)));
         GERDOS_CHECK(!executor.start(ExecutionId{802}));
+        GERDOS_CHECK(!inadmissible->admitted());
 
         GERDOS_CHECK(inadmissible->state() == ExecutionState::PENDING);
         GERDOS_CHECK(inadmissible->has_binding());
@@ -435,7 +436,10 @@ int main() {
 
         GERDOS_CHECK(!executor.start(ExecutionId{805}));
 
-        // Nothing changed: no effects, no state transition.
+        // Nothing changed: no effects, no state transition, and no
+        // admission evidence — the rejected begin leaves no gate verdict
+        // behind.
+        GERDOS_CHECK(!execution->admitted());
         GERDOS_CHECK(execution->state() == ExecutionState::PENDING);
         GERDOS_CHECK(
             fixture.output_a->state() == DataResidencyState::UNAVAILABLE);
@@ -1074,6 +1078,138 @@ int main() {
         GERDOS_CHECK(first->has_result());
         GERDOS_CHECK(first->result()->outcome == ExecutionState::FAILED);
         GERDOS_CHECK(first->binding() != nullptr);
+    }
+
+    // ---------------------------------------------------------------------
+    // 14. A hostile backend cannot leave evidence or claims behind
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+
+        // A backend that mutates runtime state during submission: it claims
+        // the producing residency on behalf of another live attempt.
+        auto* intruder = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{860},
+                OperationId{700},
+            });
+
+        class HostileBackend final : public ExecutionBackend {
+        public:
+            HostileBackend(DataResidency* target, ExecutionId intruder)
+                : target_(target), intruder_(intruder) {}
+
+            [[nodiscard]] bool submit(
+                const Operation&,
+                const Execution&) override {
+                (void)target_->set_state(DataResidencyState::TRANSFERRING);
+                target_->set_update_owner(intruder_);
+                return true;
+            }
+
+            void poll(std::vector<BackendCompletion>& completed) override {
+                if (pending_) {
+                    completed.push_back(
+                        BackendCompletion{
+                            pending_.value(),
+                            true,
+                            1'000'000,
+                        });
+
+                    pending_.reset();
+                }
+            }
+
+            void complete(ExecutionId id) {
+                pending_ = id;
+            }
+
+        private:
+            DataResidency* target_;
+            ExecutionId intruder_;
+            std::optional<ExecutionId> pending_;
+        };
+
+        HostileBackend backend(
+            fixture.output_a,
+            intruder->description().id);
+
+        Executor executor(
+            fixture.executions,
+            fixture.operations,
+            fixture.devices,
+            fixture.data,
+            backend);
+
+        auto* victim = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{861},
+                OperationId{700},
+            });
+
+        GERDOS_CHECK(
+            victim->bind(compute_binding(DataId{301}, DataResidencyId{410})));
+
+        // The attempt begins (submission succeeded) but its start effects
+        // are rejected by the mutation: it runs unclaimed and the
+        // incoherence is reported with its completion, never silent.
+        GERDOS_CHECK(executor.start(ExecutionId{861}));
+        GERDOS_CHECK(victim->state() == ExecutionState::RUNNING);
+
+        backend.complete(ExecutionId{861});
+
+        std::vector<AttemptStatus> outcomes;
+        executor.advance(outcomes);
+
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(
+            outcomes.front().integrity ==
+            AttemptIntegrity::EFFECTS_REJECTED);
+        GERDOS_CHECK(victim->state() == ExecutionState::COMPLETED);
+        GERDOS_CHECK(
+            victim->result()->integrity ==
+            AttemptIntegrity::EFFECTS_REJECTED);
+    }
+
+    // ---------------------------------------------------------------------
+    // 15. Cancellation releases claims from any state
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        SimulatedBackend backend{4};
+        Executor executor(
+            fixture.executions,
+            fixture.operations,
+            fixture.devices,
+            fixture.data,
+            backend);
+
+        auto* execution = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{862},
+                OperationId{700},
+            });
+
+        GERDOS_CHECK(
+            execution->bind(
+                compute_binding(DataId{301}, DataResidencyId{410})));
+
+        // An attempt holding claims while still PENDING — the shape a
+        // failed begin leaves behind — is still finalizable.
+        ExecutionEffects effects(fixture.data, fixture.executions);
+        GERDOS_CHECK(effects.start(*execution));
+        GERDOS_CHECK(
+            fixture.output_a->update_owner() == ExecutionId{862});
+
+        GERDOS_CHECK(executor.cancel(ExecutionId{862}));
+        GERDOS_CHECK(!fixture.output_a->update_owner().valid());
+        GERDOS_CHECK(
+            fixture.output_a->state() == DataResidencyState::UNAVAILABLE);
+        GERDOS_CHECK(execution->has_result());
+        GERDOS_CHECK(
+            execution->result()->integrity == AttemptIntegrity::COHERENT);
     }
 
     return 0;
