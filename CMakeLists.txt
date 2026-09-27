@@ -133,6 +133,16 @@ if (OpenCL_FOUND)
         PRIVATE CL_HPP_TARGET_OPENCL_VERSION=300
                 CL_HPP_MINIMUM_OPENCL_VERSION=120)
 
+    add_executable(gerdos_demo demo/gerdos_demo.cpp)
+    gerdos_configure_target(gerdos_demo)
+    target_include_directories(gerdos_demo
+        PRIVATE ${OpenCL_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    target_link_libraries(gerdos_demo PRIVATE ${OpenCL_LIBRARIES})
+    target_compile_definitions(gerdos_demo
+        PRIVATE CL_HPP_TARGET_OPENCL_VERSION=300
+                CL_HPP_MINIMUM_OPENCL_VERSION=120)
+    add_test(NAME demo_end_to_end COMMAND gerdos_demo)
+
     gerdos_add_test(gerdos_core_hw_real_benchmark
         tests/core_real_benchmark.cpp)
     target_include_directories(gerdos_core_hw_real_benchmark_test
