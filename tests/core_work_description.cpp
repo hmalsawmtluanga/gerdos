@@ -460,5 +460,98 @@ int main() {
                 0) == 9.0f);
     }
 
+    // ---------------------------------------------------------------------
+    // 6. Resizing a representation while work is in flight is safe
+    // ---------------------------------------------------------------------
+
+    {
+        Machine machine;
+
+        OperationDescription slow{
+            OperationId{807},
+            {DataId{500}},
+            {DataId{501}},
+            {},
+            {
+                ResourceRequirement{ResourceBindingRole::COMPUTE, 1},
+            },
+            WorkDescription{1 << 20, 64, 0.5f, 1.5f, 0.0f},
+        };
+
+        OperationDescription quick{
+            OperationId{808},
+            {DataId{500}},
+            {DataId{501}},
+            {},
+            {
+                ResourceRequirement{ResourceBindingRole::COMPUTE, 1},
+            },
+            WorkDescription{4, 1, 0.0f, 1.0f, 0.0f},
+        };
+
+        (void)machine.operations.create_operation(slow);
+        (void)machine.operations.create_operation(quick);
+
+        CpuBackend backend;
+
+        PhysicalBinding binding;
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{500}, DataResidencyId{5001}},
+            });
+
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{501}, DataResidencyId{5101}},
+            });
+
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{100}, ResourceId{102}},
+            });
+
+        const Operation slow_operation{slow};
+        const Operation quick_operation{quick};
+
+        Execution slow_attempt{
+            ExecutionDescription{ExecutionId{907}, OperationId{807}}};
+        Execution quick_attempt{
+            ExecutionDescription{ExecutionId{908}, OperationId{808}}};
+
+        GERDOS_CHECK(slow_attempt.bind(binding));
+        GERDOS_CHECK(quick_attempt.bind(binding));
+
+        // The second attempt resizes the representations the first is
+        // still working on. Shared ownership keeps the first attempt's
+        // buffers alive; both complete coherently.
+        GERDOS_CHECK(backend.submit(slow_operation, slow_attempt));
+        GERDOS_CHECK(backend.submit(quick_operation, quick_attempt));
+
+        std::vector<BackendCompletion> completed;
+
+        while (completed.size() < 2) {
+            backend.poll(completed);
+        }
+
+        GERDOS_CHECK(completed.size() == 2);
+
+        for (const auto& completion : completed) {
+            GERDOS_CHECK(completion.succeeded);
+        }
+
+        // The mapping now holds the quick attempt's storage, with its own
+        // semantics: an exact copy of the input.
+        GERDOS_CHECK(backend.allocation_count() == 2);
+        GERDOS_CHECK(
+            backend.allocation_bytes(
+                DataResidencyRef{DataId{501}, DataResidencyId{5101}}) == 4);
+        GERDOS_CHECK(backend.allocations_equal(
+            DataResidencyRef{DataId{500}, DataResidencyId{5001}},
+            DataResidencyRef{DataId{501}, DataResidencyId{5101}}));
+    }
+
     return 0;
 }
