@@ -70,6 +70,7 @@ struct Machine {
                 {
                     ResourceRequirement{ResourceBindingRole::TRANSFER, 1},
                 },
+                WorkDescription{1 << 18, 1, 0.0f, 1.0f, 0.0f},
             });
 
         (void)operations.create_operation(
@@ -81,6 +82,7 @@ struct Machine {
                 {
                     ResourceRequirement{ResourceBindingRole::COMPUTE, 1},
                 },
+                WorkDescription{1 << 14, 4, 0.5f, 1.5f, 0.0f},
             });
     }
 
@@ -132,8 +134,6 @@ int main() {
 
     Machine machine;
     CpuBackend backend;
-    backend.set_operation_work(OperationId{800}, 1 << 20, 1);
-    backend.set_operation_work(OperationId{801}, 1 << 16, 4);
 
     BindingPlanner planner(
         machine.devices,
@@ -266,7 +266,6 @@ int main() {
 
     {
         CpuBackend failing_backend;
-        failing_backend.set_operation_work(OperationId{801}, 1 << 12, 1);
         failing_backend.set_failure(ExecutionId{903});
 
         Executor failing_executor(
@@ -318,7 +317,7 @@ int main() {
         GERDOS_CHECK(
             backend.allocation_bytes(
                 DataResidencyRef{DataId{500}, DataResidencyId{5002}}) ==
-            (1 << 20) / sizeof(float));
+            (std::size_t{1} << 18));
     }
 
     return 0;

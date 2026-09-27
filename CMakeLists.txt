@@ -103,6 +103,9 @@ gerdos_add_test(gerdos_core_binding_planner
 gerdos_add_test(gerdos_core_workload_benchmark
     tests/core_workload_benchmark.cpp)
 
+gerdos_add_test(gerdos_core_work_description
+    tests/core_work_description.cpp)
+
 gerdos_add_test(gerdos_core_cpu_backend
     tests/core_cpu_backend.cpp)
 

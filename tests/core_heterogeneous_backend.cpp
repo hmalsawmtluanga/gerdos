@@ -74,6 +74,7 @@ struct Machine {
                 {
                     ResourceRequirement{ResourceBindingRole::TRANSFER, 1},
                 },
+                WorkDescription{1 << 18, 1, 0.0f, 1.0f, 0.0f},
             });
 
         (void)operations.create_operation(
@@ -85,6 +86,7 @@ struct Machine {
                 {
                     ResourceRequirement{ResourceBindingRole::COMPUTE, 1},
                 },
+                WorkDescription{1 << 12, 1, 0.5f, 1.5f, 0.0f},
             });
     }
 
@@ -149,9 +151,6 @@ int main() {
 
     HeterogeneousBackend backend(machine.data, DeviceId{200});
     GERDOS_CHECK(backend.gpu_available());
-
-    backend.set_operation_work(OperationId{800}, 1 << 20, 1);
-    backend.set_operation_work(OperationId{801}, 1 << 12, 1);
 
     BindingPlanner planner(
         machine.devices,

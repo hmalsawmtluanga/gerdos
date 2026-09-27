@@ -88,6 +88,10 @@ struct StagedWorkload {
         workload.name = "just-in-time staged units";
 
         for (std::size_t unit = 0; unit < kUnits; ++unit) {
+            // Real work: 1 MB of floats; the compute unit runs deep
+            // streaming arithmetic — 64 passes, where the engines on this
+            // machine genuinely diverge (the CPU engine's per-pass cost is
+            // about twice the accelerator's on this silicon).
             workload.operations.push_back(
                 OperationDescription{
                     OperationId{1000 + unit},
@@ -100,6 +104,7 @@ struct StagedWorkload {
                             1,
                         },
                     },
+                    WorkDescription{1 << 18, 1, 0.0f, 1.0f, 0.0f},
                 });
 
             workload.operations.push_back(
@@ -114,11 +119,12 @@ struct StagedWorkload {
                             1,
                         },
                     },
+                    WorkDescription{1 << 18, 64, 0.5f, 1.5f, 0.0f},
                 });
         }
     }
 
-    void populate(Machine& machine, HeterogeneousBackend& backend) const {
+    void populate(Machine& machine) const {
         for (std::size_t unit = 0; unit < kUnits; ++unit) {
             const DataId payload{500 + unit};
             const DataId result{600 + unit};
@@ -167,15 +173,6 @@ struct StagedWorkload {
                 workload.operations[unit * 2]);
             (void)machine.operations.create_operation(
                 workload.operations[unit * 2 + 1]);
-
-            // Real work: 1 MB of floats; the compute unit runs deep
-            // streaming arithmetic — 64 passes, where the engines on this
-            // machine genuinely diverge (the CPU engine's per-pass cost is
-            // about twice the accelerator's on this silicon).
-            backend.set_operation_work(
-                OperationId{1000 + unit}, 1 << 20, 1);
-            backend.set_operation_work(
-                OperationId{2000 + unit}, 1 << 20, 64);
         }
     }
 };
@@ -246,7 +243,7 @@ int main() {
     Machine naive_machine;
     HeterogeneousBackend naive_backend(naive_machine.data, DeviceId{200});
     GERDOS_CHECK(naive_backend.gpu_available());
-    staged.populate(naive_machine, naive_backend);
+    staged.populate(naive_machine);
 
     // The baseline's evidence log records what happened; its planner never
     // reads it.
@@ -279,7 +276,7 @@ int main() {
     HeterogeneousBackend informed_backend(
         informed_machine.data, DeviceId{200});
     GERDOS_CHECK(informed_backend.gpu_available());
-    staged.populate(informed_machine, informed_backend);
+    staged.populate(informed_machine);
 
     BindingPlanner informed_planner(
         informed_machine.devices,

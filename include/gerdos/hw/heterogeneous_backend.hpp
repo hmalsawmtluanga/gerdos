@@ -29,9 +29,9 @@ namespace gerdos {
 // mediates between host and device memory. Durations are real wall-clock
 // nanoseconds measured where the work happens.
 //
-// Work runs on real background threads and poll never blocks. Kernel
-// semantics are engine-independent: movement pairs are copied between
-// representations, compute pairs run the same arithmetic on either engine.
+// Both engines execute the operation's declared work — the same elementwise
+// affine semantics — and exact copying is the fast path. Work runs on real
+// background threads and poll never blocks.
 class HeterogeneousBackend final : public ExecutionBackend {
 public:
     HeterogeneousBackend(
@@ -58,16 +58,20 @@ public:
         context_ = cl::Context(device_);
         program_ = cl::Program(
             context_,
-            "__kernel void compute_pair(__global float* d,"
-            " const __global float* o, ulong passes) {"
+            "__kernel void transform(__global float* d,"
+            " const __global float* o, float dscale, float sscale,"
+            " float bias, ulong passes) {"
             "  size_t i = get_global_id(0);"
             "  for (ulong p = 0; p < passes; ++p) {"
-            "    d[i] = d[i] * 0.5f + o[i] * 1.5f;"
+            "    d[i] = d[i] * dscale + o[i] * sscale + bias;"
             "  }"
             "}"
-            "__kernel void fill(__global float* d) {"
+            "__kernel void fill(__global float* d, float dscale,"
+            " float bias, ulong passes) {"
             "  size_t i = get_global_id(0);"
-            "  d[i] = d[i] * 1.0001f + 0.0001f;"
+            "  for (ulong p = 0; p < passes; ++p) {"
+            "    d[i] = d[i] * dscale + bias;"
+            "  }"
             "}");
 
         if (program_.build(std::vector<cl::Device>{device_}) !=
@@ -83,6 +87,9 @@ public:
                 context_, CL_MEM_READ_WRITE, sizeof(float), nullptr);
             cl::Kernel kernel(program_, "fill");
             kernel.setArg(0, scratch);
+            kernel.setArg(1, 1.0f);
+            kernel.setArg(2, 0.0f);
+            kernel.setArg(3, static_cast<cl_ulong>(1));
             warmup.enqueueNDRangeKernel(
                 kernel, cl::NullRange, cl::NDRange(1));
             warmup.finish();
@@ -93,14 +100,6 @@ public:
 
     [[nodiscard]] bool gpu_available() const noexcept {
         return available_;
-    }
-
-    // Scenario configuration: the real size of one attempt's work.
-    void set_operation_work(
-        OperationId id,
-        std::size_t bytes,
-        std::size_t passes) {
-        work_[id] = Work{bytes, passes};
     }
 
     // Scenario configuration: the attempt completes unsuccessfully.
@@ -123,15 +122,16 @@ public:
             return false;
         }
 
-        const auto work = work_for(operation.description().id);
+        const auto work = operation.description().work;
         const bool succeeded = !failures_.contains(id);
+        const auto bytes = work.elements * sizeof(float);
 
         // Real allocations exist before the work begins, and the worker
         // receives storage handles only — it never touches shared maps.
         std::vector<Slot> slots;
 
         for (const auto& entry : binding->data) {
-            slots.push_back(slot_for(entry.residency, work.bytes));
+            slots.push_back(slot_for(entry.residency, bytes));
         }
 
         const bool gpu = on_accelerator(*binding);
@@ -229,11 +229,6 @@ public:
     }
 
 private:
-    struct Work {
-        std::size_t bytes;
-        std::size_t passes;
-    };
-
     struct Outcome {
         bool succeeded;
         std::uint64_t duration_ns;
@@ -259,12 +254,6 @@ private:
         cl::Buffer device;
         std::size_t bytes;
     };
-
-    [[nodiscard]] Work work_for(OperationId id) const noexcept {
-        const auto it = work_.find(id);
-
-        return it == work_.end() ? Work{4096, 1} : it->second;
-    }
 
     [[nodiscard]] bool on_accelerator(const PhysicalBinding& binding) const
         noexcept {
@@ -349,13 +338,13 @@ private:
             it->second.device, CL_TRUE, 0, it->second.bytes, out);
     }
 
-    // Real work. The engine is chosen by the bound mechanisms; data moves
-    // between declared homes with real staging. Workers touch only the
-    // slots they were given.
+    // The declared work. The engine is chosen by the bound mechanisms; data
+    // moves between declared homes with real staging. Workers touch only
+    // the slots they were given.
     [[nodiscard]] Outcome run(
         const PhysicalBinding& binding,
         const std::vector<Slot>& slots,
-        Work work,
+        const WorkDescription& work,
         bool configured,
         bool gpu) {
         const auto begin = std::chrono::steady_clock::now();
@@ -367,55 +356,32 @@ private:
             queue = cl::CommandQueue(context_, device_);
         }
 
+        const bool exact_copy =
+            work.passes == 1 && work.destination_scale == 0.0f &&
+            work.source_scale == 1.0f && work.constant == 0.0f;
+
         for (std::size_t out = 0; out < binding.data.size(); ++out) {
-            const auto& producing = binding.data[out];
-
-            if (!is_producing(producing.role)) {
+            if (!is_producing(binding.data[out].role)) {
                 continue;
-            }
-
-            // Update and movement shapes read the same Data's consuming
-            // record; compute shapes read the first consuming entry.
-            std::size_t origin_index = 0;
-            bool found = false;
-
-            for (std::size_t in = 0; in < binding.data.size(); ++in) {
-                const auto& consuming = binding.data[in];
-
-                if (is_consuming(consuming.role) &&
-                    consuming.residency.data == producing.residency.data) {
-                    origin_index = in;
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found) {
-                for (std::size_t in = 0; in < binding.data.size(); ++in) {
-                    if (is_consuming(binding.data[in].role)) {
-                        origin_index = in;
-                        found = true;
-                        break;
-                    }
-                }
             }
 
             const auto& destination = slots[out];
-            const auto& origin = found ? slots[origin_index] : slots[out];
+            const auto source_index = work_source_index(binding, out);
+            const bool has_source = source_index < binding.data.size();
 
-            if (!found) {
-                fill(destination, queue, gpu);
+            if (!has_source) {
+                fill(destination, queue, gpu, work);
                 continue;
             }
 
-            if (binding.data[origin_index].residency !=
-                    producing.residency &&
-                producing.role == DataBindingRole::DESTINATION) {
+            const auto& origin = slots[source_index];
+
+            if (exact_copy && source_index != out) {
                 transfer(origin, destination, queue);
-            } else {
-                compute_pair(
-                    origin, destination, queue, gpu, work.passes);
+                continue;
             }
+
+            transform(origin, destination, queue, gpu, work);
         }
 
         if (gpu) {
@@ -433,9 +399,8 @@ private:
         };
     }
 
-    // Movement between representations: real copying with real staging
-    // across homes. Transfers are engine-independent — like a transfer
-    // engine, the path follows where the data lives.
+    // Exact copying: real staging across homes, engine-independent — like a
+    // transfer engine, the path follows where the data lives.
     static void transfer(
         const Slot& origin,
         const Slot& destination,
@@ -464,15 +429,15 @@ private:
         }
     }
 
-    // Compute between representations: the same arithmetic on either
-    // engine, with real staging across homes.
-    void compute_pair(
+    // The affine elementwise transform on either engine, with real staging
+    // across homes.
+    void transform(
         const Slot& origin,
         const Slot& destination,
         cl::CommandQueue& queue,
         bool gpu,
-        std::size_t passes) const {
-        const auto elements = destination.bytes / sizeof(float);
+        const WorkDescription& work) const {
+        const auto elements = work.elements;
 
         if (gpu) {
             cl::Buffer staged_origin = origin.device;
@@ -491,10 +456,13 @@ private:
                     context_, CL_MEM_READ_WRITE, destination.bytes, nullptr);
             }
 
-            cl::Kernel kernel(program_, "compute_pair");
+            cl::Kernel kernel(program_, "transform");
             kernel.setArg(0, staged_destination);
             kernel.setArg(1, staged_origin);
-            kernel.setArg(2, static_cast<cl_ulong>(passes));
+            kernel.setArg(2, work.destination_scale);
+            kernel.setArg(3, work.source_scale);
+            kernel.setArg(4, work.constant);
+            kernel.setArg(5, static_cast<cl_ulong>(work.passes));
             queue.enqueueNDRangeKernel(
                 kernel, cl::NullRange, cl::NDRange(elements));
 
@@ -542,10 +510,11 @@ private:
                 destination.bytes);
         }
 
-        for (std::size_t pass = 0; pass < passes; ++pass) {
+        for (std::size_t pass = 0; pass < work.passes; ++pass) {
             for (std::size_t i = 0; i < elements; ++i) {
                 staged_destination[i] =
-                    staged_destination[i] * 0.5f + staged_origin[i] * 1.5f;
+                    staged_destination[i] * work.destination_scale +
+                    staged_origin[i] * work.source_scale + work.constant;
             }
         }
 
@@ -565,10 +534,14 @@ private:
         }
     }
 
-    // Fill of an unpaired producing representation.
-    void fill(const Slot& destination, cl::CommandQueue& queue, bool gpu)
-        const {
-        const auto elements = destination.bytes / sizeof(float);
+    // The transform without a source: dst = dst * destination_scale +
+    // constant.
+    void fill(
+        const Slot& destination,
+        cl::CommandQueue& queue,
+        bool gpu,
+        const WorkDescription& work) const {
+        const auto elements = work.elements;
 
         if (gpu) {
             cl::Buffer staged = destination.device;
@@ -580,6 +553,9 @@ private:
 
             cl::Kernel kernel(program_, "fill");
             kernel.setArg(0, staged);
+            kernel.setArg(1, work.destination_scale);
+            kernel.setArg(2, work.constant);
+            kernel.setArg(3, static_cast<cl_ulong>(work.passes));
             queue.enqueueNDRangeKernel(
                 kernel, cl::NullRange, cl::NDRange(elements));
 
@@ -602,8 +578,11 @@ private:
                 destination.bytes,
                 staged.data());
 
-            for (std::size_t i = 0; i < elements; ++i) {
-                staged[i] = staged[i] * 1.0001f + 0.0001f;
+            for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                for (std::size_t i = 0; i < elements; ++i) {
+                    staged[i] =
+                        staged[i] * work.destination_scale + work.constant;
+                }
             }
 
             staging.enqueueWriteBuffer(
@@ -616,9 +595,12 @@ private:
             return;
         }
 
-        for (std::size_t i = 0; i < elements; ++i) {
-            destination.host[i] =
-                destination.host[i] * 1.0001f + 0.0001f;
+        for (std::size_t pass = 0; pass < work.passes; ++pass) {
+            for (std::size_t i = 0; i < elements; ++i) {
+                destination.host[i] =
+                    destination.host[i] * work.destination_scale +
+                    work.constant;
+            }
         }
     }
 
@@ -629,7 +611,6 @@ private:
     cl::Context context_;
     cl::Program program_;
 
-    std::unordered_map<OperationId, Work> work_;
     std::unordered_set<ExecutionId> failures_;
     std::unordered_map<DataResidencyRef, Allocation> allocations_;
     std::vector<Job> jobs_;

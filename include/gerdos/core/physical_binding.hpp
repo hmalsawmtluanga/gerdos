@@ -63,4 +63,31 @@ struct PhysicalBinding {
     std::vector<ResourceBinding> resources;
 };
 
+// Which consuming entry supplies the source of one producing entry: the
+// consuming record of the same Data — or, for compute shapes, the first
+// consuming entry. Returns the binding index, or the binding's data size
+// when the producing entry has no source.
+[[nodiscard]] constexpr std::size_t work_source_index(
+    const PhysicalBinding& binding,
+    std::size_t producing_index) noexcept {
+    const auto& producing = binding.data[producing_index];
+
+    for (std::size_t in = 0; in < binding.data.size(); ++in) {
+        const auto& consuming = binding.data[in];
+
+        if (is_consuming(consuming.role) &&
+            consuming.residency.data == producing.residency.data) {
+            return in;
+        }
+    }
+
+    for (std::size_t in = 0; in < binding.data.size(); ++in) {
+        if (is_consuming(binding.data[in].role)) {
+            return in;
+        }
+    }
+
+    return binding.data.size();
+}
+
 } // namespace gerdos

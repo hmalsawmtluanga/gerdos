@@ -14,27 +14,17 @@
 
 namespace gerdos {
 
-// The CPU backend: the first backend performing real work on real hardware.
-// It owns real allocations for the representations it touches — the core's
-// data plane lives behind the seam — and executes real kernels over them:
-// movement pairs are copied between representations, compute pairs run
-// arithmetic between them. Observed durations are real wall-clock
-// nanoseconds measured where the work happens.
+// The CPU backend: real work on real hardware. It owns real allocations for
+// the representations it touches — the core's data plane lives behind the
+// seam — and executes the operation's declared work over them with real CPU
+// kernels. Observed durations are real wall-clock nanoseconds measured
+// where the work happens.
 //
 // Work runs on real background threads; poll never blocks. Allocations are
 // resolved at submission and worker threads touch only the buffers they are
-// given. The amount of work is backend configuration until Operation work
-// descriptions exist.
+// given.
 class CpuBackend final : public ExecutionBackend {
 public:
-    // Scenario configuration: the real size of one attempt's work.
-    void set_operation_work(
-        OperationId id,
-        std::size_t bytes,
-        std::size_t passes) {
-        work_[id] = Work{bytes, passes};
-    }
-
     // Scenario configuration: the attempt completes unsuccessfully.
     void set_failure(ExecutionId id) {
         failures_.insert(id);
@@ -55,8 +45,9 @@ public:
             return false;
         }
 
-        const auto work = work_for(operation.description().id);
+        const auto work = operation.description().work;
         const bool succeeded = !failures_.contains(id);
+        const auto bytes = work.elements * sizeof(float);
 
         // Real allocations exist before the work begins, and the worker
         // receives buffer pointers only — it never touches shared maps.
@@ -64,7 +55,7 @@ public:
 
         for (const auto& entry : binding->data) {
             buffers.push_back(
-                allocation(entry.residency, work.bytes).data());
+                allocation(entry.residency, bytes).data());
         }
 
         jobs_.push_back(
@@ -119,6 +110,17 @@ public:
         return it == allocations_.end() ? 0 : it->second.size();
     }
 
+    [[nodiscard]] float sample(DataResidencyRef ref, std::size_t index) {
+        const auto it = allocations_.find(ref);
+
+        if (it == allocations_.end() ||
+            it->second.size() <= index) {
+            return 0.0f;
+        }
+
+        return it->second[index];
+    }
+
     [[nodiscard]] bool allocations_equal(
         DataResidencyRef left,
         DataResidencyRef right) const noexcept {
@@ -131,11 +133,6 @@ public:
     }
 
 private:
-    struct Work {
-        std::size_t bytes;
-        std::size_t passes;
-    };
-
     struct Outcome {
         bool succeeded;
         std::uint64_t duration_ns;
@@ -145,12 +142,6 @@ private:
         ExecutionId id;
         std::future<Outcome> result;
     };
-
-    [[nodiscard]] Work work_for(OperationId id) const noexcept {
-        const auto it = work_.find(id);
-
-        return it == work_.end() ? Work{4096, 1} : it->second;
-    }
 
     [[nodiscard]] std::vector<float>& allocation(
         DataResidencyRef ref,
@@ -165,73 +156,56 @@ private:
         return buffer;
     }
 
-    // Real work over the bound representations: movement pairs are copied
-    // between representations; compute pairs run arithmetic between them;
-    // unpaired producing entries are written in place.
+    // The declared work over the bound representations: exact copying when
+    // the description says so, otherwise the affine elementwise transform.
     static Outcome run(
         const PhysicalBinding& binding,
         const std::vector<float*>& buffers,
-        Work work,
+        const WorkDescription& work,
         bool configured) {
         const auto begin = std::chrono::steady_clock::now();
 
-        for (std::size_t out = 0; out < binding.data.size(); ++out) {
-            const auto& producing = binding.data[out];
+        const bool exact_copy =
+            work.passes == 1 && work.destination_scale == 0.0f &&
+            work.source_scale == 1.0f && work.constant == 0.0f;
 
-            if (!is_producing(producing.role)) {
+        for (std::size_t out = 0; out < binding.data.size(); ++out) {
+            if (!is_producing(binding.data[out].role)) {
                 continue;
             }
 
-            // Update and movement shapes read the same Data's consuming
-            // record; compute shapes read the first consuming entry.
             float* destination = buffers[out];
-            const float* origin = nullptr;
-            std::size_t origin_index = 0;
+            const auto source_index =
+                work_source_index(binding, out);
+            const bool has_source = source_index < binding.data.size();
 
-            for (std::size_t in = 0; in < binding.data.size(); ++in) {
-                const auto& consuming = binding.data[in];
-
-                if (is_consuming(consuming.role) &&
-                    consuming.residency.data == producing.residency.data) {
-                    origin = buffers[in];
-                    origin_index = in;
-                    break;
-                }
-            }
-
-            if (origin == nullptr) {
-                for (std::size_t in = 0; in < binding.data.size(); ++in) {
-                    if (is_consuming(binding.data[in].role)) {
-                        origin = buffers[in];
-                        origin_index = in;
-                        break;
+            if (!has_source) {
+                for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                    for (std::size_t i = 0; i < work.elements; ++i) {
+                        destination[i] =
+                            destination[i] * work.destination_scale +
+                            work.constant;
                     }
                 }
-            }
-
-            const auto elements = work.bytes / sizeof(float);
-
-            if (origin == nullptr) {
-                for (std::size_t i = 0; i < elements; ++i) {
-                    destination[i] = destination[i] * 1.0001f + 0.0001f;
-                }
 
                 continue;
             }
 
-            if (binding.data[origin_index].residency !=
-                    producing.residency &&
-                producing.role == DataBindingRole::DESTINATION) {
+            const float* origin = buffers[source_index];
+
+            if (exact_copy && source_index != out) {
                 std::memcpy(
                     destination,
                     origin,
-                    elements * sizeof(float));
-            } else {
-                for (std::size_t pass = 0; pass < work.passes; ++pass) {
-                    for (std::size_t i = 0; i < elements; ++i) {
-                        destination[i] =
-                            destination[i] * 0.5f + origin[i] * 1.5f;
-                    }
+                    work.elements * sizeof(float));
+                continue;
+            }
+
+            for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                for (std::size_t i = 0; i < work.elements; ++i) {
+                    destination[i] =
+                        destination[i] * work.destination_scale +
+                        origin[i] * work.source_scale + work.constant;
                 }
             }
         }
@@ -247,7 +221,6 @@ private:
         };
     }
 
-    std::unordered_map<OperationId, Work> work_;
     std::unordered_set<ExecutionId> failures_;
     std::unordered_map<DataResidencyRef, std::vector<float>> allocations_;
     std::vector<Job> jobs_;
