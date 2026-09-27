@@ -1285,12 +1285,16 @@ execution.
 
 When the source is the destination record, the transform is defined as the
 iterated form: each pass composes over the previous result. This holds for
-every elementwise form, including the exponential and the two-operand and
-three-operand selections: an in-place pass reads the values the previous
-pass wrote. All three reduction forms are also iterated: each pass
-re-folds the unchanged source into the running first element. The gather
-form snapshots its value table per pass for the same reason: an in-place
-gather reads the table the previous pass wrote.
+the single-source elementwise forms, including the exponential: an
+in-place pass reads the value the previous pass wrote. All three
+reduction forms are also iterated: each pass re-folds the unchanged
+source into the running first element. Multi-operand selections
+(elementwise min/max, predicate selection, gather) require operand Data
+records distinct from the destination Data: an attempt that aliases an
+operand Data with its destination Data writes nothing, exactly as a
+compute shape with fewer than two consuming entries writes nothing
+rather than fabricating an operand. Distinct records of the same Data
+still alias — the same-Data consuming entry is the source by definition.
 
 Model adapters translate model semantics into this vocabulary; the core
 never sees model terms. The element type is float in this version. The
