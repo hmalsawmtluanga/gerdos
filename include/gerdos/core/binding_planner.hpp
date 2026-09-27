@@ -157,17 +157,30 @@ public:
             }
 
             if (is_output) {
-                target = choose_target(id, source);
+                // A producing entry for the same Data as the consuming
+                // entry writes the same record in place: skip the
+                // distinct-target search, which excludes the source
+                // record by construction.
+                const bool same_data =
+                    is_input && source != nullptr &&
+                    sole_residency(id) == source;
+                target = same_data ? source : choose_target(id, source);
 
                 // In-place realization only when the consuming record is
                 // the sole representation: with sibling records that are
                 // unreachable or busy, the update was movement and planning
-                // fails loudly.
-                if (target == nullptr && source != nullptr) {
-                    if (record_count(id) == 1) {
-                        target = source;
-                    } else {
+                // fails loudly. A pure output (no consuming source) with
+                // exactly one representation writes it in place.
+                if (target == nullptr &&
+                    (source != nullptr || record_count(id) == 1)) {
+                    if (source != nullptr && record_count(id) != 1) {
                         return std::nullopt;
+                    }
+
+                    target = source;
+
+                    if (target == nullptr) {
+                        target = sole_residency(id);
                     }
                 }
 
@@ -822,6 +835,30 @@ private:
             });
 
         return count;
+    }
+
+    // The sole representation of a Data, or nullptr unless exactly one
+    // exists. Pure outputs (no consuming source) with one representation
+    // write it in place.
+    [[nodiscard]] const DataResidency* sole_residency(DataId id) const
+        noexcept {
+        const DataResidency* sole = nullptr;
+        std::size_t count = 0;
+
+        data_.for_each_data(
+            [&](const Data* datum) {
+                if (datum->description().id != id) {
+                    return;
+                }
+
+                datum->for_each_residency(
+                    [&](const DataResidency* record) {
+                        sole = record;
+                        ++count;
+                    });
+            });
+
+        return count == 1 ? sole : nullptr;
     }
 
     [[nodiscard]] static bool better_record(
