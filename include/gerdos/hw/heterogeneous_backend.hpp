@@ -13,6 +13,7 @@
 #include <CL/opencl.hpp>
 
 #include "gerdos/core/data_registry.hpp"
+#include "gerdos/core/dtype.hpp"
 #include "gerdos/core/execution_backend.hpp"
 
 namespace gerdos {
@@ -247,7 +248,7 @@ public:
         }
 
         const bool succeeded = !failures_.contains(id);
-        const auto bytes = work.storage_elements() * sizeof(float);
+        const auto bytes = work.storage_elements() * work.storage_bytes();
 
         // Rejection-atomic submission: workers hold shared ownership of
         // their storage and copied OpenCL handles — never this object's
@@ -263,8 +264,15 @@ public:
                 const auto& ref = entry.residency;
                 const auto it = allocations_.find(ref);
 
-                if (it == allocations_.end() ||
-                    it->second.bytes != bytes) {
+                // Allocations keep their own dtype across attempts (see
+                // the CPU backend): only a missing record or an
+                // element-count mismatch reallocates.
+                const bool count_matches =
+                    it != allocations_.end() &&
+                    it->second.bytes / dtype_bytes(it->second.dtype) ==
+                        work.storage_elements();
+
+                if (!count_matches) {
                     undo.emplace_back(
                         ref,
                         it == allocations_.end()
@@ -272,7 +280,7 @@ public:
                             : std::optional<Allocation>{it->second});
                 }
 
-                slots.push_back(slot_for(ref, bytes));
+                slots.push_back(slot_for(ref, bytes, work.dtype));
             }
 
             jobs_.push_back(
@@ -368,21 +376,35 @@ public:
     }
 
     [[nodiscard]] float sample(DataResidencyRef ref, std::size_t index) {
-        float value = 0.0f;
+        const auto it = allocations_.find(ref);
 
-        const auto bytes = allocation_bytes(ref);
+        if (it == allocations_.end()) {
+            return 0.0f;
+        }
 
-        if (bytes < (index + 1) * sizeof(float)) {
-            return value;
+        const auto width = dtype_bytes(it->second.dtype);
+        const auto bytes = it->second.bytes;
+
+        if ((index + 1) * width > bytes) {
+            return 0.0f;
         }
 
         // read() copies the whole allocation; give it the whole buffer.
+        // Device homes stage F32 working copies: convert back through
+        // the shared helpers so the inspection path matches the
+        // compute path.
+        if (it->second.on_device) {
+            std::vector<float> working(bytes / width, 0.0f);
+            read_device(ref, reinterpret_cast<unsigned char*>(working.data()));
+            std::vector<unsigned char> raw(bytes, 0);
+            encode_all(it->second.dtype, working.data(), raw.data(), working.size());
+            return decode_element(it->second.dtype, raw.data(), index);
+        }
+
         std::vector<unsigned char> raw;
         raw.resize(bytes);
         read(ref, raw.data());
-        std::memcpy(&value, raw.data() + index * sizeof(float), sizeof(float));
-
-        return value;
+        return decode_element(it->second.dtype, raw.data(), index);
     }
 
 private:
@@ -401,7 +423,8 @@ private:
     // long as they run, so a replacement can never dangle under them.
     struct Allocation {
         bool on_device;
-        std::shared_ptr<std::vector<float>> host;
+        WorkDtype dtype{WorkDtype::F32};
+        std::shared_ptr<std::vector<unsigned char>> host;
         cl::Buffer device;
         std::size_t bytes;
     };
@@ -409,7 +432,8 @@ private:
     // What a worker needs, resolved before it starts.
     struct Slot {
         bool on_device;
-        std::shared_ptr<std::vector<float>> host;
+        WorkDtype dtype{WorkDtype::F32};
+        std::shared_ptr<std::vector<unsigned char>> host;
         cl::Buffer device;
         std::size_t bytes;
     };
@@ -438,28 +462,43 @@ private:
                record->description().resource.device == accelerator_;
     }
 
-    [[nodiscard]] Slot slot_for(DataResidencyRef ref, std::size_t bytes) {
+    [[nodiscard]] Slot slot_for(
+        DataResidencyRef ref,
+        std::size_t bytes,
+        WorkDtype dtype) {
         auto it = allocations_.find(ref);
 
-        if (it == allocations_.end() || it->second.bytes != bytes) {
+        const bool count_matches =
+            it != allocations_.end() &&
+            it->second.bytes / dtype_bytes(it->second.dtype) ==
+                bytes / dtype_bytes(dtype);
+
+        if (!count_matches) {
             const bool on_device =
                 available_ && home_on_accelerator(ref);
 
             Allocation fresh{};
             fresh.on_device = on_device;
+            fresh.dtype = dtype;
             fresh.bytes = bytes;
 
             fresh.host =
-                std::make_shared<std::vector<float>>(
-                    bytes / sizeof(float),
-                    1.0f);
+                std::make_shared<std::vector<unsigned char>>(bytes, 0);
+            std::vector<float> ones(bytes / dtype_bytes(dtype), 1.0f);
+            encode_all(dtype, ones.data(), fresh.host->data(), ones.size());
 
             if (on_device) {
+                // Device buffers always stage F32 working copies: decode
+                // host storage to F32 scratch, then upload the scratch.
+                // Conversion is structural at the boundary, identical on
+                // both engines.
+                std::vector<float> working(ones.size(), 0.0f);
+                decode_all(dtype, fresh.host->data(), working.data(), ones.size());
                 fresh.device = cl::Buffer(
                     context_,
                     CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-                    bytes,
-                    fresh.host->data());
+                    working.size() * sizeof(float),
+                    working.data());
             }
 
             it = allocations_.insert_or_assign(ref, std::move(fresh)).first;
@@ -469,6 +508,7 @@ private:
 
         return Slot{
             allocation.on_device,
+            allocation.dtype,
             allocation.host,
             allocation.on_device ? allocation.device : cl::Buffer(),
             allocation.bytes,
@@ -479,6 +519,22 @@ private:
         const auto it = allocations_.find(ref);
 
         return it == allocations_.end() ? 0 : it->second.bytes;
+    }
+
+    void read_device(DataResidencyRef ref, unsigned char* out) {
+        const auto it = allocations_.find(ref);
+
+        if (it == allocations_.end() || !it->second.on_device) {
+            return;
+        }
+
+        cl::CommandQueue queue(context_, device_);
+        queue.enqueueReadBuffer(
+            it->second.device,
+            CL_TRUE,
+            0,
+            it->second.bytes / dtype_bytes(it->second.dtype) * sizeof(float),
+            out);
     }
 
     void read(DataResidencyRef ref, unsigned char* out) {
@@ -677,7 +733,7 @@ private:
             const auto& origin = slots[source_index];
 
             if (exact_copy && source_index != out) {
-                transfer(origin, destination, queue);
+                transfer(origin, destination, work, queue);
                 continue;
             }
 
@@ -708,33 +764,95 @@ private:
     }
 
     // Exact copying: real staging across homes, engine-independent — like a
-    // transfer engine, the path follows where the data lives.
+    // transfer engine, the path follows where the data lives. Same-dtype
+    // copies move stored bytes; mixed-dtype copies convert explicitly
+    // through F32 with the shared helpers. Device buffers hold F32
+    // working copies sized by element count, so device paths convert at
+    // the boundary in both directions.
     static void transfer(
         const Slot& origin,
         const Slot& destination,
+        const WorkDescription& work,
         cl::CommandQueue& queue) {
+        const auto elements = work.storage_elements();
         const auto bytes =
             origin.bytes < destination.bytes ? origin.bytes
                                              : destination.bytes;
 
-        if (!origin.on_device && !destination.on_device) {
-            std::memcpy(
-                destination.host->data(), origin.host->data(), bytes);
+        if (origin.dtype != destination.dtype) {
+            // Mixed-dtype move: decode the source to F32, encode into
+            // the destination dtype, then stage to the destination home.
+            // Device destinations receive F32 working copies.
+            std::vector<float> working(elements, 0.0f);
+            if (origin.on_device) {
+                queue.enqueueReadBuffer(
+                    origin.device,
+                    CL_TRUE,
+                    0,
+                    elements * sizeof(float),
+                    working.data());
+            } else {
+                decode_all(
+                    origin.dtype, origin.host->data(), working.data(), elements);
+            }
+            if (destination.on_device) {
+                queue.enqueueWriteBuffer(
+                    destination.device,
+                    CL_TRUE,
+                    0,
+                    elements * sizeof(float),
+                    working.data());
+            } else {
+                encode_all(
+                    destination.dtype,
+                    working.data(),
+                    destination.host->data(),
+                    elements);
+            }
             return;
         }
 
-        if (origin.on_device && destination.on_device) {
-            queue.enqueueCopyBuffer(
-                origin.device, destination.device, 0, 0, bytes);
-            return;
-        }
+        if (origin.dtype == destination.dtype) {
+            if (!origin.on_device && !destination.on_device) {
+                std::memcpy(
+                    destination.host->data(), origin.host->data(), bytes);
+                return;
+            }
 
-        if (destination.on_device) {
-            queue.enqueueWriteBuffer(
-                destination.device, CL_TRUE, 0, bytes, origin.host->data());
-        } else {
-            queue.enqueueReadBuffer(
-                origin.device, CL_TRUE, 0, bytes, destination.host->data());
+            if (origin.on_device && destination.on_device) {
+                queue.enqueueCopyBuffer(
+                    origin.device,
+                    destination.device,
+                    0,
+                    0,
+                    elements * sizeof(float));
+                return;
+            }
+
+            if (destination.on_device) {
+                std::vector<float> working(elements, 0.0f);
+                decode_all(
+                    origin.dtype, origin.host->data(), working.data(), elements);
+                queue.enqueueWriteBuffer(
+                    destination.device,
+                    CL_TRUE,
+                    0,
+                    elements * sizeof(float),
+                    working.data());
+            } else {
+                std::vector<float> working(elements, 0.0f);
+                queue.enqueueReadBuffer(
+                    origin.device,
+                    CL_TRUE,
+                    0,
+                    elements * sizeof(float),
+                    working.data());
+                encode_all(
+                    destination.dtype,
+                    working.data(),
+                    destination.host->data(),
+                    elements);
+            }
         }
     }
 
@@ -750,22 +868,26 @@ private:
         bool gpu,
         const WorkDescription& work) {
         const auto elements = work.elements;
+        const auto floats = elements * sizeof(float);
 
         if (gpu) {
             cl::Buffer staged_origin = origin.device;
             cl::Buffer staged_destination = destination.device;
 
             if (!origin.on_device) {
+                std::vector<float> decoded(elements, 0.0f);
+                decode_all(
+                    origin.dtype, origin.host->data(), decoded.data(), elements);
                 staged_origin = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    origin.bytes,
-                    origin.host->data());
+                    floats,
+                    decoded.data());
             }
 
             if (!destination.on_device) {
                 staged_destination = cl::Buffer(
-                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE, floats, nullptr);
             }
 
             cl::Kernel kernel(program, "transform");
@@ -779,18 +901,26 @@ private:
                 kernel, cl::NullRange, cl::NDRange(elements));
 
             if (!destination.on_device) {
+                std::vector<float> working(elements, 0.0f);
                 queue.enqueueReadBuffer(
                     staged_destination,
                     CL_TRUE,
                     0,
-                    destination.bytes,
-                    destination.host->data());
+                    floats,
+                    working.data());
+                encode_all(
+                    destination.dtype,
+                    working.data(),
+                    destination.host->data(),
+                    elements);
             }
 
             return;
         }
 
         // CPU engine over host storage, staging device homes as needed.
+        // Device homes hold F32 working copies; host homes decode from
+        // stored dtype through the shared helpers.
         std::vector<float> staged_origin(elements, 1.0f);
         std::vector<float> staged_destination(elements, 1.0f);
 
@@ -800,11 +930,11 @@ private:
                 origin.device,
                 CL_TRUE,
                 0,
-                origin.bytes,
+                floats,
                 staged_origin.data());
         } else {
-            std::memcpy(
-                staged_origin.data(), origin.host->data(), origin.bytes);
+            decode_all(
+                origin.dtype, origin.host->data(), staged_origin.data(), elements);
         }
 
         if (destination.on_device) {
@@ -813,13 +943,14 @@ private:
                 destination.device,
                 CL_TRUE,
                 0,
-                destination.bytes,
+                floats,
                 staged_destination.data());
         } else {
-            std::memcpy(
-                staged_destination.data(),
+            decode_all(
+                destination.dtype,
                 destination.host->data(),
-                destination.bytes);
+                staged_destination.data(),
+                elements);
         }
 
         // Aliasing is defined as the iterated form: when the source is the
@@ -838,13 +969,14 @@ private:
                 destination.device,
                 CL_TRUE,
                 0,
-                destination.bytes,
+                floats,
                 staged_destination.data());
         } else {
-            std::memcpy(
-                destination.host->data(),
+            encode_all(
+                destination.dtype,
                 staged_destination.data(),
-                destination.bytes);
+                destination.host->data(),
+                elements);
         }
     }
 
@@ -863,31 +995,44 @@ private:
         const auto rows = work.rows;
         const auto inner = work.inner;
         const auto columns = work.columns;
+        const auto floats_out = rows * columns * sizeof(float);
 
         if (gpu) {
             cl::Buffer staged_left = left.device;
             cl::Buffer staged_right = right.device;
             cl::Buffer staged_destination = destination.device;
+            std::vector<float> decoded_left(rows * inner, 0.0f);
+            std::vector<float> decoded_right(inner * columns, 0.0f);
 
             if (!left.on_device) {
+                decode_all(
+                    left.dtype,
+                    left.host->data(),
+                    decoded_left.data(),
+                    decoded_left.size());
                 staged_left = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    left.bytes,
-                    left.host->data());
+                    decoded_left.size() * sizeof(float),
+                    decoded_left.data());
             }
 
             if (!right.on_device) {
+                decode_all(
+                    right.dtype,
+                    right.host->data(),
+                    decoded_right.data(),
+                    decoded_right.size());
                 staged_right = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    right.bytes,
-                    right.host->data());
+                    decoded_right.size() * sizeof(float),
+                    decoded_right.data());
             }
 
             if (!destination.on_device) {
                 staged_destination = cl::Buffer(
-                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE, floats_out, nullptr);
             }
 
             cl::Kernel kernel(program, "matrix_product");
@@ -907,18 +1052,25 @@ private:
                 cl::NDRange(rows * columns));
 
             if (!destination.on_device) {
+                std::vector<float> working(rows * columns, 0.0f);
                 queue.enqueueReadBuffer(
                     staged_destination,
                     CL_TRUE,
                     0,
-                    rows * columns * sizeof(float),
-                    destination.host->data());
+                    floats_out,
+                    working.data());
+                encode_all(
+                    destination.dtype,
+                    working.data(),
+                    destination.host->data(),
+                    working.size());
             }
 
             return;
         }
 
-        // CPU engine, staging device homes as needed.
+        // CPU engine, staging device homes as needed. Device homes hold
+        // F32 working copies; host homes decode through shared helpers.
         std::vector<float> staged_left(rows * inner, 1.0f);
         std::vector<float> staged_right(inner * columns, 1.0f);
         std::vector<float> staged_destination(rows * columns, 1.0f);
@@ -934,10 +1086,8 @@ private:
                     target.size() * sizeof(float),
                     target.data());
             } else {
-                std::memcpy(
-                    target.data(),
-                    slot.host->data(),
-                    target.size() * sizeof(float));
+                decode_all(
+                    slot.dtype, slot.host->data(), target.data(), target.size());
             }
         };
 
@@ -974,10 +1124,11 @@ private:
                 staged_destination.size() * sizeof(float),
                 staged_destination.data());
         } else {
-            std::memcpy(
-                destination.host->data(),
+            encode_all(
+                destination.dtype,
                 staged_destination.data(),
-                staged_destination.size() * sizeof(float));
+                destination.host->data(),
+                staged_destination.size());
         }
     }
 
@@ -997,18 +1148,20 @@ private:
         if (gpu) {
             cl::Buffer staged_origin = origin.device;
             cl::Buffer staged_destination = destination.device;
+            std::vector<float> decoded_origin(count, 0.0f);
+            decode_all(origin.dtype, origin.host->data(), decoded_origin.data(), count);
 
             if (!origin.on_device) {
                 staged_origin = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    origin.bytes,
-                    origin.host->data());
+                    count * sizeof(float),
+                    decoded_origin.data());
             }
 
             if (!destination.on_device) {
                 staged_destination = cl::Buffer(
-                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE, count * sizeof(float), nullptr);
             }
 
             cl::Kernel kernel(program, "reduce_sum");
@@ -1023,12 +1176,14 @@ private:
                 kernel, cl::NullRange, cl::NDRange(1));
 
             if (!destination.on_device) {
+                std::vector<float> working(count, 0.0f);
                 queue.enqueueReadBuffer(
                     staged_destination,
                     CL_TRUE,
                     0,
-                    destination.bytes,
-                    destination.host->data());
+                    count * sizeof(float),
+                    working.data());
+                encode_element(destination.dtype, destination.host->data(), 0, working[0]);
             }
 
             return;
@@ -1046,10 +1201,7 @@ private:
                 count * sizeof(float),
                 staged_origin.data());
         } else {
-            std::memcpy(
-                staged_origin.data(),
-                origin.host->data(),
-                count * sizeof(float));
+            decode_all(origin.dtype, origin.host->data(), staged_origin.data(), count);
         }
 
         if (destination.on_device) {
@@ -1061,7 +1213,7 @@ private:
                 sizeof(float),
                 staged_destination.data());
         } else {
-            staged_destination[0] = (*destination.host)[0];
+            staged_destination[0] = decode_element(destination.dtype, destination.host->data(), 0);
         }
 
         for (std::size_t pass = 0; pass < work.passes; ++pass) {
@@ -1085,7 +1237,7 @@ private:
                 sizeof(float),
                 staged_destination.data());
         } else {
-            (*destination.host)[0] = staged_destination[0];
+            encode_element(destination.dtype, destination.host->data(), 0, staged_destination[0]);
         }
     }
 
@@ -1105,18 +1257,20 @@ private:
         if (gpu) {
             cl::Buffer staged_origin = origin.device;
             cl::Buffer staged_destination = destination.device;
+            std::vector<float> decoded_origin(count, 0.0f);
+            decode_all(origin.dtype, origin.host->data(), decoded_origin.data(), count);
 
             if (!origin.on_device) {
                 staged_origin = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    origin.bytes,
-                    origin.host->data());
+                    count * sizeof(float),
+                    decoded_origin.data());
             }
 
             if (!destination.on_device) {
                 staged_destination = cl::Buffer(
-                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE, count * sizeof(float), nullptr);
             }
 
             cl::Kernel kernel(program, "reduce_max");
@@ -1131,12 +1285,14 @@ private:
                 kernel, cl::NullRange, cl::NDRange(1));
 
             if (!destination.on_device) {
+                std::vector<float> working(count, 0.0f);
                 queue.enqueueReadBuffer(
                     staged_destination,
                     CL_TRUE,
                     0,
-                    destination.bytes,
-                    destination.host->data());
+                    count * sizeof(float),
+                    working.data());
+                encode_element(destination.dtype, destination.host->data(), 0, working[0]);
             }
 
             return;
@@ -1154,10 +1310,7 @@ private:
                 count * sizeof(float),
                 staged_origin.data());
         } else {
-            std::memcpy(
-                staged_origin.data(),
-                origin.host->data(),
-                count * sizeof(float));
+            decode_all(origin.dtype, origin.host->data(), staged_origin.data(), count);
         }
 
         if (destination.on_device) {
@@ -1169,7 +1322,7 @@ private:
                 sizeof(float),
                 staged_destination.data());
         } else {
-            staged_destination[0] = (*destination.host)[0];
+            staged_destination[0] = decode_element(destination.dtype, destination.host->data(), 0);
         }
 
         for (std::size_t pass = 0; pass < work.passes; ++pass) {
@@ -1195,7 +1348,7 @@ private:
                 sizeof(float),
                 staged_destination.data());
         } else {
-            (*destination.host)[0] = staged_destination[0];
+            encode_element(destination.dtype, destination.host->data(), 0, staged_destination[0]);
         }
     }
 
@@ -1211,22 +1364,25 @@ private:
         bool gpu,
         const WorkDescription& work) {
         const auto elements = work.elements;
+        const auto floats = elements * sizeof(float);
 
         if (gpu) {
             cl::Buffer staged_origin = origin.device;
             cl::Buffer staged_destination = destination.device;
+            std::vector<float> decoded_origin(elements, 0.0f);
+            decode_all(origin.dtype, origin.host->data(), decoded_origin.data(), elements);
 
             if (!origin.on_device) {
                 staged_origin = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    origin.bytes,
-                    origin.host->data());
+                    floats,
+                    decoded_origin.data());
             }
 
             if (!destination.on_device) {
                 staged_destination = cl::Buffer(
-                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE, floats, nullptr);
             }
 
             cl::Kernel kernel(program, "exponential");
@@ -1240,12 +1396,14 @@ private:
                 kernel, cl::NullRange, cl::NDRange(elements));
 
             if (!destination.on_device) {
+                std::vector<float> working(elements, 0.0f);
                 queue.enqueueReadBuffer(
                     staged_destination,
                     CL_TRUE,
                     0,
-                    destination.bytes,
-                    destination.host->data());
+                    floats,
+                    working.data());
+                encode_all(destination.dtype, working.data(), destination.host->data(), elements);
             }
 
             return;
@@ -1261,11 +1419,10 @@ private:
                 origin.device,
                 CL_TRUE,
                 0,
-                origin.bytes,
+                floats,
                 staged_origin.data());
         } else {
-            std::memcpy(
-                staged_origin.data(), origin.host->data(), origin.bytes);
+            decode_all(origin.dtype, origin.host->data(), staged_origin.data(), elements);
         }
 
         if (destination.on_device) {
@@ -1274,13 +1431,10 @@ private:
                 destination.device,
                 CL_TRUE,
                 0,
-                destination.bytes,
+                floats,
                 staged_destination.data());
         } else {
-            std::memcpy(
-                staged_destination.data(),
-                destination.host->data(),
-                destination.bytes);
+            decode_all(destination.dtype, destination.host->data(), staged_destination.data(), elements);
         }
 
         for (std::size_t pass = 0; pass < work.passes; ++pass) {
@@ -1298,13 +1452,10 @@ private:
                 destination.device,
                 CL_TRUE,
                 0,
-                destination.bytes,
+                floats,
                 staged_destination.data());
         } else {
-            std::memcpy(
-                destination.host->data(),
-                staged_destination.data(),
-                destination.bytes);
+            encode_all(destination.dtype, staged_destination.data(), destination.host->data(), elements);
         }
     }
 
@@ -1324,18 +1475,20 @@ private:
         if (gpu) {
             cl::Buffer staged_origin = origin.device;
             cl::Buffer staged_destination = destination.device;
+            std::vector<float> decoded_origin(count, 0.0f);
+            decode_all(origin.dtype, origin.host->data(), decoded_origin.data(), count);
 
             if (!origin.on_device) {
                 staged_origin = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    origin.bytes,
-                    origin.host->data());
+                    count * sizeof(float),
+                    decoded_origin.data());
             }
 
             if (!destination.on_device) {
                 staged_destination = cl::Buffer(
-                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE, count * sizeof(float), nullptr);
             }
 
             cl::Kernel kernel(program, "reduce_min");
@@ -1350,12 +1503,14 @@ private:
                 kernel, cl::NullRange, cl::NDRange(1));
 
             if (!destination.on_device) {
+                std::vector<float> working(count, 0.0f);
                 queue.enqueueReadBuffer(
                     staged_destination,
                     CL_TRUE,
                     0,
-                    destination.bytes,
-                    destination.host->data());
+                    count * sizeof(float),
+                    working.data());
+                encode_element(destination.dtype, destination.host->data(), 0, working[0]);
             }
 
             return;
@@ -1373,10 +1528,7 @@ private:
                 count * sizeof(float),
                 staged_origin.data());
         } else {
-            std::memcpy(
-                staged_origin.data(),
-                origin.host->data(),
-                count * sizeof(float));
+            decode_all(origin.dtype, origin.host->data(), staged_origin.data(), count);
         }
 
         if (destination.on_device) {
@@ -1388,7 +1540,7 @@ private:
                 sizeof(float),
                 staged_destination.data());
         } else {
-            staged_destination[0] = (*destination.host)[0];
+            staged_destination[0] = decode_element(destination.dtype, destination.host->data(), 0);
         }
 
         for (std::size_t pass = 0; pass < work.passes; ++pass) {
@@ -1414,7 +1566,7 @@ private:
                 sizeof(float),
                 staged_destination.data());
         } else {
-            (*destination.host)[0] = staged_destination[0];
+            encode_element(destination.dtype, destination.host->data(), 0, staged_destination[0]);
         }
     }
 
@@ -1435,30 +1587,36 @@ private:
             ? "elementwise_min"
             : "elementwise_max";
 
+        const auto floats = elements * sizeof(float);
+
         if (gpu) {
             cl::Buffer staged_left = left.device;
             cl::Buffer staged_right = right.device;
             cl::Buffer staged_destination = destination.device;
+            std::vector<float> decoded_left(elements, 0.0f);
+            std::vector<float> decoded_right(elements, 0.0f);
+            decode_all(left.dtype, left.host->data(), decoded_left.data(), elements);
+            decode_all(right.dtype, right.host->data(), decoded_right.data(), elements);
 
             if (!left.on_device) {
                 staged_left = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    left.bytes,
-                    left.host->data());
+                    floats,
+                    decoded_left.data());
             }
 
             if (!right.on_device) {
                 staged_right = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    right.bytes,
-                    right.host->data());
+                    floats,
+                    decoded_right.data());
             }
 
             if (!destination.on_device) {
                 staged_destination = cl::Buffer(
-                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE, floats, nullptr);
             }
 
             cl::Kernel kernel(program, name);
@@ -1473,12 +1631,14 @@ private:
                 kernel, cl::NullRange, cl::NDRange(elements));
 
             if (!destination.on_device) {
+                std::vector<float> working(elements, 0.0f);
                 queue.enqueueReadBuffer(
                     staged_destination,
                     CL_TRUE,
                     0,
-                    destination.bytes,
-                    destination.host->data());
+                    floats,
+                    working.data());
+                encode_all(destination.dtype, working.data(), destination.host->data(), elements);
             }
 
             return;
@@ -1530,39 +1690,47 @@ private:
         const WorkDescription& work) {
         const auto elements = work.elements;
 
+        const auto floats = elements * sizeof(float);
+
         if (gpu) {
             cl::Buffer staged_predicate = predicate.device;
             cl::Buffer staged_first = first.device;
             cl::Buffer staged_second = second.device;
             cl::Buffer staged_destination = destination.device;
+            std::vector<float> decoded_predicate(elements, 0.0f);
+            std::vector<float> decoded_first(elements, 0.0f);
+            std::vector<float> decoded_second(elements, 0.0f);
+            decode_all(predicate.dtype, predicate.host->data(), decoded_predicate.data(), elements);
+            decode_all(first.dtype, first.host->data(), decoded_first.data(), elements);
+            decode_all(second.dtype, second.host->data(), decoded_second.data(), elements);
 
             if (!predicate.on_device) {
                 staged_predicate = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    predicate.bytes,
-                    predicate.host->data());
+                    floats,
+                    decoded_predicate.data());
             }
 
             if (!first.on_device) {
                 staged_first = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    first.bytes,
-                    first.host->data());
+                    floats,
+                    decoded_first.data());
             }
 
             if (!second.on_device) {
                 staged_second = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    second.bytes,
-                    second.host->data());
+                    floats,
+                    decoded_second.data());
             }
 
             if (!destination.on_device) {
                 staged_destination = cl::Buffer(
-                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE, floats, nullptr);
             }
 
             cl::Kernel kernel(program, "mask_select");
@@ -1578,12 +1746,14 @@ private:
                 kernel, cl::NullRange, cl::NDRange(elements));
 
             if (!destination.on_device) {
+                std::vector<float> working(elements, 0.0f);
                 queue.enqueueReadBuffer(
                     staged_destination,
                     CL_TRUE,
                     0,
-                    destination.bytes,
-                    destination.host->data());
+                    floats,
+                    working.data());
+                encode_all(destination.dtype, working.data(), destination.host->data(), elements);
             }
 
             return;
@@ -1632,31 +1802,36 @@ private:
         bool gpu,
         const WorkDescription& work) {
         const auto elements = work.elements;
+        const auto floats = elements * sizeof(float);
 
         if (gpu) {
             cl::Buffer staged_table = table.device;
             cl::Buffer staged_indices = indices.device;
             cl::Buffer staged_destination = destination.device;
+            std::vector<float> decoded_table(elements, 0.0f);
+            std::vector<float> decoded_indices(elements, 0.0f);
+            decode_all(table.dtype, table.host->data(), decoded_table.data(), elements);
+            decode_all(indices.dtype, indices.host->data(), decoded_indices.data(), elements);
 
             if (!table.on_device) {
                 staged_table = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    table.bytes,
-                    table.host->data());
+                    floats,
+                    decoded_table.data());
             }
 
             if (!indices.on_device) {
                 staged_indices = cl::Buffer(
                     context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                    indices.bytes,
-                    indices.host->data());
+                    floats,
+                    decoded_indices.data());
             }
 
             if (!destination.on_device) {
                 staged_destination = cl::Buffer(
-                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE, floats, nullptr);
             }
 
             cl::Kernel kernel(program, "gather");
@@ -1672,12 +1847,14 @@ private:
                 kernel, cl::NullRange, cl::NDRange(elements));
 
             if (!destination.on_device) {
+                std::vector<float> working(elements, 0.0f);
                 queue.enqueueReadBuffer(
                     staged_destination,
                     CL_TRUE,
                     0,
-                    destination.bytes,
-                    destination.host->data());
+                    floats,
+                    working.data());
+                encode_all(destination.dtype, working.data(), destination.host->data(), elements);
             }
 
             return;
@@ -1775,10 +1952,7 @@ private:
                 staged.size() * sizeof(float),
                 staged.data());
         } else {
-            std::memcpy(
-                staged.data(),
-                slot.host->data(),
-                staged.size() * sizeof(float));
+            decode_all(slot.dtype, slot.host->data(), staged.data(), staged.size());
         }
     }
 
@@ -1797,10 +1971,7 @@ private:
                 staged.size() * sizeof(float),
                 staged.data());
         } else {
-            std::memcpy(
-                destination.host->data(),
-                staged.data(),
-                staged.size() * sizeof(float));
+            encode_all(destination.dtype, staged.data(), destination.host->data(), staged.size());
         }
     }
 
@@ -1815,13 +1986,19 @@ private:
         bool gpu,
         const WorkDescription& work) {
         const auto elements = work.elements;
+        const auto floats = elements * sizeof(float);
 
         if (gpu) {
             cl::Buffer staged = destination.device;
 
             if (!destination.on_device) {
+                // Sourceless fill over a non-F32 home: decode the current
+                // values to F32 first so the kernel's dst term is right,
+                // then upload the working copy.
+                std::vector<float> decoded(elements, 0.0f);
+                decode_all(destination.dtype, destination.host->data(), decoded.data(), elements);
                 staged = cl::Buffer(
-                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, floats, decoded.data());
             }
 
             cl::Kernel kernel(program, "fill");
@@ -1833,8 +2010,10 @@ private:
                 kernel, cl::NullRange, cl::NDRange(elements));
 
             if (!destination.on_device) {
+                std::vector<float> working(elements, 0.0f);
                 queue.enqueueReadBuffer(
-                    staged, CL_TRUE, 0, destination.bytes, destination.host->data());
+                    staged, CL_TRUE, 0, floats, working.data());
+                encode_all(destination.dtype, working.data(), destination.host->data(), elements);
             }
 
             return;
@@ -1848,7 +2027,7 @@ private:
                 destination.device,
                 CL_TRUE,
                 0,
-                destination.bytes,
+                floats,
                 staged.data());
 
             for (std::size_t pass = 0; pass < work.passes; ++pass) {
@@ -1862,19 +2041,22 @@ private:
                 destination.device,
                 CL_TRUE,
                 0,
-                destination.bytes,
+                floats,
                 staged.data());
 
             return;
         }
 
+        std::vector<float> decoded(elements, 0.0f);
+        decode_all(destination.dtype, destination.host->data(), decoded.data(), elements);
         for (std::size_t pass = 0; pass < work.passes; ++pass) {
             for (std::size_t i = 0; i < elements; ++i) {
-                (*destination.host)[i] =
-                    (*destination.host)[i] * work.destination_scale +
+                decoded[i] =
+                    decoded[i] * work.destination_scale +
                     work.constant;
             }
         }
+        encode_all(destination.dtype, decoded.data(), destination.host->data(), elements);
     }
 
     const DataRegistry& data_;

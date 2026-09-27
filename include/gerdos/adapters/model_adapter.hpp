@@ -51,6 +51,7 @@ struct ModelStep {
     float destination_scale{1.0f};
     float source_scale{1.0f};
     float constant{0.0f};
+    WorkDtype dtype{WorkDtype::F32};
 };
 
 struct Adaptation {
@@ -70,6 +71,7 @@ struct Adaptation {
     std::uint64_t next_id = 4000;
 
     for (const auto& step : steps) {
+        const std::size_t before = adaptation.workload.operations.size();
         switch (step.op) {
         case ModelOp::LINEAR: {
             if (step.rows == 0 || step.inner == 0 ||
@@ -411,6 +413,13 @@ struct Adaptation {
                 "ATTENTION: depends on SOFTMAX, which the algebra "
                 "cannot express exactly");
             break;
+        }
+
+        // Dtype carriage: the emitted work (if any) runs in the step's
+        // dtype. Refused steps `continue` before pushing, so only
+        // accepted steps are stamped.
+        if (adaptation.workload.operations.size() == before + 1) {
+            adaptation.workload.operations.back().work.dtype = step.dtype;
         }
     }
 

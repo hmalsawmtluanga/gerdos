@@ -7,10 +7,12 @@
 #include <cstring>
 #include <future>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include "gerdos/core/dtype.hpp"
 #include "gerdos/core/execution_backend.hpp"
 #include "gerdos/core/physical_binding.hpp"
 
@@ -63,29 +65,58 @@ public:
         // Rejection-atomic submission: workers hold shared ownership of
         // their storage, so replacements cannot dangle under a live job,
         // and a failed launch restores exactly what it changed.
-        std::vector<std::pair<DataResidencyRef, Buffer>> undo;
+        // Allocations are byte buffers in the work's dtype; a record
+        // retargeted to another dtype reinitializes, never reinterprets.
+        std::vector<std::pair<DataResidencyRef, std::optional<Allocation>>> undo;
         jobs_.reserve(jobs_.size() + 1);
 
         try {
             std::vector<Buffer> keeps;
+            std::vector<WorkDtype> dtypes;
 
             for (const auto& entry : binding->data) {
                 const auto& ref = entry.residency;
-                const auto it = allocations_.find(ref);
+                auto it = allocations_.find(ref);
+                const auto bytes =
+                    work.storage_elements() * work.storage_bytes();
 
-                if (it == allocations_.end() ||
-                    it->second->size() != work.storage_elements()) {
+                // Allocations keep their own dtype across attempts: a
+                // record touched by F32 work then I8 work keeps its
+                // storage and converts per operation in run(). Only a
+                // missing record or an element-count mismatch
+                // reallocates (fresh storage takes the work's dtype).
+                // Retargeting on dtype alone would wipe the operand.
+                const bool count_matches =
+                    it != allocations_.end() &&
+                    it->second.bytes / dtype_bytes(it->second.dtype) ==
+                        work.storage_elements();
+
+                if (!count_matches) {
                     undo.emplace_back(
                         ref,
-                        it == allocations_.end() ? Buffer{}
-                                                 : it->second);
-                    allocations_[ref] = std::make_shared<
-                        std::vector<float>>(
-                        work.storage_elements(),
-                        1.0f);
+                        it == allocations_.end()
+                            ? std::optional<Allocation>{}
+                            : std::optional<Allocation>{it->second});
+                    Allocation fresh;
+                    fresh.dtype = work.dtype;
+                    fresh.bytes = bytes;
+                    fresh.storage =
+                        std::make_shared<std::vector<unsigned char>>(
+                            bytes, 0);
+                    // Fresh storage decodes to F32 1.0 per element — the
+                    // same initial value the F32 path always had.
+                    std::vector<float> ones(work.storage_elements(), 1.0f);
+                    encode_all(
+                        work.dtype,
+                        ones.data(),
+                        fresh.storage->data(),
+                        ones.size());
+                    it = allocations_.insert_or_assign(ref, std::move(fresh))
+                             .first;
                 }
 
-                keeps.push_back(allocations_[ref]);
+                keeps.push_back(it->second.storage);
+                dtypes.push_back(it->second.dtype);
             }
 
             jobs_.push_back(
@@ -95,24 +126,25 @@ public:
                         std::launch::async,
                         [binding_copy = *binding,
                          keeps = std::move(keeps),
+                         dtypes = std::move(dtypes),
                          work,
                          succeeded]() {
-                            std::vector<float*> buffers;
+                            std::vector<unsigned char*> buffers;
 
                             for (const auto& keep : keeps) {
                                 buffers.push_back(keep->data());
                             }
 
                             return run(
-                                binding_copy, buffers, work, succeeded);
+                                binding_copy, buffers, dtypes, work, succeeded);
                         }),
                 });
         } catch (...) {
             // The launch failed: nothing was enqueued, and every change
             // made for it is undone.
             for (const auto& [ref, previous] : undo) {
-                if (previous) {
-                    allocations_[ref] = previous;
+                if (previous.has_value()) {
+                    allocations_[ref] = *previous;
                 } else {
                     (void)allocations_.erase(ref);
                 }
@@ -153,22 +185,35 @@ public:
         return allocations_.size();
     }
 
+    // Inspection surface: element count, not bytes — the name predates
+    // dtypes and stays for compatibility; byte size is elements times
+    // the record's dtype width.
     [[nodiscard]] std::size_t allocation_bytes(
         DataResidencyRef ref) const noexcept {
         const auto it = allocations_.find(ref);
 
-        return it == allocations_.end() ? 0 : it->second->size();
+        if (it == allocations_.end()) {
+            return 0;
+        }
+
+        return it->second.bytes / dtype_bytes(it->second.dtype);
     }
 
     [[nodiscard]] float sample(DataResidencyRef ref, std::size_t index) {
         const auto it = allocations_.find(ref);
 
-        if (it == allocations_.end() ||
-            it->second->size() <= index) {
+        if (it == allocations_.end()) {
             return 0.0f;
         }
 
-        return (*it->second)[index];
+        const auto width = dtype_bytes(it->second.dtype);
+
+        if ((index + 1) * width > it->second.bytes) {
+            return 0.0f;
+        }
+
+        return decode_element(
+            it->second.dtype, it->second.storage->data(), index);
     }
 
     [[nodiscard]] bool allocations_equal(
@@ -179,7 +224,9 @@ public:
 
         return left_it != allocations_.end() &&
                right_it != allocations_.end() &&
-               *left_it->second == *right_it->second;
+               left_it->second.dtype == right_it->second.dtype &&
+                left_it->second.bytes == right_it->second.bytes &&
+                *left_it->second.storage == *right_it->second.storage;
     }
 
 private:
@@ -193,16 +240,61 @@ private:
         std::future<Outcome> result;
     };
 
-    using Buffer = std::shared_ptr<std::vector<float>>;
+    using Buffer = std::shared_ptr<std::vector<unsigned char>>;
+
+    struct Allocation {
+        WorkDtype dtype{WorkDtype::F32};
+        std::size_t bytes{0};
+        Buffer storage;
+    };
 
     // The declared work over the bound representations: exact copying when
     // the description says so, otherwise the affine elementwise transform.
     static Outcome run(
         const PhysicalBinding& binding,
-        const std::vector<float*>& buffers,
+        const std::vector<unsigned char*>& buffers,
+        const std::vector<WorkDtype>& dtypes,
         const WorkDescription& work,
         bool configured) {
         const auto begin = std::chrono::steady_clock::now();
+
+        // Structural conversion: decode every bound representation to
+        // F32 scratch once, compute entirely in F32, encode back once.
+        // Mixed-dtype attempts convert explicitly through the shared
+        // helpers; engine semantics stay identical across dtypes.
+        // Entries sharing one residency share one scratch: aliased
+        // in-place sources must observe each pass's write, exactly as
+        // the F32 path always did.
+        std::vector<std::vector<float>> owned;
+        std::vector<std::size_t> scratch_for(buffers.size(), 0);
+        for (std::size_t b = 0; b < buffers.size(); ++b) {
+            bool shared = false;
+            for (std::size_t earlier = 0; earlier < b; ++earlier) {
+                if (buffers[earlier] == buffers[b]) {
+                    scratch_for[b] = scratch_for[earlier];
+                    shared = true;
+                    break;
+                }
+            }
+            if (shared) {
+                continue;
+            }
+            scratch_for[b] = owned.size();
+            owned.emplace_back(work.storage_elements(), 0.0f);
+            decode_all(dtypes[b], buffers[b], owned.back().data(), work.storage_elements());
+        }
+        std::vector<float*> f32;
+        f32.reserve(buffers.size());
+        for (std::size_t b = 0; b < buffers.size(); ++b) {
+            f32.push_back(owned[scratch_for[b]].data());
+        }
+        const auto encode_back = [&]() {
+            for (std::size_t b = 0; b < buffers.size(); ++b) {
+                if (is_producing(binding.data[b].role)) {
+                    encode_all(dtypes[b], owned[scratch_for[b]].data(), buffers[b], work.storage_elements());
+                }
+            }
+        };
 
         const bool exact_copy =
             work.form == WorkForm::ELEMENTWISE_AFFINE &&
@@ -224,7 +316,7 @@ private:
                 continue;
             }
 
-            float* destination = buffers[out];
+            float* destination = f32[out];
             const auto source_index =
                 work_source_index(binding, out);
             const bool has_source = source_index < binding.data.size();
@@ -234,8 +326,8 @@ private:
                     continue;
                 }
 
-                const float* left = buffers[consuming[0]];
-                const float* right = buffers[consuming[1]];
+                const float* left = f32[consuming[0]];
+                const float* right = f32[consuming[1]];
 
                 for (std::size_t pass = 0; pass < work.passes; ++pass) {
                     for (std::size_t i = 0; i < work.rows; ++i) {
@@ -269,7 +361,7 @@ private:
                     continue;
                 }
 
-                const float* origin = buffers[source_index];
+                const float* origin = f32[source_index];
 
                 for (std::size_t pass = 0; pass < work.passes; ++pass) {
                     float sum = 0.0f;
@@ -291,7 +383,7 @@ private:
                     continue;
                 }
 
-                const float* origin = buffers[source_index];
+                const float* origin = f32[source_index];
 
                 for (std::size_t pass = 0; pass < work.passes; ++pass) {
                     float peak = origin[0];
@@ -315,7 +407,7 @@ private:
                     continue;
                 }
 
-                const float* origin = buffers[source_index];
+                const float* origin = f32[source_index];
 
                 for (std::size_t pass = 0; pass < work.passes; ++pass) {
                     float floor = origin[0];
@@ -344,8 +436,8 @@ private:
                     continue;
                 }
 
-                const float* left = buffers[consuming[0]];
-                const float* right = buffers[consuming[1]];
+                const float* left = f32[consuming[0]];
+                const float* right = f32[consuming[1]];
                 const bool take_min =
                     work.form == WorkForm::ELEMENTWISE_MIN;
 
@@ -374,9 +466,9 @@ private:
                     continue;
                 }
 
-                const float* predicate = buffers[consuming[0]];
-                const float* first = buffers[consuming[1]];
-                const float* second = buffers[consuming[2]];
+                const float* predicate = f32[consuming[0]];
+                const float* first = f32[consuming[1]];
+                const float* second = f32[consuming[2]];
 
                 for (std::size_t pass = 0; pass < work.passes; ++pass) {
                     for (std::size_t i = 0; i < work.elements; ++i) {
@@ -400,8 +492,8 @@ private:
                     continue;
                 }
 
-                const float* table = buffers[consuming[0]];
-                const float* indices = buffers[consuming[1]];
+                const float* table = f32[consuming[0]];
+                const float* indices = f32[consuming[1]];
                 const auto last =
                     static_cast<std::int64_t>(work.elements - 1);
                 const float last_float = static_cast<float>(
@@ -445,7 +537,7 @@ private:
                     continue;
                 }
 
-                const float* origin = buffers[source_index];
+                const float* origin = f32[source_index];
 
                 for (std::size_t pass = 0; pass < work.passes; ++pass) {
                     for (std::size_t i = 0; i < work.elements; ++i) {
@@ -471,7 +563,7 @@ private:
                 continue;
             }
 
-            const float* origin = buffers[source_index];
+            const float* origin = f32[source_index];
 
             if (exact_copy && source_index != out) {
                 std::memcpy(
@@ -490,6 +582,7 @@ private:
             }
         }
 
+        encode_back();
         const auto end = std::chrono::steady_clock::now();
 
         return Outcome{
@@ -502,7 +595,7 @@ private:
     }
 
     std::unordered_set<ExecutionId> failures_;
-    std::unordered_map<DataResidencyRef, Buffer> allocations_;
+    std::unordered_map<DataResidencyRef, Allocation> allocations_;
     std::vector<Job> jobs_;
     std::unordered_set<ExecutionId> submitted_;
 };

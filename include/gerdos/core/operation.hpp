@@ -70,6 +70,30 @@ enum class WorkForm : std::uint8_t {
     GATHER,
 };
 
+// The element type of a declared computation: generic dtype vocabulary.
+// F32 is the default so every existing construction site keeps its
+// meaning; F16 and I8 extend the algebra without splitting forms.
+// Dtype is a parameter beside form — no gate inspects it.
+enum class WorkDtype : std::uint8_t {
+    F32,
+    F16,
+    I8,
+};
+
+// The byte width of one element of a dtype.
+[[nodiscard]] constexpr std::size_t dtype_bytes(WorkDtype dtype) noexcept {
+    switch (dtype) {
+    case WorkDtype::F32:
+        return 4;
+    case WorkDtype::F16:
+        return 2;
+    case WorkDtype::I8:
+        return 1;
+    }
+
+    return 4;
+}
+
 // The declared computation of an attempt, expressed as generic data-parallel
 // semantics over the bound representations, repeated passes times. Exact
 // copying is the elementwise form with destination_scale 0, source_scale 1,
@@ -93,13 +117,22 @@ struct WorkDescription {
     std::size_t rows{0};
     std::size_t inner{0};
     std::size_t columns{0};
+    WorkDtype dtype{WorkDtype::F32};
 
-    // Well-formed executable work: non-empty and safely sized. Gates never
-    // inspect the work; the seam rejects work that is not well-formed
-    // rather than executing hostile arithmetic.
+    // Well-formed executable work: non-empty and safely sized. The byte
+    // sizing multiplies by the dtype width under the same overflow guard
+    // as the element counts. Gates never inspect the work; the seam
+    // rejects work that is not well-formed rather than executing hostile
+    // arithmetic.
     [[nodiscard]] constexpr bool valid() const noexcept {
-        constexpr auto limit =
-            std::numeric_limits<std::size_t>::max() / sizeof(float);
+        constexpr auto max_bytes = std::numeric_limits<std::size_t>::max();
+        const auto width = dtype_bytes(dtype);
+        const auto limit = max_bytes / width;
+
+        if (dtype != WorkDtype::F32 && dtype != WorkDtype::F16 &&
+            dtype != WorkDtype::I8) {
+            return false;
+        }
 
         switch (form) {
         case WorkForm::ELEMENTWISE_AFFINE:
@@ -121,8 +154,13 @@ struct WorkDescription {
         return false;
     }
 
-    // The largest operand this work touches, in float elements — the
-    // storage every bound representation needs.
+    // The byte width of one stored element.
+    [[nodiscard]] constexpr std::size_t storage_bytes() const noexcept {
+        return dtype_bytes(dtype);
+    }
+
+    // The largest operand this work touches, in elements — the storage
+    // every bound representation needs, times storage_bytes() for bytes.
     [[nodiscard]] constexpr std::size_t storage_elements() const noexcept {
         if (form != WorkForm::MATRIX_PRODUCT) {
             return elements;
