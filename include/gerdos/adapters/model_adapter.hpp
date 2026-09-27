@@ -34,9 +34,17 @@ enum class ModelOp {
     GATHER,
     // Move a representation to another home.
     MOVE,
+    // dst = activation + residual, the skip-connection add.
+    RESIDUAL_ADD,
+    // dst[0] accumulates the mean of an operand (sum divided by the
+    // element count, folded through the affine wrapper exactly).
+    REDUCE_MEAN,
     // Refused by the current algebra — kept so refusal is explicit.
     SOFTMAX,
     ATTENTION,
+    // Refused: needs division the algebra cannot express exactly.
+    DIVIDE,
+    LAYER_NORM,
 };
 
 struct ModelStep {
@@ -423,6 +431,60 @@ struct Adaptation {
             adaptation.refused.push_back(
                 "ATTENTION: depends on SOFTMAX, which is refused as a "
                 "composite until its closing divide-by-sum has a form");
+            break;
+
+        case ModelOp::RESIDUAL_ADD:
+            // The affine form reads one source per producing entry —
+            // A + B needs two sources summed, which no single affine
+            // operation expresses. Refused rather than approximated.
+            adaptation.refused.push_back(
+                "RESIDUAL_ADD: the affine form reads one source per"
+                " producing entry — A + B is not expressible exactly");
+            break;
+
+        case ModelOp::REDUCE_MEAN: {
+            // Mean is exactly expressible: sum folded with source_scale
+            // 1/N — no division form needed. A zero count is refused.
+            if (step.rows == 0) {
+                adaptation.refused.push_back(
+                    "REDUCE_MEAN without an element count");
+                continue;
+            }
+
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}},
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        0.0f,
+                        1.0f / static_cast<float>(step.rows),
+                        0.0f,
+                        WorkForm::REDUCE_SUM,
+                    },
+                });
+            break;
+        }
+
+        case ModelOp::DIVIDE:
+            adaptation.refused.push_back(
+                "DIVIDE: the algebra has no division form — the exact"
+                " reason SOFTMAX stays refused");
+            break;
+
+        case ModelOp::LAYER_NORM:
+            adaptation.refused.push_back(
+                "LAYER_NORM: needs variance and division, neither of"
+                " which the algebra expresses exactly");
             break;
         }
 
