@@ -38,17 +38,19 @@ namespace gerdos {
 //   - movement between distinct records requires a covering topology link
 //
 // Claimed producing records are never planned onto. Measurement-informed
-// preference is discovery before exploitation, bounded by an exploration
-// budget: unmeasured mechanisms are sampled while the evidence log is small,
-// and once measured, mean successful duration decides. Failure evidence is
-// not speed evidence, and saturated totals are not evidence of speed.
+// preference is discovery before exploitation, decided per comparison:
+// unmeasured mechanisms are sampled ahead of measured ones (ties by
+// declared attributes), and once measured, mean successful duration
+// decides. Failure evidence is not speed evidence, and saturated totals
+// are not evidence of speed.
 class BindingPlanner {
 public:
-    // Discovery is bounded: while the evidence log holds fewer
-    // observations than this budget, unmeasured mechanisms are sampled
-    // ahead of measured ones. Beyond it, measured behavior outranks
-    // unmeasured mechanisms and later arrivals wait for a future
-    // exploration policy.
+    // Discovery is per-comparison, not budgeted: unmeasured mechanisms
+    // are sampled ahead of measured ones, ties break by declared
+    // attributes, and later arrivals earn one bounded re-exploration
+    // sample before means decide. Kept for compatibility: existing
+    // callers and tests may reference the historical budget value.
+    // New code must not branch on it.
     static constexpr std::size_t kExplorationBudget = 32;
 
     BindingPlanner(
@@ -854,12 +856,10 @@ private:
                 std::numeric_limits<std::uint64_t>::max();
 
         if (left_measured != right_measured) {
-            // Inside the budget, discovery: the unmeasured mechanism is
-            // sampled. Beyond it, exploitation: measured behavior wins.
-            const bool discovery_remains =
-                measurements_.count() < kExplorationBudget;
-
-            return discovery_remains ? !left_measured : left_measured;
+            // Discovery: the unmeasured mechanism is sampled — including
+            // later arrivals, which earn one bounded re-exploration
+            // sample against measured incumbents before means decide.
+            return !left_measured;
         }
 
         if (left_measured) {
