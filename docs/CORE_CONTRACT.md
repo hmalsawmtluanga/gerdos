@@ -1190,10 +1190,19 @@ Version-zero selection rules:
   from covering-link endpoints with the same declared-attribute preference
 - movement between distinct records requires a covering topology link
 
-Claimed producing records are never planned onto. Measurements are not
-consulted in this version. Planning does not order work, resolve dependencies,
-produce multi-attempt plans, or reserve capacity; those are later planning
-concerns.
+Claimed producing records are never planned onto. Planning does not order
+work, resolve dependencies, produce multi-attempt plans, or reserve capacity;
+those are later planning concerns.
+
+Measurement-informed preference: where the evidence log holds successful
+observations of the same Operation on a candidate mechanism, planning ranks
+candidates by their mean observed duration — measured behavior outranks
+declared attributes, and faster outranks slower among measured candidates.
+Candidates without such evidence rank after measured ones by the declared
+rules. Failure evidence is not speed evidence, and evidence gathered for other
+operations is not comparable. Record and link selection remain
+declared-attribute based until measurement subjects generalize beyond
+mechanisms.
 
 ## Runtime Integration
 
