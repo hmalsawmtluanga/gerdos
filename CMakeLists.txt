@@ -160,6 +160,25 @@ else()
         "OpenCL not found: the heterogeneous backend test is not registered")
 endif()
 
+# The Vulkan compute backend test requires a Vulkan toolchain and a real
+# GPU with a compute queue (software rasterizers do not count). The test
+# registers only when the toolchain is found and aborts at vk_available()
+# on machines without a suitable device — the established hardware-gating
+# pattern.
+find_package(Vulkan QUIET)
+
+if (Vulkan_FOUND)
+    gerdos_add_test(gerdos_core_vk_compute
+        tests/core_vk_compute_backend.cpp)
+    target_include_directories(gerdos_core_vk_compute_test
+        PRIVATE ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(gerdos_core_vk_compute_test
+        PRIVATE ${Vulkan_LIBRARIES})
+else()
+    message(STATUS
+        "Vulkan not found: the Vulkan compute backend test is not registered")
+endif()
+
 add_executable(gerdos_core_no_leakage_test
     tests/core_no_leakage.cpp
 )
