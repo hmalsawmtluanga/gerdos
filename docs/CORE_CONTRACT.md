@@ -1233,13 +1233,24 @@ and its completion is reported with its outcome.
 ## Operation Work Descriptions
 
 An Operation declares its computation as a work description: generic
-data-parallel semantics over the bound representations. Each producing
-representation is transformed toward `dst * destination_scale + source_scale
-* src + constant`, repeated `passes` times over `elements` float elements.
-Exact copying is the destination_scale 0, source_scale 1, constant 0,
-passes 1 case; a producing representation without a consuming source is
-transformed without the source term. The consuming record of the same Data
-supplies the source — or, for compute shapes, the first consuming entry.
+data-parallel semantics over the bound representations. The elementwise
+form transforms each producing representation toward `dst *
+destination_scale + source_scale * src + constant`, repeated `passes`
+times over `elements` float elements. Exact copying is the destination_scale
+0, source_scale 1, constant 0, passes 1 case; a producing representation
+without a consuming source is transformed without the source term. The
+consuming record of the same Data supplies the source — or, for compute
+shapes, the first consuming entry.
+
+Two further elementwise forms complete the normalization vocabulary. The
+exponential form applies the same affine wrapper around the natural
+exponential: `dst * destination_scale + source_scale * exp(src) +
+constant`, repeated `passes` times. The maximum-reduction form folds an
+operand into one element: `dst[0] = dst[0] * destination_scale +
+source_scale * max(src) + constant`, repeated `passes` times. Both forms
+apply elementwise to every producing entry; the maximum-reduction form
+writes only its first element and leaves the rest alone, exactly as the
+sum-reduction form does.
 
 The work description is parameters, not kinds: there is no operation type
 anywhere in the core, and no gate inspects the work. Structural validation,
@@ -1251,11 +1262,17 @@ algebra changes no gate.
 Well-formed work is executable work: the seam rejects work descriptions
 with zero elements, zero passes, or sizing that cannot be allocated —
 hostile arithmetic must never reach an allocation or a kernel, and a
-vacuous success is not speed evidence. Identity registration accepts any
-declared work because registration is not execution.
+vacuous success is not speed evidence. Matrix shapes additionally require
+non-zero rows, inner, and columns with products that cannot overflow.
+Identity registration accepts any declared work because registration is not
+execution.
 
 When the source is the destination record, the transform is defined as the
-iterated form: each pass composes over the previous result.
+iterated form: each pass composes over the previous result. This holds for
+every elementwise form, including the exponential: an in-place exponential
+pass reads the value the previous pass wrote. Both reduction forms are
+also iterated: each pass re-folds the unchanged source into the running
+first element.
 
 Model adapters translate model semantics into this vocabulary; the core
 never sees model terms. The element type is float in this version. The
