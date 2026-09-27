@@ -189,15 +189,24 @@ public:
             return false;
         }
 
+        const bool began =
+            execution->state() == ExecutionState::RUNNING;
+
         if (!execution->set_state(ExecutionState::CANCELLED)) {
             return false;
         }
 
         // Finishing effects apply exactly when the attempt holds claims,
-        // regardless of the state it is cancelled from.
-        const bool effects_ok =
-            !effects_.holds_claims(*execution) ||
-            effects_.finish(*execution);
+        // regardless of the state it is cancelled from. A begun attempt
+        // with producing bindings that holds no claims is incoherent — its
+        // begin effects never applied — and is reported as such.
+        bool effects_ok = true;
+
+        if (effects_.holds_claims(*execution)) {
+            effects_ok = effects_.finish(*execution);
+        } else if (began && effects_.produces(*execution)) {
+            effects_ok = false;
+        }
 
         (void)execution->record_result(
             ExecutionResult{

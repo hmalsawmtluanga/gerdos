@@ -93,6 +93,24 @@ public:
         return false;
     }
 
+    // Whether the attempt binds any producing residency at all.
+    [[nodiscard]] bool produces(const Execution& execution) const
+        noexcept {
+        const auto* binding = execution.binding();
+
+        if (binding == nullptr) {
+            return false;
+        }
+
+        for (const auto& data_binding : binding->data) {
+            if (is_producing(data_binding.role)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // Claims every producing residency for the attempt. Idempotent for the
     // claiming attempt. Rejected when the attempt is terminal, when a
     // producing residency cannot be resolved, or when another live attempt

@@ -968,7 +968,7 @@ Admission is mechanically enforced, not advisory: the `RUNNING` transition
 is rejected unless admission evidence has been recorded on the attempt, and
 that record can be established only from admission-gate evidence, for that
 attempt, exactly once. Rejected admission never establishes evidence, and a
-rejected begin leaves no evidence behind.
+a begin rejected before the commit point leaves no evidence behind.
 
 Admission also enforces role and kind coherence: a `COMPUTE` resource binding
 must reference a compute resource, and a `TRANSFER` resource binding must

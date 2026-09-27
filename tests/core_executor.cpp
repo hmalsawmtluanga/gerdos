@@ -401,6 +401,7 @@ int main() {
             unknown_operation->bind(
                 compute_binding(DataId{301}, DataResidencyId{410})));
         GERDOS_CHECK(!executor.start(ExecutionId{804}));
+        GERDOS_CHECK(!unknown_operation->admitted());
         GERDOS_CHECK(unknown_operation->state() == ExecutionState::PENDING);
     }
 
@@ -843,6 +844,7 @@ int main() {
         // The second attempt is refused atomically: nothing about it
         // changes and no work is submitted for it.
         GERDOS_CHECK(!executor.start(ExecutionId{831}));
+        GERDOS_CHECK(!second->admitted());
         GERDOS_CHECK(second->state() == ExecutionState::PENDING);
         GERDOS_CHECK(!second->has_result());
         GERDOS_CHECK(backend.in_flight_count() == 1);
@@ -1210,6 +1212,51 @@ int main() {
         GERDOS_CHECK(execution->has_result());
         GERDOS_CHECK(
             execution->result()->integrity == AttemptIntegrity::COHERENT);
+    }
+
+    // ---------------------------------------------------------------------
+    // 16. Cancelling a begun attempt without its claims reports the gap
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        SimulatedBackend backend{4};
+        Executor executor(
+            fixture.executions,
+            fixture.operations,
+            fixture.devices,
+            fixture.data,
+            backend);
+
+        auto* execution = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{863},
+                OperationId{700},
+            });
+
+        GERDOS_CHECK(
+            execution->bind(
+                compute_binding(DataId{301}, DataResidencyId{410})));
+
+        // The direct-transition lane: the attempt begins without start
+        // effects, so it runs producing bindings it does not claim.
+        ExecutionAdmissionValidator admission_validator(
+            fixture.devices,
+            fixture.data);
+
+        const auto verdict = admission_validator.admit(*execution);
+        GERDOS_CHECK(verdict.has_value());
+        GERDOS_CHECK(
+            admission_validator.establish(*execution, *verdict));
+        GERDOS_CHECK(execution->set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(!fixture.output_a->update_owner().valid());
+
+        // Cancellation reports the incoherence instead of masking it.
+        GERDOS_CHECK(executor.cancel(ExecutionId{863}));
+        GERDOS_CHECK(execution->has_result());
+        GERDOS_CHECK(
+            execution->result()->integrity ==
+            AttemptIntegrity::EFFECTS_REJECTED);
     }
 
     return 0;
