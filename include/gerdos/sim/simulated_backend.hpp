@@ -29,6 +29,13 @@ public:
         work_[id] = steps;
     }
 
+    // Scenario configuration: the speed of one mechanism. An attempt takes
+    // the slowest configured step count among the mechanisms it binds, so
+    // the planner's choice of mechanism determines realized duration.
+    void set_mechanism_steps(ResourceRef ref, std::size_t steps) {
+        mechanism_steps_[ref] = steps;
+    }
+
     // Scenario configuration: the attempt completes unsuccessfully.
     void set_failure(ExecutionId id) {
         failures_.insert(id);
@@ -44,8 +51,31 @@ public:
         }
 
         const auto work_it = work_.find(id);
-        const auto work =
+        auto work =
             work_it == work_.end() ? default_work_ : work_it->second;
+
+        // Mechanism speed model: an attempt completes when its slowest
+        // bound mechanism does.
+        const auto* binding = execution.binding();
+
+        if (binding != nullptr) {
+            bool configured = false;
+
+            for (const auto& entry : binding->resources) {
+                const auto steps_it =
+                    mechanism_steps_.find(entry.resource);
+
+                if (steps_it == mechanism_steps_.end()) {
+                    continue;
+                }
+
+                if (!configured || steps_it->second > work) {
+                    work = steps_it->second;
+                }
+
+                configured = true;
+            }
+        }
 
         in_flight_.push_back(
             InFlight{
@@ -99,6 +129,7 @@ private:
 
     std::size_t default_work_;
     std::unordered_map<ExecutionId, std::size_t> work_;
+    std::unordered_map<ResourceRef, std::size_t> mechanism_steps_;
     std::unordered_set<ExecutionId> failures_;
     std::vector<InFlight> in_flight_;
     std::unordered_set<ExecutionId> submitted_;
