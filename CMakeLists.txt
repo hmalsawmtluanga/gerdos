@@ -106,6 +106,34 @@ gerdos_add_test(gerdos_core_workload_benchmark
 gerdos_add_test(gerdos_core_cpu_backend
     tests/core_cpu_backend.cpp)
 
+# The heterogeneous backend test requires an OpenCL toolchain and device.
+find_package(OpenCL QUIET)
+if (NOT OpenCL_FOUND AND DEFINED ENV{GERDOS_OPENCL_ROOT})
+    set(OpenCL_INCLUDE_DIRS "$ENV{GERDOS_OPENCL_ROOT}/include")
+    find_library(GERDOS_OPENCL_LOADER NAMES libOpenCL.so.1 OpenCL
+        PATHS /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib)
+    if (GERDOS_OPENCL_LOADER AND
+        EXISTS "${OpenCL_INCLUDE_DIRS}/CL/opencl.hpp")
+        set(OpenCL_FOUND TRUE)
+        set(OpenCL_LIBRARIES "${GERDOS_OPENCL_LOADER}")
+    endif()
+endif()
+
+if (OpenCL_FOUND)
+    gerdos_add_test(gerdos_core_heterogeneous
+        tests/core_heterogeneous_backend.cpp)
+    target_include_directories(gerdos_core_heterogeneous_test
+        PRIVATE ${OpenCL_INCLUDE_DIRS})
+    target_link_libraries(gerdos_core_heterogeneous_test
+        PRIVATE ${OpenCL_LIBRARIES})
+    target_compile_definitions(gerdos_core_heterogeneous_test
+        PRIVATE CL_HPP_TARGET_OPENCL_VERSION=300
+                CL_HPP_MINIMUM_OPENCL_VERSION=120)
+else()
+    message(STATUS
+        "OpenCL not found: the heterogeneous backend test is not registered")
+endif()
+
 add_executable(gerdos_core_no_leakage_test
     tests/core_no_leakage.cpp
 )
