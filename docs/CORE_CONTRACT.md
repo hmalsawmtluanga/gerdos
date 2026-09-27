@@ -1213,8 +1213,21 @@ scheduled — never deadlocked — while acyclic ready work is still
 returned; a pure cycle yields the empty set. The planner detects the
 cycle structurally (Kahn's algorithm over the declared graph) and the
 cycle stays visible in the declared dependencies for the caller to
-break. Multi-attempt plans,
-derived capacity, and reservation remain later planning concerns.
+break.
+
+Multi-attempt plans cover more than one attempt in dependency order:
+plan_attempts() pairs each scheduled operation with its own physical
+binding — an ordered list of (operation, binding) pairs, each
+individually gate-passable through the same structural validation,
+resolution, admissibility, and admission as a single plan. The list is
+a plan, not a promise: execution still advances attempt by attempt
+through the executor, and rejection-atomicity extends per attempt — a
+refused later attempt leaves earlier recorded evidence, residency
+state, and results untouched. Overlap (transfer/compute pipelining
+where topology allows) is an execution property the plan enables but
+does not mandate: the plan guarantees order and per-attempt
+admissibility, never simultaneity. Derived capacity and reservation
+remain later planning concerns.
 
 Measurement-informed preference is discovery before exploitation, bounded
 by an exploration budget. While the evidence log is small, a mechanism with
