@@ -60,7 +60,10 @@ struct Fixture {
     }
 
     [[nodiscard]] bool start_attempt(Execution& execution) {
-        return admission.admit(execution).has_value() &&
+        const auto verdict = admission.admit(execution);
+
+        return verdict.has_value() &&
+               admission.establish(execution, *verdict) &&
                execution.set_state(ExecutionState::RUNNING);
     }
 };

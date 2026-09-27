@@ -215,11 +215,14 @@ int main() {
     GERDOS_CHECK(admission.has_value());
     GERDOS_CHECK(admission->execution() == ExecutionId{502});
 
-    // Admission is observational: it does not change execution state.
+    // The verdict is observational: it changes neither execution state nor
+    // admission evidence.
     GERDOS_CHECK(valid.state() == ExecutionState::PENDING);
     GERDOS_CHECK(valid.has_binding());
+    GERDOS_CHECK(!valid.admitted());
 
-    // Admission is what makes the RUNNING transition possible.
+    // Recorded evidence is what makes the RUNNING transition possible.
+    GERDOS_CHECK(admission_validator.establish(valid, *admission));
     GERDOS_CHECK(valid.admitted());
     GERDOS_CHECK(valid.set_state(ExecutionState::RUNNING));
 
@@ -477,7 +480,10 @@ int main() {
         });
 
     GERDOS_CHECK(running.bind(std::move(running_binding)));
-    GERDOS_CHECK(admission_validator.admit(running).has_value());
+    const auto running_verdict = admission_validator.admit(running);
+    GERDOS_CHECK(running_verdict.has_value());
+    GERDOS_CHECK(
+        admission_validator.establish(running, *running_verdict));
     GERDOS_CHECK(running.set_state(ExecutionState::RUNNING));
     GERDOS_CHECK(!admission_validator.admit(running).has_value());
 
@@ -546,9 +552,12 @@ int main() {
     GERDOS_CHECK(!unadmitted.set_state(ExecutionState::RUNNING));
     GERDOS_CHECK(unadmitted.state() == ExecutionState::PENDING);
 
-    // Admission establishes the evidence and the transition succeeds.
+    // Established evidence enables the transition.
+    const auto unadmitted_verdict =
+        admission_validator.admit(unadmitted);
+    GERDOS_CHECK(unadmitted_verdict.has_value());
     GERDOS_CHECK(
-        admission_validator.admit(unadmitted).has_value());
+        admission_validator.establish(unadmitted, *unadmitted_verdict));
     GERDOS_CHECK(unadmitted.admitted());
     GERDOS_CHECK(unadmitted.set_state(ExecutionState::RUNNING));
     GERDOS_CHECK(unadmitted.state() == ExecutionState::RUNNING);
@@ -628,6 +637,44 @@ int main() {
         GERDOS_CHECK(place_as_mechanism.bind(std::move(binding)));
         GERDOS_CHECK(
             !admission_validator.admit(place_as_mechanism).has_value());
+    }
+
+    // One resource bound in two roles is structurally well-formed but can
+    // never pass admission: mechanism coherence pins one resource to one
+    // role, so it never satisfies two requirements in practice.
+    {
+        Execution dual_role{
+            ExecutionDescription{
+                ExecutionId{517},
+                OperationId{617},
+            }};
+
+        PhysicalBinding binding;
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{
+                    DataId{300},
+                    DataResidencyId{400},
+                },
+            });
+
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                compute_ref,
+            });
+
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::TRANSFER,
+                compute_ref,
+            });
+
+        GERDOS_CHECK(dual_role.bind(std::move(binding)));
+        GERDOS_CHECK(
+            !admission_validator.admit(dual_role).has_value());
+        GERDOS_CHECK(!dual_role.admitted());
     }
 
     return 0;

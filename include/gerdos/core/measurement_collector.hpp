@@ -8,11 +8,11 @@
 
 namespace gerdos {
 
-// Measurement capture: records one duration observation for each Resource a
-// completed attempt bound, carrying the attempted Operation, the attempt's
-// identity and outcome, and the observed conditions. Each subject is
-// observed once per attempt. Reports whether every intended observation was
-// recorded.
+// Measurement capture: records one duration observation for each distinct
+// mechanism Resource a completed attempt bound, carrying the attempted
+// Operation, the attempt's identity and outcome, and the observed
+// conditions. Each subject is observed once per attempt. Reports whether
+// every intended observation was recorded.
 class MeasurementCollector {
 public:
     static bool capture(

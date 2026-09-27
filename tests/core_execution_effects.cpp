@@ -87,9 +87,13 @@ struct Fixture {
         (void)input->set_state(DataResidencyState::VALID);
     }
 
-    // Admission is mechanism: attempts reach RUNNING only through it.
+    // Admission is mechanism: attempts reach RUNNING only through
+    // recorded evidence, established at the commit point.
     bool start_attempt(Execution& execution) {
-        return admission.admit(execution).has_value() &&
+        const auto verdict = admission.admit(execution);
+
+        return verdict.has_value() &&
+               admission.establish(execution, *verdict) &&
                execution.set_state(ExecutionState::RUNNING);
     }
 };
@@ -461,6 +465,108 @@ int main() {
             fixture.output->update_owner() == ExecutionId{523});
         GERDOS_CHECK(
             fixture.output->state() == DataResidencyState::TRANSFERRING);
+    }
+
+    // ---------------------------------------------------------------------
+    // 10. Partial takeover releases the stale owner's remaining claims
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        ExecutionEffects effects(fixture.data_registry, fixture.executions);
+
+        // A second producing representation alongside the first.
+        GERDOS_CHECK(fixture.data->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{402},
+                    DataId{300},
+                    ResourceRef{
+                        DeviceId{100},
+                        ResourceId{201},
+                    },
+                    "output-b",
+                },
+            }));
+
+        auto* sibling = fixture.data->find_residency(DataResidencyId{402});
+        GERDOS_CHECK(sibling != nullptr);
+
+        auto* owner = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{530},
+                OperationId{600},
+            });
+
+        auto* successor = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{531},
+                OperationId{600},
+            });
+
+        PhysicalBinding dual_binding;
+        dual_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{
+                    DataId{300},
+                    DataResidencyId{401},
+                },
+            });
+
+        dual_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{
+                    DataId{300},
+                    DataResidencyId{402},
+                },
+            });
+
+        PhysicalBinding single_binding;
+        single_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{
+                    DataId{300},
+                    DataResidencyId{401},
+                },
+            });
+
+        GERDOS_CHECK(owner->bind(std::move(dual_binding)));
+        GERDOS_CHECK(successor->bind(std::move(single_binding)));
+
+        // The owner claims both producing residencies, then dies without
+        // applying its finishing effects.
+        GERDOS_CHECK(effects.start(*owner));
+        GERDOS_CHECK(
+            fixture.output->update_owner() == ExecutionId{530});
+        GERDOS_CHECK(sibling->update_owner() == ExecutionId{530});
+
+        GERDOS_CHECK(owner->set_state(ExecutionState::CANCELLED));
+
+        // A later attempt takes over the representation it needs and the
+        // stale owner's remaining claim is released — the wedge this test
+        // guards against is the sibling staying claimed forever.
+        GERDOS_CHECK(effects.claims_free(*successor));
+        GERDOS_CHECK(effects.start(*successor));
+        GERDOS_CHECK(
+            fixture.output->update_owner() == ExecutionId{531});
+        GERDOS_CHECK(!sibling->update_owner().valid());
+        GERDOS_CHECK(
+            sibling->state() == DataResidencyState::TRANSFERRING);
+
+        // The dead owner's late finishing effects cannot reach anything.
+        GERDOS_CHECK(!effects.finish(*owner));
+
+        // The released sibling is not wedged: it can be removed.
+        GERDOS_CHECK(fixture.data->remove_residency(DataResidencyId{402}));
+
+        // The successor completes its own claim normally.
+        GERDOS_CHECK(fixture.start_attempt(*successor));
+        GERDOS_CHECK(successor->set_state(ExecutionState::COMPLETED));
+        GERDOS_CHECK(effects.finish(*successor));
+        GERDOS_CHECK(fixture.output->state() == DataResidencyState::VALID);
     }
 
     return 0;

@@ -872,7 +872,7 @@ int main() {
                 },
             }));
 
-        GERDOS_CHECK(!guarded->has_updating_residency());
+        GERDOS_CHECK(!guarded->has_claimed_update());
 
         auto* guard_record =
             guarded->find_residency(DataResidencyId{900});
@@ -880,15 +880,19 @@ int main() {
 
         GERDOS_CHECK(
             guard_record->set_state(DataResidencyState::TRANSFERRING));
-        GERDOS_CHECK(guarded->has_updating_residency());
+
+        // A claimed update protects the record.
+        guard_record->set_update_owner(ExecutionId{9000});
+        GERDOS_CHECK(guarded->has_claimed_update());
 
         GERDOS_CHECK(!guarded->remove_residency(DataResidencyId{900}));
         GERDOS_CHECK(!guarded_registry.remove_data(DataId{800}));
         GERDOS_CHECK(guarded->residency_count() == 1);
 
-        // Resolving the update restores removal.
-        GERDOS_CHECK(guard_record->set_state(DataResidencyState::VALID));
-        GERDOS_CHECK(!guarded->has_updating_residency());
+        // An update-in-progress state without a claim protects nothing: a
+        // claim held by an attempt that can no longer complete is released.
+        guard_record->set_update_owner(ExecutionId{});
+        GERDOS_CHECK(!guarded->has_claimed_update());
 
         GERDOS_CHECK(guarded->remove_residency(DataResidencyId{900}));
         GERDOS_CHECK(guarded_registry.remove_data(DataId{800}));

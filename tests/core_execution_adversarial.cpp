@@ -469,7 +469,9 @@ int main() {
         ResourceBindingRole::COMPUTE);
 
     // An admitted bound PENDING execution may enter RUNNING.
-    GERDOS_CHECK(admission.admit(*failed_attempt).has_value());
+    const auto failed_verdict = admission.admit(*failed_attempt);
+    GERDOS_CHECK(failed_verdict.has_value());
+    GERDOS_CHECK(admission.establish(*failed_attempt, *failed_verdict));
     GERDOS_CHECK(failed_attempt->set_state(ExecutionState::RUNNING));
 
     // Binding remains immutable while RUNNING.
@@ -555,7 +557,9 @@ int main() {
 
     GERDOS_CHECK(retry_attempt->bind(std::move(binding_b)));
     GERDOS_CHECK(retry_attempt->has_binding());
-    GERDOS_CHECK(admission.admit(*retry_attempt).has_value());
+    const auto retry_verdict = admission.admit(*retry_attempt);
+    GERDOS_CHECK(retry_verdict.has_value());
+    GERDOS_CHECK(admission.establish(*retry_attempt, *retry_verdict));
     GERDOS_CHECK(retry_attempt->set_state(ExecutionState::RUNNING));
 
     GERDOS_CHECK(
@@ -635,7 +639,10 @@ int main() {
         });
 
     GERDOS_CHECK(completed_attempt->bind(std::move(completed_binding)));
-    GERDOS_CHECK(admission.admit(*completed_attempt).has_value());
+    const auto completed_verdict = admission.admit(*completed_attempt);
+    GERDOS_CHECK(completed_verdict.has_value());
+    GERDOS_CHECK(
+        admission.establish(*completed_attempt, *completed_verdict));
     GERDOS_CHECK(completed_attempt->set_state(ExecutionState::RUNNING));
     GERDOS_CHECK(completed_attempt->set_state(ExecutionState::COMPLETED));
 

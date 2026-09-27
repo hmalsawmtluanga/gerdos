@@ -57,14 +57,14 @@ public:
     }
 
     // Removal is preconditioned on lifecycle state: a Data object cannot be
-    // removed while one of its residencies is updating.
+    // removed while one of its residencies holds a claimed update.
     [[nodiscard]] bool remove_data(DataId id) {
         const auto it = data_.find(id);
         if (it == data_.end()) {
             return false;
         }
 
-        if (it->second->has_updating_residency()) {
+        if (it->second->has_claimed_update()) {
             return false;
         }
 

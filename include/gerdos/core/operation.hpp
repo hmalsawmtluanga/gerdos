@@ -10,7 +10,7 @@
 namespace gerdos {
 
 // A resource requirement declares required runtime participation as a
-// resource binding role and a minimum number of resource entries of that
+// resource binding role and a minimum number of distinct resources in that
 // role. Requirements do not select a concrete Resource or Device and do not
 // classify the Operation.
 struct ResourceRequirement {

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <unordered_set>
 #include <vector>
 
 #include "gerdos/core/binding_admissibility.hpp"
@@ -16,10 +15,10 @@
 
 namespace gerdos {
 
-// The runtime integration layer: the executor is the only component that
-// advances an attempt through its lifecycle. It composes the gates as law —
-// semantic admissibility, execution admission, execution effects, and the
-// backend seam — in the sequence mandated by the execution effects contract.
+// The runtime integration layer: the executor advances attempts through
+// their lifecycle. It composes the gates as mandatory steps — semantic
+// admissibility, execution admission, update-claim arbitration, execution
+// effects, and the backend seam — in the sequence mandated by the contract.
 class Executor {
 public:
     Executor(
@@ -63,7 +62,9 @@ public:
             return false;
         }
 
-        if (!admission_.admit(*execution)) {
+        const auto admission = admission_.admit(*execution);
+
+        if (!admission.has_value()) {
             return false;
         }
 
@@ -77,19 +78,31 @@ public:
             return false;
         }
 
-        // Pinned invariants (tests/core_executor.cpp): given admission and
-        // free claims, start effects and the RUNNING transition cannot
-        // reject — every producing residency resolves, is claimable, and can
-        // enter the update-in-progress state, and an admitted PENDING
-        // attempt with a binding may enter RUNNING. If
-        // either ever rejects, the attempt is in flight but incoherent: the
-        // rejection is remembered and reported with its completion instead of
-        // being discarded.
-        const bool coherent = effects_.start(*execution) &&
-                              execution->set_state(ExecutionState::RUNNING);
+        // Commit point: admission evidence is recorded only after the
+        // backend has accepted the work, so every rejection above leaves
+        // the attempt exactly as it was.
+        if (!admission_.establish(*execution, *admission)) {
+            finalize_incoherent(*execution);
+            return false;
+        }
 
-        if (!coherent) {
-            incoherent_.insert(id);
+        // Pinned invariants (tests/core_executor.cpp): with evidence
+        // recorded and free claims, start effects and the RUNNING
+        // transition cannot reject — every producing residency resolves, is
+        // claimable, and can enter the update-in-progress state. Start
+        // effects can only reject against a backend that mutated runtime
+        // state during submission; the attempt then runs unclaimed and its
+        // completion effects rejection records the incoherence.
+        if (!effects_.start(*execution)) {
+            // Reported through the attempt's completion effects verdict.
+        }
+
+        if (!execution->set_state(ExecutionState::RUNNING)) {
+            // Unreachable: the attempt is admitted and holds a binding.
+            // Finalize it in place so in-flight work cannot strand claims or
+            // leave an unstarted attempt behind.
+            finalize_incoherent(*execution);
+            return false;
         }
 
         return true;
@@ -97,9 +110,10 @@ public:
 
     // Advances backend work and applies the completion sequence — terminal
     // transition, finish effects, result recording, measurement capture —
-    // for attempts that finished since the previous call. Every completion
-    // is reported with its integrity; an effects rejection is recorded in
-    // the attempt's result and reported here, never discarded.
+    // for attempts that finished since the previous call. Every applied
+    // completion is reported with its integrity; completions for attempts
+    // that are not RUNNING are discarded as documented. An effects rejection
+    // is recorded in the attempt's result and reported here, never discarded.
     void advance(std::vector<AttemptStatus>& outcomes) {
         std::vector<BackendCompletion> finished;
         backend_.poll(finished);
@@ -126,11 +140,9 @@ public:
             (void)execution->set_state(outcome);
 
             const bool effects_ok = effects_.finish(*execution);
-            const bool started_coherent =
-                incoherent_.erase(completion.execution) == 0;
 
             const auto integrity =
-                effects_ok && started_coherent
+                effects_ok
                     ? AttemptIntegrity::COHERENT
                     : AttemptIntegrity::EFFECTS_REJECTED;
 
@@ -173,9 +185,6 @@ public:
             return false;
         }
 
-        const bool started =
-            execution->state() == ExecutionState::RUNNING;
-
         if (is_terminal(execution->state())) {
             return false;
         }
@@ -184,16 +193,17 @@ public:
             return false;
         }
 
+        // Finishing effects apply exactly when the attempt holds claims,
+        // regardless of the state it is cancelled from.
         const bool effects_ok =
-            !started || effects_.finish(*execution);
-
-        const bool started_coherent = incoherent_.erase(id) == 0;
+            !effects_.holds_claims(*execution) ||
+            effects_.finish(*execution);
 
         (void)execution->record_result(
             ExecutionResult{
                 ExecutionState::CANCELLED,
                 {},
-                effects_ok && started_coherent
+                effects_ok
                     ? AttemptIntegrity::COHERENT
                     : AttemptIntegrity::EFFECTS_REJECTED,
             });
@@ -202,6 +212,24 @@ public:
     }
 
 private:
+    // Finalizes an attempt whose begin was incoherent: any claim is
+    // released, the rejection is recorded, and the attempt is left terminal
+    // so its late backend completion is discarded.
+    void finalize_incoherent(Execution& execution) const {
+        (void)execution.set_state(ExecutionState::CANCELLED);
+
+        // Claim release is deterministic here: the begin either claimed
+        // every producing residency or none.
+        (void)effects_.finish(execution);
+
+        (void)execution.record_result(
+            ExecutionResult{
+                ExecutionState::CANCELLED,
+                {},
+                AttemptIntegrity::EFFECTS_REJECTED,
+            });
+    }
+
     [[nodiscard]] std::size_t count_running() const noexcept {
         std::size_t running = 0;
 
@@ -217,7 +245,6 @@ private:
 
     ExecutionRegistry& executions_;
     OperationRegistry& operations_;
-    std::unordered_set<ExecutionId> incoherent_;
     ExecutionBackend& backend_;
     MeasurementRegistry* measurements_;
     ExecutionAdmissionValidator admission_;

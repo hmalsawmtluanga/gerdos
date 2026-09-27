@@ -152,15 +152,17 @@ public:
     }
 
     // Removal is preconditioned on lifecycle state: a residency whose
-    // update is in progress must be resolved first, so that the attempt
-    // updating it can still apply its finishing effects.
+    // update is claimed by an attempt must be resolved first, so that the
+    // claiming attempt can still apply its finishing effects. An
+    // update-in-progress state without a claim does not protect the record.
     [[nodiscard]] bool remove_residency(DataResidencyId id) {
         const auto it = residencies_.find(id);
         if (it == residencies_.end()) {
             return false;
         }
 
-        if (it->second->state() == DataResidencyState::TRANSFERRING) {
+        if (it->second->state() == DataResidencyState::TRANSFERRING &&
+            it->second->update_owner().valid()) {
             return false;
         }
 
@@ -169,11 +171,12 @@ public:
         return true;
     }
 
-    [[nodiscard]] bool has_updating_residency() const noexcept {
+    [[nodiscard]] bool has_claimed_update() const noexcept {
         for (const auto& [id, residency] : residencies_) {
             (void)id;
 
-            if (residency->state() == DataResidencyState::TRANSFERRING) {
+            if (residency->state() == DataResidencyState::TRANSFERRING &&
+                residency->update_owner().valid()) {
                 return true;
             }
         }

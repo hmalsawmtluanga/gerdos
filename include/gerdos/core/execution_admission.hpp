@@ -39,11 +39,12 @@ public:
         : devices_(devices),
           resolver_(devices, data_registry) {}
 
-    // Establishes admission evidence on the attempt and returns the
-    // evidence token. The attempt's RUNNING transition is gated on this
-    // evidence.
+    // The admission verdict is observational: it does not mutate the
+    // attempt, its binding, or any registry. The evidence token identifies
+    // what was admitted; recording the evidence on the attempt is a separate
+    // step (establish), performed at the commit point.
     [[nodiscard]] std::optional<ExecutionAdmission> admit(
-        Execution& execution) const {
+        const Execution& execution) const {
         if (execution.state() != ExecutionState::PENDING) {
             return std::nullopt;
         }
@@ -72,9 +73,20 @@ public:
             return std::nullopt;
         }
 
-        execution.mark_admitted();
-
         return ExecutionAdmission{execution.description().id};
+    }
+
+    // Records admission evidence on the attempt: the single step that
+    // enables its RUNNING transition. Only evidence produced by this gate
+    // for this attempt is accepted, and only once.
+    [[nodiscard]] bool establish(
+        Execution& execution,
+        const ExecutionAdmission& admission) const {
+        if (admission.execution() != execution.description().id) {
+            return false;
+        }
+
+        return execution.mark_admitted();
     }
 
 private:

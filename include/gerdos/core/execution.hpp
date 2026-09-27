@@ -136,8 +136,15 @@ public:
 private:
     friend class ExecutionAdmissionValidator;
 
-    void mark_admitted() noexcept {
+    // Records admission evidence exactly once. Returns false when evidence
+    // was already recorded.
+    [[nodiscard]] bool mark_admitted() noexcept {
+        if (admitted_) {
+            return false;
+        }
+
         admitted_ = true;
+        return true;
     }
 
     ExecutionDescription description_;
