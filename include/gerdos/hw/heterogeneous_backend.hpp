@@ -101,6 +101,91 @@ public:
             "    d[index] = d[index] * dscale + acc * sscale + bias;"
             "  }"
             "}"
+            "__kernel void matmul_tile(__global float* d,"
+            " const __global float* a, const __global float* b,"
+            " ulong rows, ulong inner, ulong columns, float dscale,"
+            " float sscale, float bias, ulong passes) {"
+            "  __local float at[16][16];"
+            "  __local float bt[16][16];"
+            "  ulong row = get_group_id(1) * 16 + get_local_id(1);"
+            "  ulong col = get_group_id(0) * 16 + get_local_id(0);"
+            "  ulong lid1 = get_local_id(1);"
+            "  ulong lid0 = get_local_id(0);"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
+            "    float acc = 0.0f;"
+            "    for (ulong t = 0; t < (inner + 15) / 16; ++t) {"
+            "      ulong arow = row;"
+            "      ulong acol = t * 16 + lid0;"
+            "      at[lid1][lid0] = (arow < rows && acol < inner) ?"
+            "        a[arow * inner + acol] : 0.0f;"
+            "      ulong brow = t * 16 + lid1;"
+            "      ulong bcol = col;"
+            "      bt[lid1][lid0] = (brow < inner && bcol < columns) ?"
+            "        b[brow * columns + bcol] : 0.0f;"
+            "      barrier(CLK_LOCAL_MEM_FENCE);"
+            "      for (ulong k = 0; k < 16; ++k) {"
+            "        acc += at[lid1][k] * bt[k][lid0];"
+            "      }"
+            "      barrier(CLK_LOCAL_MEM_FENCE);"
+            "    }"
+            "    ulong index = row * columns + col;"
+            "    if (row < rows && col < columns) {"
+            "      d[index] = d[index] * dscale + acc * sscale + bias;"
+            "    }"
+            "  }"
+            "}"
+            "__kernel void transform_vec(__global float* d,"
+            " const __global float* o, float dscale, float sscale,"
+            " float bias, ulong passes, ulong n) {"
+            "  size_t i = get_global_id(0) * 4;"
+            "  ulong remaining = (n > i) ? (n - i) : 0;"
+            "  if (remaining == 0) { return; }"
+            "  for (ulong p = 0; p < passes; ++p) {"
+            "    if (remaining >= 4) {"
+            "      float4 dd = vload4(0, d + i);"
+            "      float4 oo = vload4(0, o + i);"
+            "      vstore4(dd * dscale + oo * sscale + bias, 0, d + i);"
+            "    } else {"
+            "      for (ulong k = 0; k < remaining; ++k) {"
+            "        d[i + k] = d[i + k] * dscale + o[i + k] * sscale + bias;"
+            "      }"
+            "    }"
+            "  }"
+            "}"
+            "__kernel void exponential_vec(__global float* d,"
+            " const __global float* o, float dscale, float sscale,"
+            " float bias, ulong passes, ulong n) {"
+            "  size_t i = get_global_id(0) * 4;"
+            "  ulong remaining = (n > i) ? (n - i) : 0;"
+            "  if (remaining == 0) { return; }"
+            "  for (ulong p = 0; p < passes; ++p) {"
+            "    if (remaining >= 4) {"
+            "      float4 dd = vload4(0, d + i);"
+            "      float4 oo = vload4(0, o + i);"
+            "      vstore4(dd * dscale + exp(oo) * sscale + bias, 0, d + i);"
+            "    } else {"
+            "      for (ulong k = 0; k < remaining; ++k) {"
+            "        d[i + k] = d[i + k] * dscale + exp(o[i + k]) * sscale + bias;"
+            "      }"
+            "    }"
+            "  }"
+            "}"
+            "__kernel void fill_vec(__global float* d,"
+            " float dscale, float bias, ulong passes, ulong n) {"
+            "  size_t i = get_global_id(0) * 4;"
+            "  ulong remaining = (n > i) ? (n - i) : 0;"
+            "  if (remaining == 0) { return; }"
+            "  for (ulong p = 0; p < passes; ++p) {"
+            "    if (remaining >= 4) {"
+            "      float4 dd = vload4(0, d + i);"
+            "      vstore4(dd * dscale + bias, 0, d + i);"
+            "    } else {"
+            "      for (ulong k = 0; k < remaining; ++k) {"
+            "        d[i + k] = d[i + k] * dscale + bias;"
+            "      }"
+            "    }"
+            "  }"
+            "}"
             "__kernel void reduce_sum(__global float* d,"
             " const __global float* o, ulong n, float dscale,"
             " float sscale, float bias, ulong passes) {"
@@ -210,6 +295,13 @@ public:
             warmup.finish();
         }
 
+        // Tiled matmul needs 16x16 work-groups: query capability once
+        // and fall back to the naive kernel fail-closed where the
+        // device cannot serve it.
+        std::size_t max_group = 0;
+        device_.getInfo(CL_DEVICE_MAX_WORK_GROUP_SIZE, &max_group);
+        tiled_ok_ = max_group >= 256;
+
         available_ = true;
     }
 
@@ -295,7 +387,8 @@ public:
                          slots = std::move(slots),
                          work,
                          succeeded,
-                         gpu]() {
+                         gpu,
+                         tiled = tiled_ok_]() {
                             return run(
                                 context,
                                 device,
@@ -304,7 +397,8 @@ public:
                                 slots,
                                 work,
                                 succeeded,
-                                gpu);
+                                gpu,
+                                tiled);
                         }),
                 });
         } catch (...) {
@@ -565,7 +659,8 @@ private:
         const std::vector<Slot>& slots,
         const WorkDescription& work,
         bool configured,
-        bool gpu) {
+        bool gpu,
+        bool tiled) {
         const auto begin = std::chrono::steady_clock::now();
 
         // Staging across homes needs a real queue regardless of engine.
@@ -606,6 +701,7 @@ private:
                         destination,
                         queue,
                         gpu,
+                        tiled,
                         work);
                 }
 
@@ -890,15 +986,18 @@ private:
                     context, CL_MEM_READ_WRITE, floats, nullptr);
             }
 
-            cl::Kernel kernel(program, "transform");
+            // Vectorized float4 streaming with scalar tails: identical
+            // values to the scalar kernel (pinned by test).
+            cl::Kernel kernel(program, "transform_vec");
             kernel.setArg(0, staged_destination);
             kernel.setArg(1, staged_origin);
             kernel.setArg(2, work.destination_scale);
             kernel.setArg(3, work.source_scale);
             kernel.setArg(4, work.constant);
             kernel.setArg(5, static_cast<cl_ulong>(work.passes));
+            kernel.setArg(6, static_cast<cl_ulong>(elements));
             queue.enqueueNDRangeKernel(
-                kernel, cl::NullRange, cl::NDRange(elements));
+                kernel, cl::NullRange, cl::NDRange((elements + 3) / 4));
 
             if (!destination.on_device) {
                 std::vector<float> working(elements, 0.0f);
@@ -991,6 +1090,7 @@ private:
         const Slot& destination,
         cl::CommandQueue& queue,
         bool gpu,
+        bool tiled,
         const WorkDescription& work) {
         const auto rows = work.rows;
         const auto inner = work.inner;
@@ -1035,7 +1135,14 @@ private:
                     context, CL_MEM_READ_WRITE, floats_out, nullptr);
             }
 
-            cl::Kernel kernel(program, "matrix_product");
+            // Tiled 16x16 work-groups over local-memory tiles when the
+            // device serves them; the naive kernel stays the fail-closed
+            // fallback. Both compute identical values (pinned by test).
+            const bool use_tile =
+                tiled && rows <= 4096 && columns <= 4096 &&
+                rows * columns <= (std::size_t{1} << 30);
+            cl::Kernel kernel(
+                program, use_tile ? "matmul_tile" : "matrix_product");
             kernel.setArg(0, staged_destination);
             kernel.setArg(1, staged_left);
             kernel.setArg(2, staged_right);
@@ -1046,10 +1153,21 @@ private:
             kernel.setArg(7, work.source_scale);
             kernel.setArg(8, work.constant);
             kernel.setArg(9, static_cast<cl_ulong>(work.passes));
-            queue.enqueueNDRangeKernel(
-                kernel,
-                cl::NullRange,
-                cl::NDRange(rows * columns));
+
+            if (use_tile) {
+                const auto groups_x = (columns + 15) / 16;
+                const auto groups_y = (rows + 15) / 16;
+                queue.enqueueNDRangeKernel(
+                    kernel,
+                    cl::NullRange,
+                    cl::NDRange(groups_x * 16, groups_y * 16),
+                    cl::NDRange(16, 16));
+            } else {
+                queue.enqueueNDRangeKernel(
+                    kernel,
+                    cl::NullRange,
+                    cl::NDRange(rows * columns));
+            }
 
             if (!destination.on_device) {
                 std::vector<float> working(rows * columns, 0.0f);
@@ -1385,15 +1503,16 @@ private:
                     context, CL_MEM_READ_WRITE, floats, nullptr);
             }
 
-            cl::Kernel kernel(program, "exponential");
+            cl::Kernel kernel(program, "exponential_vec");
             kernel.setArg(0, staged_destination);
             kernel.setArg(1, staged_origin);
             kernel.setArg(2, work.destination_scale);
             kernel.setArg(3, work.source_scale);
             kernel.setArg(4, work.constant);
             kernel.setArg(5, static_cast<cl_ulong>(work.passes));
+            kernel.setArg(6, static_cast<cl_ulong>(elements));
             queue.enqueueNDRangeKernel(
-                kernel, cl::NullRange, cl::NDRange(elements));
+                kernel, cl::NullRange, cl::NDRange((elements + 3) / 4));
 
             if (!destination.on_device) {
                 std::vector<float> working(elements, 0.0f);
@@ -2001,13 +2120,14 @@ private:
                     context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, floats, decoded.data());
             }
 
-            cl::Kernel kernel(program, "fill");
+            cl::Kernel kernel(program, "fill_vec");
             kernel.setArg(0, staged);
             kernel.setArg(1, work.destination_scale);
             kernel.setArg(2, work.constant);
             kernel.setArg(3, static_cast<cl_ulong>(work.passes));
+            kernel.setArg(4, static_cast<cl_ulong>(elements));
             queue.enqueueNDRangeKernel(
-                kernel, cl::NullRange, cl::NDRange(elements));
+                kernel, cl::NullRange, cl::NDRange((elements + 3) / 4));
 
             if (!destination.on_device) {
                 std::vector<float> working(elements, 0.0f);
@@ -2062,6 +2182,7 @@ private:
     const DataRegistry& data_;
     DeviceId accelerator_;
     bool available_{false};
+    bool tiled_ok_{false};
     cl::Device device_;
     cl::Context context_;
     cl::Program program_;

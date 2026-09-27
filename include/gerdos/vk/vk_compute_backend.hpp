@@ -303,6 +303,15 @@ private:
         VkPipelineLayout fill_layout{VK_NULL_HANDLE};
         VkPipeline matmul{VK_NULL_HANDLE};
         VkPipelineLayout matmul_layout{VK_NULL_HANDLE};
+        VkPipeline matmul_tiled{VK_NULL_HANDLE};
+        VkPipelineLayout matmul_tiled_layout{VK_NULL_HANDLE};
+        VkPipeline transform_vec{VK_NULL_HANDLE};
+        VkPipelineLayout transform_vec_layout{VK_NULL_HANDLE};
+        VkPipeline exponential_vec{VK_NULL_HANDLE};
+        VkPipelineLayout exponential_vec_layout{VK_NULL_HANDLE};
+        VkPipeline fill_vec{VK_NULL_HANDLE};
+        VkPipelineLayout fill_vec_layout{VK_NULL_HANDLE};
+        std::uint32_t max_workgroup{0};
         VkPipeline reduce_sum{VK_NULL_HANDLE};
         VkPipelineLayout reduce_sum_layout{VK_NULL_HANDLE};
         VkPipeline reduce_minmax{VK_NULL_HANDLE};
@@ -470,6 +479,11 @@ private:
             return false;
         }
 
+        VkPhysicalDeviceProperties device_properties{};
+        vkGetPhysicalDeviceProperties(physical_, &device_properties);
+        context_.max_workgroup =
+            device_properties.limits.maxComputeWorkGroupInvocations;
+
         memory_type_ = find_memory_type();
 
         VkPhysicalDeviceMemoryProperties properties{};
@@ -623,6 +637,24 @@ private:
                    context_.layout3, sizeof(PcMatmul), &context_.matmul,
                    &context_.matmul_layout) &&
                make_pipeline(
+                   kSpvMatmulTile.data(), kSpvMatmulTile.size(),
+                   context_.layout3, sizeof(PcMatmul), &context_.matmul_tiled,
+                   &context_.matmul_tiled_layout) &&
+               make_pipeline(
+                   kSpvTransformVec.data(), kSpvTransformVec.size(),
+                   context_.layout2, sizeof(PcAffine),
+                   &context_.transform_vec,
+                   &context_.transform_vec_layout) &&
+               make_pipeline(
+                   kSpvExponentialVec.data(), kSpvExponentialVec.size(),
+                   context_.layout2, sizeof(PcAffine),
+                   &context_.exponential_vec,
+                   &context_.exponential_vec_layout) &&
+               make_pipeline(
+                   kSpvFillVec.data(), kSpvFillVec.size(),
+                   context_.layout1, sizeof(PcAffine), &context_.fill_vec,
+                   &context_.fill_vec_layout) &&
+               make_pipeline(
                    kSpvReduceSum.data(), kSpvReduceSum.size(),
                    context_.layout2, sizeof(PcReduce), &context_.reduce_sum,
                    &context_.reduce_sum_layout) &&
@@ -728,7 +760,9 @@ private:
         }
 
         const VkPipeline pipelines[] = {context_.transform, context_.fill,
-            context_.matmul, context_.reduce_sum, context_.reduce_minmax,
+            context_.matmul, context_.matmul_tiled, context_.transform_vec,
+            context_.exponential_vec, context_.fill_vec,
+            context_.reduce_sum, context_.reduce_minmax,
             context_.select, context_.mask, context_.gather,
             context_.exponential};
 
@@ -740,6 +774,8 @@ private:
 
         const VkPipelineLayout layouts[] = {context_.transform_layout,
             context_.fill_layout, context_.matmul_layout,
+            context_.matmul_tiled_layout, context_.transform_vec_layout,
+            context_.exponential_vec_layout, context_.fill_vec_layout,
             context_.reduce_sum_layout, context_.reduce_minmax_layout,
             context_.select_layout, context_.mask_layout,
             context_.gather_layout, context_.exponential_layout};
@@ -927,6 +963,7 @@ private:
         std::vector<VkBuffer> buffers;
         std::vector<std::uint8_t> push;
         std::uint32_t groups{1};
+        std::uint32_t groups_y{1};
     };
 
     struct Scratch {
@@ -975,7 +1012,7 @@ private:
             commands, dispatch.pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
             0, static_cast<std::uint32_t>(dispatch.push.size()),
             dispatch.push.data());
-        vkCmdDispatch(commands, dispatch.groups, 1, 1);
+        vkCmdDispatch(commands, dispatch.groups, dispatch.groups_y, 1);
 
         VkMemoryBarrier barrier{};
         barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -1259,16 +1296,39 @@ private:
             };
             const std::uint32_t total = static_cast<std::uint32_t>(
                 work.rows * work.columns);
-            record_dispatch(
-                context.device, commands, pool,
-                Dispatch{
-                    context.matmul,
-                    context.matmul_layout,
-                    context.layout3,
-                    {destination->buffer, left->buffer, right->buffer},
-                    to_bytes(push),
-                    (total + 63) / 64,
-                });
+            const bool use_tile =
+                context.max_workgroup >= 256 && work.rows <= 4096 &&
+                work.columns <= 4096 &&
+                work.rows * work.columns <= (std::size_t{1} << 30);
+
+            if (use_tile) {
+                const std::uint32_t groups_x = static_cast<std::uint32_t>(
+                    (work.columns + 15) / 16);
+                const std::uint32_t groups_y = static_cast<std::uint32_t>(
+                    (work.rows + 15) / 16);
+                record_dispatch(
+                    context.device, commands, pool,
+                    Dispatch{
+                        context.matmul_tiled,
+                        context.matmul_layout,
+                        context.layout3,
+                        {destination->buffer, left->buffer, right->buffer},
+                        to_bytes(push),
+                        groups_x,
+                        groups_y,
+                    });
+            } else {
+                record_dispatch(
+                    context.device, commands, pool,
+                    Dispatch{
+                        context.matmul,
+                        context.matmul_layout,
+                        context.layout3,
+                        {destination->buffer, left->buffer, right->buffer},
+                        to_bytes(push),
+                        (total + 63) / 64,
+                    });
+            }
             download_transient(out, staging_for[out], destination);
             return true;
         }
@@ -1486,12 +1546,13 @@ private:
             record_dispatch(
                 context.device, commands, pool,
                 Dispatch{
-                    context.exponential,
-                    context.exponential_layout,
+                    context.exponential_vec,
+                    context.exponential_vec_layout,
                     context.layout2,
                     {destination->buffer, origin->buffer},
                     to_bytes(push),
-                    groups,
+                    static_cast<std::uint32_t>(
+                        (work.elements + 3) / 4),
                 });
             download_transient(out, staging_for[out], destination);
             return true;
@@ -1514,12 +1575,13 @@ private:
             record_dispatch(
                 context.device, commands, pool,
                 Dispatch{
-                    context.fill,
-                    context.fill_layout,
+                    context.fill_vec,
+                    context.fill_vec_layout,
                     context.layout1,
                     {destination->buffer},
                     to_bytes(push),
-                    groups,
+                    static_cast<std::uint32_t>(
+                        (work.elements + 3) / 4),
                 });
             download_transient(out, staging_for[out], destination);
             return true;
@@ -1551,12 +1613,13 @@ private:
         record_dispatch(
             context.device, commands, pool,
             Dispatch{
-                context.transform,
-                context.transform_layout,
+                context.transform_vec,
+                context.transform_vec_layout,
                 context.layout2,
                 {destination->buffer, origin->buffer},
                 to_bytes(push),
-                groups,
+                static_cast<std::uint32_t>(
+                    (work.elements + 3) / 4),
             });
         download_transient(out, staging_for[out], destination);
         return true;
