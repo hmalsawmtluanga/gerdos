@@ -9,6 +9,7 @@
 #include "gerdos/core/device_registry.hpp"
 #include "gerdos/core/measurement.hpp"
 #include "gerdos/core/operation.hpp"
+#include "gerdos/core/operation_registry.hpp"
 #include "gerdos/core/physical_binding.hpp"
 #include "gerdos/core/topology.hpp"
 
@@ -200,6 +201,166 @@ public:
         }
 
         return binding;
+    }
+
+    // Ready operations in topological order over declared dependencies.
+    // Deterministic (lowest OperationId first among ready), fail-closed
+    // (cycles yield the empty set), non-blocking (unready operations are
+    // excluded, never waited on).
+    [[nodiscard]] std::vector<OperationId> schedule(
+        const OperationRegistry& operations) const {
+        // Index present operations by id.
+        std::vector<const Operation*> present;
+        operations.for_each_operation(
+            [&](const Operation* operation) {
+                present.push_back(operation);
+            });
+
+        auto present_by_id = [&](OperationId id) -> const Operation* {
+            for (const auto* operation : present) {
+                if (operation->description().id == id) {
+                    return operation;
+                }
+            }
+
+            return nullptr;
+        };
+
+        // Kahn's algorithm over edges dependency -> operation, restricted
+        // to dependencies the registry holds. Operations with absent
+        // dependencies are excluded upfront (not ready); their dependents
+        // cascade as unready through fixpoint iteration: an operation is
+        // eligible only when every dependency is itself eligible.
+        std::vector<const Operation*> eligible;
+        for (const auto* operation : present) {
+            bool missing = false;
+            for (const auto dependency :
+                 operation->description().dependencies) {
+                if (present_by_id(dependency) == nullptr) {
+                    missing = true;
+                    break;
+                }
+            }
+
+            if (!missing) {
+                eligible.push_back(operation);
+            }
+        }
+
+        auto eligible_contains = [&](OperationId id) -> bool {
+            for (const auto* operation : eligible) {
+                if (operation->description().id == id) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        bool narrowed = true;
+        while (narrowed) {
+            narrowed = false;
+            std::vector<const Operation*> kept;
+            for (const auto* operation : eligible) {
+                bool unready = false;
+                for (const auto dependency :
+                     operation->description().dependencies) {
+                    if (!eligible_contains(dependency)) {
+                        unready = true;
+                        break;
+                    }
+                }
+
+                if (unready) {
+                    narrowed = true;
+                } else {
+                    kept.push_back(operation);
+                }
+            }
+            eligible = std::move(kept);
+        }
+
+        // In-degree over eligible-only edges.
+        auto eligible_by_id = [&](OperationId id) -> bool {
+            for (const auto* operation : eligible) {
+                if (operation->description().id == id) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        std::vector<OperationId> ordered;
+        std::vector<const Operation*> remaining = eligible;
+
+        while (!remaining.empty()) {
+            // Lowest id first: deterministic ready order.
+            const Operation* next = nullptr;
+            for (const auto* candidate : remaining) {
+                bool blocked = false;
+                for (const auto dependency :
+                     candidate->description().dependencies) {
+                    if (!eligible_by_id(dependency)) {
+                        continue;
+                    }
+
+                    bool satisfied = false;
+                    for (const auto done : ordered) {
+                        if (done == dependency) {
+                            satisfied = true;
+                            break;
+                        }
+                    }
+
+                    if (!satisfied) {
+                        blocked = true;
+                        break;
+                    }
+                }
+
+                if (!blocked &&
+                    (next == nullptr ||
+                     candidate->description().id.value() <
+                         next->description().id.value())) {
+                    next = candidate;
+                }
+            }
+
+            if (next == nullptr) {
+                // No unblocked operation remains: the remainder is a
+                // dependency cycle. Fail closed for the cyclic nodes —
+                // they are excluded and never scheduled — while already
+                // ordered ready work is kept. The cycle stays visible in
+                // the declared dependencies for the caller to break.
+                // A pure cycle therefore yields the empty set.
+                break;
+            }
+
+            ordered.push_back(next->description().id);
+            std::vector<const Operation*> still;
+            for (const auto* operation : remaining) {
+                if (operation->description().id !=
+                    next->description().id) {
+                    still.push_back(operation);
+                }
+            }
+            remaining = std::move(still);
+        }
+
+        // Readiness probe: keep only operations whose binding plans
+        // successfully — usability and claim state evaluated by plan(),
+        // the one semantic home. Order preserved.
+        std::vector<OperationId> ready;
+        for (const auto id : ordered) {
+            const auto* operation = present_by_id(id);
+
+            if (operation != nullptr && plan(*operation).has_value()) {
+                ready.push_back(id);
+            }
+        }
+
+        return ready;
     }
 
 private:
