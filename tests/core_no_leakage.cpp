@@ -6,10 +6,11 @@
 #include <string>
 #include <vector>
 
-// Model vocabulary is forbidden everywhere in the core tree. Platform
-// vocabulary is forbidden in the core itself; backend directories are the
-// documented vendor boundary and may name the platforms they encapsulate.
-// The guard scans headers so the rule is enforced rather than reviewed.
+// Model vocabulary is forbidden everywhere except the adapter layer — the
+// documented model boundary. Platform vocabulary is forbidden in the core
+// itself; backend directories are the documented vendor boundary and may
+// name the platforms they encapsulate. The guard scans headers so the rules
+// are enforced rather than reviewed.
 int main(int argc, char** argv) {
     GERDOS_CHECK(argc == 2);
 
@@ -53,14 +54,20 @@ int main(int argc, char** argv) {
 
         const auto path = entry.path().string();
         const bool in_core = path.find("/core/") != std::string::npos;
+        const bool in_adapters =
+            path.find("/adapters/") != std::string::npos;
 
         std::ifstream input(entry.path());
         GERDOS_CHECK(input.good());
 
         std::string line;
         while (std::getline(input, line)) {
-            for (const auto& token : model_tokens) {
-                GERDOS_CHECK(line.find(token) == std::string::npos);
+            // Model vocabulary lives only in the adapter layer — the
+            // documented model boundary.
+            if (!in_adapters) {
+                for (const auto& token : model_tokens) {
+                    GERDOS_CHECK(line.find(token) == std::string::npos);
+                }
             }
 
             if (in_core) {

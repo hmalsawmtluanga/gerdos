@@ -106,6 +106,9 @@ gerdos_add_test(gerdos_core_workload_benchmark
 gerdos_add_test(gerdos_core_work_description
     tests/core_work_description.cpp)
 
+gerdos_add_test(gerdos_adapter_model_translation
+    tests/adapter_model_translation.cpp)
+
 gerdos_add_test(gerdos_core_cpu_backend
     tests/core_cpu_backend.cpp)
 

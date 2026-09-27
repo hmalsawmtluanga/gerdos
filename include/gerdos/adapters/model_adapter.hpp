@@ -1,0 +1,184 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "gerdos/core/operation.hpp"
+#include "gerdos/core/workload.hpp"
+
+namespace gerdos::adapters {
+
+// The model-semantic vocabulary of the adapter layer. This is the one place
+// model terms are allowed to exist: adapters translate them into the core's
+// generic work vocabulary, and the core never sees them.
+enum class ModelOp {
+    // C = A x B, a projection of two operands into a product.
+    LINEAR,
+    // dst = dst * scale + operand * operand_scale + constant.
+    AFFINE,
+    // dst[0] accumulates the sum of an operand.
+    REDUCE_SUM,
+    // Move a representation to another home.
+    MOVE,
+    // Refused by the current algebra — kept so refusal is explicit.
+    SOFTMAX,
+    ATTENTION,
+};
+
+struct ModelStep {
+    ModelOp op;
+    std::uint64_t operand_a{0};
+    std::uint64_t operand_b{0};
+    std::uint64_t result{0};
+    std::size_t rows{0};
+    std::size_t inner{0};
+    std::size_t columns{0};
+    float destination_scale{1.0f};
+    float source_scale{1.0f};
+    float constant{0.0f};
+};
+
+struct Adaptation {
+    Workload workload;
+    std::vector<std::string> refused;
+};
+
+// Translates model-shaped steps into core work units. Translation is
+// fail-closed: a step the algebra cannot express exactly is refused by
+// name with its reason, never approximated silently.
+[[nodiscard]] inline Adaptation adapt(
+    const std::string& name,
+    const std::vector<ModelStep>& steps) {
+    Adaptation adaptation;
+    adaptation.workload.name = name;
+
+    std::uint64_t next_id = 4000;
+
+    for (const auto& step : steps) {
+        switch (step.op) {
+        case ModelOp::LINEAR: {
+            if (step.rows == 0 || step.inner == 0 ||
+                step.columns == 0) {
+                adaptation.refused.push_back(
+                    "LINEAR without a complete shape");
+                continue;
+            }
+
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}, DataId{step.operand_b}},
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        0,
+                        1,
+                        0.0f,
+                        1.0f,
+                        0.0f,
+                        WorkForm::MATRIX_PRODUCT,
+                        step.rows,
+                        step.inner,
+                        step.columns,
+                    },
+                });
+            break;
+        }
+
+        case ModelOp::AFFINE: {
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}, DataId{step.operand_b}},
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        step.destination_scale,
+                        step.source_scale,
+                        step.constant,
+                    },
+                });
+            break;
+        }
+
+        case ModelOp::REDUCE_SUM: {
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}},
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        0.0f,
+                        1.0f,
+                        0.0f,
+                        WorkForm::REDUCE_SUM,
+                    },
+                });
+            break;
+        }
+
+        case ModelOp::MOVE: {
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}},
+                    {DataId{step.operand_a}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::TRANSFER,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        0.0f,
+                        1.0f,
+                        0.0f,
+                    },
+                });
+            break;
+        }
+
+        case ModelOp::SOFTMAX:
+            adaptation.refused.push_back(
+                "SOFTMAX: the algebra has no exponential or "
+                "max-reduction yet");
+            break;
+
+        case ModelOp::ATTENTION:
+            adaptation.refused.push_back(
+                "ATTENTION: depends on SOFTMAX, which the algebra "
+                "cannot express exactly");
+            break;
+        }
+    }
+
+    return adaptation;
+}
+
+} // namespace gerdos::adapters
