@@ -1596,6 +1596,32 @@ A model is one possible producer of a workload.
 
 GERDOS must not require workloads to originate from models.
 
+## Workload artifact format (version 1)
+
+The on-disk form of a workload is a line-oriented text format — the
+same declarations the adapter emits in memory, auditable and
+diffable with no parser dependency:
+
+```text
+version 1
+workload <name>
+data <data_id> <name>
+residency <data_id> <residency_id> <device_id> <resource_id> <representation>
+usable <data_id> <residency_id>
+op <op_id> inputs=<ids|-> outputs=<ids|-> deps=<ids|-> req=<ROLE:min>[,...] form=<FORM> dtype=<DTYPE> elements=<n> passes=<n> ds=<f> ss=<f> c=<f> [rows=<n> inner=<n> columns=<n>]
+```
+
+Ids are unsigned integers; names and representations are single tokens
+(no spaces, no model vocabulary — tensors are data, shapes are element
+counts). `-` is the empty list. Roles are COMPUTE or TRANSFER;
+forms and dtypes are the declared algebra and dtype vocabularies
+(`AFFINE` is accepted as shorthand for `ELEMENTWISE_AFFINE`).
+Parsing is fail-closed and versioned: a missing or non-1 version, an
+unknown line kind, an unknown role/form/dtype, a duplicate id, a
+malformed float or integer (strict full-consumption parsing), or a
+matrix form without its complete shape is refused loudly with the line
+number — never ignored, never defaulted.
+
 ---
 
 # 17. Model Boundary
