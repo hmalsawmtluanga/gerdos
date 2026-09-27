@@ -1226,8 +1226,20 @@ refused later attempt leaves earlier recorded evidence, residency
 state, and results untouched. Overlap (transfer/compute pipelining
 where topology allows) is an execution property the plan enables but
 does not mandate: the plan guarantees order and per-attempt
-admissibility, never simultaneity. Derived capacity and reservation
-remain later planning concerns.
+admissibility, never simultaneity. Derived capacity turns the contract's 'capacity, where meaningful'
+into a planning input: memory and storage resources declare a total
+byte capacity (zero means unbounded/unknown — never a refusal).
+Derived demand is computed, not stored: walking the scheduled order,
+the planner accumulates each operation's producing-entry bytes
+(elements × dtype width) per home memory/storage resource. An
+operation whose demand would exceed a declared total is excluded from
+the ready set — over-subscription is refused loudly at plan time by
+absence from the schedule, never discovered at submission — and its
+dependents cascade as unready through the existing rule. The refusal
+evidence IS the exclusion (the same structural path as claim
+ Exclusion): byte counts never enter the duration measurement log,
+where they would corrupt means. Reservation (holding capacity across
+rounds) remains a later concern.
 
 Measurement-informed preference is discovery before exploitation, bounded
 by an exploration budget. While the evidence log is small, a mechanism with
