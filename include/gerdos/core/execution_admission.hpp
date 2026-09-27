@@ -128,7 +128,7 @@ private:
                 return false;
             }
 
-            if (!role_coherent(
+            if (!is_mechanism(
                     resource_binding.role,
                     resource->description().kind)) {
                 return false;
@@ -136,23 +136,6 @@ private:
         }
 
         return true;
-    }
-
-    // Binding roles name mechanisms: a COMPUTE binding references a compute
-    // resource and a TRANSFER binding references a transfer resource. Memory
-    // and storage resources are places, reached through residencies, and are
-    // never bound as mechanisms.
-    [[nodiscard]] static constexpr bool role_coherent(
-        ResourceBindingRole role,
-        ResourceKind kind) noexcept {
-        switch (role) {
-        case ResourceBindingRole::COMPUTE:
-            return kind == ResourceKind::COMPUTE;
-        case ResourceBindingRole::TRANSFER:
-            return kind == ResourceKind::TRANSFER;
-        default:
-            return false;
-        }
     }
 
     PhysicalBindingValidator validator_;

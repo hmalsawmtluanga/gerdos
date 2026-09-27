@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "gerdos/core/ids.hpp"
+#include "gerdos/core/resource.hpp"
 
 namespace gerdos {
 
@@ -29,6 +30,22 @@ enum class ResourceBindingRole {
 [[nodiscard]] constexpr bool is_producing(DataBindingRole role) noexcept {
     return role == DataBindingRole::OUTPUT ||
            role == DataBindingRole::DESTINATION;
+}
+
+// Binding roles name mechanisms: a COMPUTE binding references a compute
+// resource and a TRANSFER binding references a transfer resource. Memory
+// and storage resources are places, reached through residencies.
+[[nodiscard]] constexpr bool is_mechanism(
+    ResourceBindingRole role,
+    ResourceKind kind) noexcept {
+    switch (role) {
+    case ResourceBindingRole::COMPUTE:
+        return kind == ResourceKind::COMPUTE;
+    case ResourceBindingRole::TRANSFER:
+        return kind == ResourceKind::TRANSFER;
+    default:
+        return false;
+    }
 }
 
 struct DataBinding {

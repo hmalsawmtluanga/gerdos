@@ -97,6 +97,9 @@ gerdos_add_test(gerdos_core_vertical_slice
 gerdos_add_test(gerdos_core_measurement
     tests/core_measurement.cpp)
 
+gerdos_add_test(gerdos_core_binding_planner
+    tests/core_binding_planner.cpp)
+
 add_executable(gerdos_core_no_leakage_test
     tests/core_no_leakage.cpp
 )
