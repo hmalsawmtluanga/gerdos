@@ -1437,6 +1437,22 @@ same configure-time gate the OpenCL suites use. The core learns no new
 vocabulary: backend API spellings live in the backend directory, the
 documented vendor boundary.
 
+## Kernel optimization: tiling and vectorization (still generic)
+
+Within each accelerator backend, matrix shapes may execute tiled
+work-group kernels (TILE = 16, bounds-checked for non-multiple shapes,
+no model shape baked in) and pure-streaming elementwise kernels
+(transform, exponential, fill) may use vectorized loads/stores with
+scalar tails. Reductions stay single-threaded; selection forms keep
+scalar access (divergent/dependent indexing buys nothing measurable
+from widening). The CPU reference loops stay naive — tiling the
+reference risks pessimizing the baseline correctness anchor. Tiling
+must not change values: the same exact-value suites verify both paths.
+Wall-clock comparisons print as machine-scoped evidence with the
+machine named, never asserted as portable ratios. Where a device
+cannot serve the tiled shape (work-group limits), the backend falls
+back to the naive kernel fail-closed — availability, not guesswork.
+
 One backend seam may execute an attempt's work on more than one physical
 engine. The engine is chosen by the devices that own the attempt's bound
 mechanisms: attempts binding accelerator mechanisms execute real OpenCL
