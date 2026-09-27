@@ -28,19 +28,24 @@ int main() {
     // ---------------------------------------------------------------------
 
     const std::vector<ModelStep> fragment{
-        ModelStep{ModelOp::LINEAR, 701, 700, 702, 2, 3, 2},
+        ModelStep{ModelOp::LINEAR, 701, 700, 0, 702, 2, 3, 2},
         ModelStep{ModelOp::SOFTMAX, 702, 0, 702},
         ModelStep{ModelOp::ATTENTION, 701, 700, 702},
-        ModelStep{ModelOp::REDUCE_SUM, 700, 0, 701, 6},
-        ModelStep{ModelOp::EXPONENTIAL, 700, 0, 701, 6},
-        ModelStep{ModelOp::REDUCE_MAX, 700, 0, 701, 6},
-        ModelStep{ModelOp::MOVE, 700, 0, 0, 6},
+        ModelStep{ModelOp::REDUCE_SUM, 700, 0, 0, 701, 6},
+        ModelStep{ModelOp::EXPONENTIAL, 700, 0, 0, 701, 6},
+        ModelStep{ModelOp::REDUCE_MAX, 700, 0, 0, 701, 6},
+        ModelStep{ModelOp::REDUCE_MIN, 700, 0, 0, 701, 6},
+        ModelStep{ModelOp::ELEMENTWISE_MIN, 700, 701, 0, 702, 6},
+        ModelStep{ModelOp::ELEMENTWISE_MAX, 700, 701, 0, 702, 6},
+        ModelStep{ModelOp::MASK_SELECT, 700, 701, 702, 703, 6},
+        ModelStep{ModelOp::GATHER, 700, 701, 0, 702, 6},
+        ModelStep{ModelOp::MOVE, 700, 0, 0, 0, 6},
     };
 
     const Adaptation adaptation = adapt("decoder fragment", fragment);
 
     GERDOS_CHECK(adaptation.workload.name == "decoder fragment");
-    GERDOS_CHECK(adaptation.workload.operations.size() == 5);
+    GERDOS_CHECK(adaptation.workload.operations.size() == 10);
 
     // Fail-closed translation: what the algebra cannot express exactly is
     // refused by name, never approximated silently.
@@ -69,7 +74,31 @@ int main() {
     GERDOS_CHECK(peak.work.form == WorkForm::REDUCE_MAX);
     GERDOS_CHECK(peak.work.elements == 6);
 
-    const auto& move = adaptation.workload.operations[4];
+    const auto& floor = adaptation.workload.operations[4];
+    GERDOS_CHECK(floor.work.form == WorkForm::REDUCE_MIN);
+    GERDOS_CHECK(floor.work.elements == 6);
+
+    const auto& emin = adaptation.workload.operations[5];
+    GERDOS_CHECK(emin.work.form == WorkForm::ELEMENTWISE_MIN);
+    GERDOS_CHECK(emin.work.elements == 6);
+    GERDOS_CHECK(emin.inputs.size() == 2);
+
+    const auto& emax = adaptation.workload.operations[6];
+    GERDOS_CHECK(emax.work.form == WorkForm::ELEMENTWISE_MAX);
+    GERDOS_CHECK(emax.work.elements == 6);
+    GERDOS_CHECK(emax.inputs.size() == 2);
+
+    const auto& mask = adaptation.workload.operations[7];
+    GERDOS_CHECK(mask.work.form == WorkForm::MASK_SELECT);
+    GERDOS_CHECK(mask.work.elements == 6);
+    GERDOS_CHECK(mask.inputs.size() == 3);
+
+    const auto& gather = adaptation.workload.operations[8];
+    GERDOS_CHECK(gather.work.form == WorkForm::GATHER);
+    GERDOS_CHECK(gather.work.elements == 6);
+    GERDOS_CHECK(gather.inputs.size() == 2);
+
+    const auto& move = adaptation.workload.operations[9];
     GERDOS_CHECK(
         move.work.form == WorkForm::ELEMENTWISE_AFFINE);
     GERDOS_CHECK(move.work.source_scale == 1.0f);
@@ -159,8 +188,8 @@ int main() {
         // Seed the non-uniform operand through the algebra itself:
         // reduce the uniform source into the partial record first.
         const std::vector<ModelStep> seeding{
-            ModelStep{ModelOp::REDUCE_SUM, 700, 0, 701, 6},
-            ModelStep{ModelOp::LINEAR, 701, 700, 702, 2, 3, 2},
+            ModelStep{ModelOp::REDUCE_SUM, 700, 0, 0, 701, 6},
+            ModelStep{ModelOp::LINEAR, 701, 700, 0, 702, 2, 3, 2},
         };
 
         const Adaptation plan = adapt("projection", seeding);

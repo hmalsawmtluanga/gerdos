@@ -635,5 +635,521 @@ int main() {
             std::fabs(raised_one - expected_one) <= 1e-4f * expected_one);
     }
 
+    // ---------------------------------------------------------------------
+    // 7. Comparison and selection on the accelerator engine
+    // ---------------------------------------------------------------------
+
+    {
+        // Six-element records mirroring the CPU chain: the table reduces
+        // to [6,1,1,1,1,1], the partner seeds uniform [2,2,2,2,2,2], the
+        // predicate is T - 1 = [5,0,0,0,0,0], and the indices cover
+        // in-range, negative, and over-range clamping. Residencies live
+        // on the accelerator home so the GPU engine serves every
+        // attempt; the uniform record stays host-homed as the reduce
+        // source.
+        auto* table = machine.data.create_data(
+            DataDescription{DataId{720}, "table"});
+        (void)table->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7201},
+                    DataId{720},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "table",
+                },
+            });
+
+        auto* partner = machine.data.create_data(
+            DataDescription{DataId{721}, "partner"});
+        (void)partner->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7202},
+                    DataId{721},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "partner",
+                },
+            });
+
+        auto* predicate = machine.data.create_data(
+            DataDescription{DataId{723}, "predicate"});
+        (void)predicate->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7204},
+                    DataId{723},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "predicate",
+                },
+            });
+
+        auto* indices = machine.data.create_data(
+            DataDescription{DataId{724}, "indices"});
+        (void)indices->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7205},
+                    DataId{724},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "indices",
+                },
+            });
+
+        auto* picked = machine.data.create_data(
+            DataDescription{DataId{725}, "picked"});
+        (void)picked->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7206},
+                    DataId{725},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "picked",
+                },
+            });
+
+        auto* uniform = machine.data.create_data(
+            DataDescription{DataId{726}, "uniform"});
+        (void)uniform->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7207},
+                    DataId{726},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "uniform",
+                },
+            });
+        (void)uniform->find_residency(DataResidencyId{7207})
+            ->set_state(DataResidencyState::VALID);
+
+        const ResourceBinding compute{
+            ResourceBindingRole::COMPUTE,
+            ResourceRef{DeviceId{200}, ResourceId{202}},
+        };
+        auto entry = [](DataBindingRole role,
+                        DataId data,
+                        DataResidencyId residency) {
+            return DataBinding{role, DataResidencyRef{data, residency}};
+        };
+        auto compute_binding = [&](std::vector<DataBinding> entries) {
+            PhysicalBinding binding;
+            binding.data = std::move(entries);
+            binding.resources.push_back(compute);
+            return binding;
+        };
+        auto run = [&](const OperationDescription& description,
+                       const PhysicalBinding& binding,
+                       ExecutionId id) {
+            const Operation operation{description};
+            Execution attempt{ExecutionDescription{id, description.id}};
+            GERDOS_CHECK(attempt.bind(binding));
+            GERDOS_CHECK(backend.submit(operation, attempt));
+            std::vector<BackendCompletion> completed;
+
+            while (completed.empty()) {
+                backend.poll(completed);
+            }
+
+            GERDOS_CHECK(completed.front().succeeded);
+        };
+
+        run(OperationDescription{
+                OperationId{840},
+                {DataId{726}},
+                {DataId{720}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{726},
+                    DataResidencyId{7207}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{720},
+                    DataResidencyId{7201})}),
+            ExecutionId{940});
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{720}, DataResidencyId{7201}},
+                0) == 6.0f);
+
+        // REDUCE_MIN over [6,1,1,1,1,1] is exactly 1.
+        run(OperationDescription{
+                OperationId{841},
+                {DataId{720}},
+                {DataId{725}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_MIN},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{725},
+                    DataResidencyId{7206})}),
+            ExecutionId{941});
+
+        const float floor_value = backend.sample(
+            DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 0);
+        std::printf("gpu reduce_min floor: %f\n", floor_value);
+        std::fflush(stdout);
+        GERDOS_CHECK(floor_value == 1.0f);
+
+        // Partner uniform [2,2,2,2,2,2].
+        run(OperationDescription{
+                OperationId{842},
+                {},
+                {DataId{721}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 0.0f, 2.0f},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{721},
+                    DataResidencyId{7202})}),
+            ExecutionId{942});
+
+        // max(T, 2) = [6,2,2,2,2,2]; min(T, 2) = [2,1,1,1,1,1].
+        run(OperationDescription{
+                OperationId{843},
+                {DataId{720}, DataId{721}},
+                {DataId{725}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::ELEMENTWISE_MAX},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::INPUT,
+                    DataId{721},
+                    DataResidencyId{7202}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{725},
+                    DataResidencyId{7206})}),
+            ExecutionId{943});
+
+        std::printf(
+            "gpu elementwise_max: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 1));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                0) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                1) == 2.0f);
+
+        run(OperationDescription{
+                OperationId{844},
+                {DataId{720}, DataId{721}},
+                {DataId{725}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::ELEMENTWISE_MIN},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::INPUT,
+                    DataId{721},
+                    DataResidencyId{7202}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{725},
+                    DataResidencyId{7206})}),
+            ExecutionId{944});
+
+        std::printf(
+            "gpu elementwise_min: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 1));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                0) == 2.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                1) == 1.0f);
+
+        // Predicate P = T - 1 = [5,0,0,0,0,0]: mask picks the table at
+        // element 0 and the partner elsewhere.
+        run(OperationDescription{
+                OperationId{845},
+                {DataId{720}},
+                {DataId{723}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, -1.0f, 1.0f, 0.0f},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{723},
+                    DataResidencyId{7204})}),
+            ExecutionId{945});
+
+        run(OperationDescription{
+                OperationId{846},
+                {DataId{723}, DataId{720}, DataId{721}},
+                {DataId{725}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::MASK_SELECT},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{723},
+                    DataResidencyId{7204}),
+                 entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::INPUT,
+                    DataId{721},
+                    DataResidencyId{7202}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{725},
+                    DataResidencyId{7206})}),
+            ExecutionId{946});
+
+        std::printf(
+            "gpu mask_select: %f %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 1),
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 5));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                0) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                1) == 2.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                5) == 2.0f);
+
+        // Gather: I = T - 1 = [5,0,0,0,0,0] reads T[5] = 1 at element
+        // 0 and T[0] = 6 elsewhere; I = 2 - T = [-4,1,1,1,1,1] clamps
+        // negative to T[0]; I = T * 2 + 2 = [14,4,4,4,4,4] clamps
+        // over-range to T[5].
+        run(OperationDescription{
+                OperationId{847},
+                {DataId{720}},
+                {DataId{724}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, -1.0f, 1.0f, 0.0f},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{724},
+                    DataResidencyId{7205})}),
+            ExecutionId{947});
+
+        run(OperationDescription{
+                OperationId{848},
+                {DataId{720}, DataId{724}},
+                {DataId{725}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::GATHER},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::INPUT,
+                    DataId{724},
+                    DataResidencyId{7205}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{725},
+                    DataResidencyId{7206})}),
+            ExecutionId{948});
+
+        std::printf(
+            "gpu gather in-range: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 1));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                0) == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                1) == 6.0f);
+
+        run(OperationDescription{
+                OperationId{849},
+                {DataId{720}},
+                {DataId{724}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 2.0f, -1.0f, 0.0f},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{724},
+                    DataResidencyId{7205})}),
+            ExecutionId{949});
+
+        run(OperationDescription{
+                OperationId{850},
+                {DataId{720}, DataId{724}},
+                {DataId{725}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::GATHER},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::INPUT,
+                    DataId{724},
+                    DataResidencyId{7205}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{725},
+                    DataResidencyId{7206})}),
+            ExecutionId{950});
+
+        std::printf(
+            "gpu gather clamped: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 1));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                0) == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                1) == 6.0f);
+
+        run(OperationDescription{
+                OperationId{851},
+                {DataId{720}},
+                {DataId{724}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 2.0f, 2.0f},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{724},
+                    DataResidencyId{7205})}),
+            ExecutionId{951});
+
+        run(OperationDescription{
+                OperationId{852},
+                {DataId{720}, DataId{724}},
+                {DataId{725}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::GATHER},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::INPUT,
+                    DataId{724},
+                    DataResidencyId{7205}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{725},
+                    DataResidencyId{7206})}),
+            ExecutionId{952});
+
+        std::printf(
+            "gpu gather over-range: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 1));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                0) == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                1) == 1.0f);
+    }
+
     return 0;
 }

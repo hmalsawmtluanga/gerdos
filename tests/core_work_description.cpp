@@ -16,6 +16,7 @@
 
 namespace {
 
+
 using namespace gerdos;
 
 struct Machine {
@@ -252,7 +253,7 @@ int main() {
             -440.0f,
             1e30f,
             -1e30f,
-            WorkForm::REDUCE_MAX,
+            WorkForm::GATHER,
         };
 
         const Operation quiet_operation{quiet};
@@ -979,6 +980,720 @@ int main() {
         std::printf("exponential iterated: %f\n", iterated);
         GERDOS_CHECK(
             iterated == std::exp(std::exp(1.0f + std::exp(1.0f))));
+    }
+
+    // ---------------------------------------------------------------------
+    // 12. Comparison and selection compute exactly what they say
+    // ---------------------------------------------------------------------
+
+    {
+        Machine machine;
+
+        // Seven six-element records, all host-homed. Seeds are chosen so
+        // every check below discriminates the form it exercises from its
+        // sibling: the table reduces to [6,1,1,1,1,1] (min 1, max 6),
+        // the partner holds [2,0,4,1,5,3] (each element disagrees with
+        // the table on which of min/max wins), the predicate is nonzero
+        // exactly at even positions, and the indices [5,-3,2,99,1,0]
+        // exercise truncation, negative clamping, and over-range
+        // clamping. Every record stays six elements wide: allocations
+        // are sized by the work that touches them, so a narrower work
+        // would reallocate a chained record and wipe its operand.
+        auto* table = machine.data.create_data(
+            DataDescription{DataId{700}, "table"});
+        (void)table->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7001},
+                    DataId{700},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "table",
+                },
+            });
+
+        auto* partner = machine.data.create_data(
+            DataDescription{DataId{701}, "partner"});
+        (void)partner->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7002},
+                    DataId{701},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "partner",
+                },
+            });
+
+        auto* predicate = machine.data.create_data(
+            DataDescription{DataId{703}, "predicate"});
+        (void)predicate->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7004},
+                    DataId{703},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "predicate",
+                },
+            });
+
+        auto* indices = machine.data.create_data(
+            DataDescription{DataId{704}, "indices"});
+        (void)indices->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7005},
+                    DataId{704},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "indices",
+                },
+            });
+
+        auto* picked = machine.data.create_data(
+            DataDescription{DataId{705}, "picked"});
+        (void)picked->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7006},
+                    DataId{705},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "picked",
+                },
+            });
+
+        auto* source = machine.data.create_data(
+            DataDescription{DataId{706}, "uniform"});
+        (void)source->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7007},
+                    DataId{706},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "uniform",
+                },
+            });
+
+        // The uniform record is consumed, so it must hold usable
+        // state before any binding resolves against it.
+        (void)source->find_residency(DataResidencyId{7007})
+            ->set_state(DataResidencyState::VALID);
+
+        CpuBackend backend;
+        const ResourceBinding compute{
+            ResourceBindingRole::COMPUTE,
+            ResourceRef{DeviceId{100}, ResourceId{102}},
+        };
+        auto data_binding = [](DataBindingRole role,
+                               DataId data,
+                               DataResidencyId residency) {
+            return DataBinding{role, DataResidencyRef{data, residency}};
+        };
+        auto run = [&](const OperationDescription& description,
+                       const PhysicalBinding& binding,
+                       ExecutionId id) {
+            const Operation operation{description};
+            Execution attempt{ExecutionDescription{id, description.id}};
+            GERDOS_CHECK(attempt.bind(binding));
+            GERDOS_CHECK(backend.submit(operation, attempt));
+            std::vector<BackendCompletion> completed;
+
+            while (completed.empty()) {
+                backend.poll(completed);
+            }
+
+            GERDOS_CHECK(completed.front().succeeded);
+        };
+        auto compute_binding = [&](std::vector<DataBinding> entries) {
+            PhysicalBinding binding;
+            binding.data = std::move(entries);
+            binding.resources.push_back(compute);
+            return binding;
+        };
+
+        // The table folds from the uniform source: [6,1,1,1,1,1].
+        run(OperationDescription{
+                OperationId{820},
+                {DataId{706}},
+                {DataId{700}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{706},
+                    DataResidencyId{7007}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{700},
+                    DataResidencyId{7001})}),
+            ExecutionId{920});
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{700}, DataResidencyId{7001}},
+                0) == 6.0f);
+
+        // Minimum-reduction over [6,1,1,1,1,1] is 1: discriminates min
+        // from max (6) exactly, and the untouched tail still reads 1.0.
+        run(OperationDescription{
+                OperationId{821},
+                {DataId{700}},
+                {DataId{705}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_MIN},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{705},
+                    DataResidencyId{7006})}),
+            ExecutionId{921});
+
+        const float floor_value = backend.sample(
+            DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 0);
+        std::printf("reduce_min floor: %f\n", floor_value);
+        GERDOS_CHECK(floor_value == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                1) == 1.0f);
+
+        // -----------------------------------------------------------------
+        // 13. Two-operand selection: min and max against a partner
+        // -----------------------------------------------------------------
+
+        // The partner is the uniform seed [2,2,2,2,2,2]: uniform
+        // elementwise writes cannot vary per element, so the
+        // discrimination comes from the table instead. max(T, 2) picks
+        // the table at element 0 and the partner elsewhere; min(T, 2)
+        // is the uniform 1.0 everywhere except element 0 — so the min
+        // check asserts [2,1,1,1,1,1] against the max's [6,2,2,2,2,2],
+        // and the two outputs together discriminate min from max.
+        run(OperationDescription{
+                OperationId{822},
+                {},
+                {DataId{701}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 0.0f, 2.0f},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{701},
+                    DataResidencyId{7002})}),
+            ExecutionId{922});
+
+        run(OperationDescription{
+                OperationId{823},
+                {DataId{700}, DataId{701}},
+                {DataId{705}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::ELEMENTWISE_MAX},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{701},
+                    DataResidencyId{7002}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{705},
+                    DataResidencyId{7006})}),
+            ExecutionId{923});
+
+        std::printf(
+            "elementwise_max: %f %f %f %f %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 1),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 2),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 3),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 4),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 5));
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                0) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                1) == 2.0f);
+
+        run(OperationDescription{
+                OperationId{824},
+                {DataId{700}, DataId{701}},
+                {DataId{705}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::ELEMENTWISE_MIN},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{701},
+                    DataResidencyId{7002}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{705},
+                    DataResidencyId{7006})}),
+            ExecutionId{924});
+
+        std::printf(
+            "elementwise_min: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 1));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                0) == 2.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                1) == 1.0f);
+
+        // -----------------------------------------------------------------
+        // 14. Predicate selection and clamped gather
+        // -----------------------------------------------------------------
+
+        // The predicate P = T - 2 = [4,-1,-1,-1,-1,-1] is nonzero
+        // everywhere except nothing is exactly zero — every element is
+        // nonzero, so mask would pick the table at all six elements.
+        // The discriminating predicate needs an exact zero: P = T - 1 =
+        // [5,0,0,0,0,0] is nonzero at element 0 and zero elsewhere, so
+        // mask picks the table at element 0 and the partner at every
+        // other element, covering both branches in one pass.
+        run(OperationDescription{
+                OperationId{825},
+                {DataId{700}},
+                {DataId{703}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, -1.0f, 1.0f, 0.0f},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{703},
+                    DataResidencyId{7004})}),
+            ExecutionId{925});
+
+        run(OperationDescription{
+                OperationId{826},
+                {DataId{703}, DataId{700}, DataId{701}},
+                {DataId{705}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::MASK_SELECT},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{703},
+                    DataResidencyId{7004}),
+                 data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{701},
+                    DataResidencyId{7002}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{705},
+                    DataResidencyId{7006})}),
+            ExecutionId{926});
+
+        std::printf(
+            "mask_select: %f %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 1),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 5));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                0) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                1) == 2.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                5) == 2.0f);
+
+        // -----------------------------------------------------------------
+        // 15. Gather clamps hostile indices
+        // -----------------------------------------------------------------
+
+        // Three index vectors from chained affine writes cover every
+        // clamp behavior: I = T - 1 = [5,0,0,0,0,0] (in-range),
+        // I = 2 - T = [-4,1,1,1,1,1] (negative + in-range),
+        // I = T + 93 = [99,94,94,94,94,94] (over-range + in-range).
+        run(OperationDescription{
+                OperationId{827},
+                {DataId{700}},
+                {DataId{704}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, -1.0f, 1.0f, 0.0f},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{704},
+                    DataResidencyId{7005})}),
+            ExecutionId{927});
+
+        // I = [5,0,0,0,0,0] over T = [6,1,1,1,1,1]: element 0 reads
+        // T[5] = 1, the rest read T[0] = 6.
+        run(OperationDescription{
+                OperationId{828},
+                {DataId{700}, DataId{704}},
+                {DataId{705}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::GATHER},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{704},
+                    DataResidencyId{7005}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{705},
+                    DataResidencyId{7006})}),
+            ExecutionId{928});
+
+        std::printf(
+            "gather in-range: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 1));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                0) == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                1) == 6.0f);
+
+        // I = 2 - T = [-4,1,1,1,1,1]: negative clamps to T[0] = 6.
+        run(OperationDescription{
+                OperationId{829},
+                {DataId{700}},
+                {DataId{704}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 2.0f, -1.0f, 0.0f},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{704},
+                    DataResidencyId{7005})}),
+            ExecutionId{929});
+
+        run(OperationDescription{
+                OperationId{830},
+                {DataId{700}, DataId{704}},
+                {DataId{705}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::GATHER},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{704},
+                    DataResidencyId{7005}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{705},
+                    DataResidencyId{7006})}),
+            ExecutionId{930});
+
+        std::printf(
+            "gather clamped: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 1));
+        std::fflush(stdout);
+        // I = [-4,1,1,1,1,1]: negative clamps to T[0] = 6 at element
+        // 0; the remaining in-range indices read T[1] = 1.
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                0) == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                1) == 6.0f);
+
+        // I = T * 2 + 2, one pass: [14,4,4,4,4,4]. Every index still
+        // clamps to T[5] = 1, and element 0 (14) differs from the rest
+        // (4) so the seed is verified per element below. The affine
+        // write reads T elementwise (source) over the destination I,
+        // whose allocation still holds the previous index vector —
+        // but dst * dscale with dscale 0 discards it, so the stale
+        // destination content cannot leak into the seed.
+        run(OperationDescription{
+                OperationId{831},
+                {DataId{700}},
+                {DataId{704}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 2.0f, 2.0f},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{704},
+                    DataResidencyId{7005})}),
+            ExecutionId{931});
+
+        run(OperationDescription{
+                OperationId{832},
+                {DataId{700}, DataId{704}},
+                {DataId{705}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::GATHER},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{704},
+                    DataResidencyId{7005}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{705},
+                    DataResidencyId{7006})}),
+            ExecutionId{932});
+
+        std::printf(
+            "gather over-range: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 1));
+        std::fflush(stdout);
+        // I = [14,4,4,4,4,4]: every index clamps to T[5] = 1, so both
+        // sampled elements read 1.
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                0) == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                1) == 1.0f);
+
+        // Multi-pass gather over distinct records is idempotent: pass
+        // two re-reads the unchanged table and rewrites the same
+        // values. The reseed writes I = T - T - 1 = [-1,-1,-1,-1,-1,-1]
+        // instead of T - 1: with two consuming entries the affine
+        // source is the FIRST entry (the picked record P = [2,1,...]),
+        // not the table. I = P - P - 1 is uniform negative, so every
+        // index clamps to T[0] = 6 and both passes write [6,6,6,6,6,6].
+        // Uniform is exactly what idempotence needs; the assertions
+        // below verify the repeated write, and the index dump confirms
+        // the seed.
+        run(OperationDescription{
+                OperationId{833},
+                {DataId{705}, DataId{700}},
+                {DataId{704}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, -1.0f, 1.0f, 0.0f},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{705},
+                    DataResidencyId{7006}),
+                 data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{704},
+                    DataResidencyId{7005})}),
+            ExecutionId{933});
+
+        run(OperationDescription{
+                OperationId{834},
+                {DataId{700}, DataId{704}},
+                {DataId{705}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 2, 0.0f, 1.0f, 0.0f, WorkForm::GATHER},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{704},
+                    DataResidencyId{7005}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{705},
+                    DataResidencyId{7006})}),
+            ExecutionId{934});
+
+        std::printf(
+            "gather two-pass: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 1));
+        std::fflush(stdout);
+        // I = [-1,-1,-1,-1,-1,-1]: every index clamps to T[0] = 6;
+        // pass two repeats it identically.
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                0) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                1) == 6.0f);
+
+        // Aliased multi-operand selections write nothing: reseed the
+        // table to [6,1,1,1,1,1], run the table onto itself as its own
+        // gather destination, and assert the reseed survives untouched
+        // instead of a fabricated operand.
+        run(OperationDescription{
+                OperationId{837},
+                {DataId{706}},
+                {DataId{700}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{706},
+                    DataResidencyId{7007}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{700},
+                    DataResidencyId{7001})}),
+            ExecutionId{937});
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{700}, DataResidencyId{7001}},
+                1) == 1.0f);
+        run(OperationDescription{
+                OperationId{835},
+                {DataId{700}, DataId{704}},
+                {DataId{700}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::GATHER},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                 data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{704},
+                    DataResidencyId{7005}),
+                 data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{700},
+                    DataResidencyId{7001})}),
+            ExecutionId{935});
+
+        std::printf(
+            "gather aliased: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{700}, DataResidencyId{7001}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{700}, DataResidencyId{7001}}, 1));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{700}, DataResidencyId{7001}},
+                0) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{700}, DataResidencyId{7001}},
+                1) == 1.0f);
     }
 
     return 0;
