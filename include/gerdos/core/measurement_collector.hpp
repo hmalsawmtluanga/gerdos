@@ -5,28 +5,31 @@
 
 #include "gerdos/core/execution.hpp"
 #include "gerdos/core/measurement.hpp"
-#include "gerdos/core/operation.hpp"
 
 namespace gerdos {
 
 // Measurement capture: records one duration observation for each Resource a
-// completed attempt bound, carrying the attempted Operation and the observed
-// conditions. Each subject is observed once per attempt.
+// completed attempt bound, carrying the attempted Operation, the attempt's
+// identity and outcome, and the observed conditions. Each subject is
+// observed once per attempt. Reports whether every intended observation was
+// recorded.
 class MeasurementCollector {
 public:
-    static void capture(
+    static bool capture(
         MeasurementRegistry& measurements,
         const Execution& execution,
-        const Operation& operation,
+        OperationId operation,
+        bool succeeded,
         std::uint64_t duration_ns,
         std::size_t concurrent_attempts) {
         const auto* binding = execution.binding();
 
         if (binding == nullptr) {
-            return;
+            return true;
         }
 
         std::vector<ResourceRef> observed;
+        bool complete = true;
 
         for (const auto& resource_binding : binding->resources) {
             const auto subject = resource_binding.resource;
@@ -37,17 +40,25 @@ public:
 
             observed.push_back(subject);
 
-            (void)measurements.record(
+            const auto id = measurements.record(
                 MeasurementObservation{
                     MeasurementQuantity::DURATION_NS,
                     subject,
-                    operation.description().id,
+                    operation,
+                    execution.description().id,
+                    succeeded,
                     duration_ns,
                     MeasurementConditions{
                         concurrent_attempts,
                     },
                 });
+
+            if (!id.valid()) {
+                complete = false;
+            }
         }
+
+        return complete;
     }
 
 private:

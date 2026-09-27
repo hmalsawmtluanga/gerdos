@@ -871,5 +871,146 @@ int main() {
             fixture.output_a->state() == DataResidencyState::VALID);
     }
 
+    // ---------------------------------------------------------------------
+    // 11. Evidence carries outcome and symmetric contention conditions
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        SimulatedBackend backend{1};
+        MeasurementRegistry measurements;
+
+        Executor executor(
+            fixture.executions,
+            fixture.operations,
+            fixture.devices,
+            fixture.data,
+            backend,
+            &measurements);
+
+        backend.set_failure(ExecutionId{840});
+        backend.set_work(ExecutionId{840}, 2);
+        backend.set_work(ExecutionId{841}, 2);
+
+        auto* first = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{840},
+                OperationId{700},
+            });
+
+        auto* second = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{841},
+                OperationId{702},
+            });
+
+        GERDOS_CHECK(
+            first->bind(compute_binding(DataId{301}, DataResidencyId{410})));
+
+        GERDOS_CHECK(
+            second->bind(compute_binding(DataId{302}, DataResidencyId{420})));
+
+        GERDOS_CHECK(executor.start(ExecutionId{840}));
+        GERDOS_CHECK(executor.start(ExecutionId{841}));
+
+        std::vector<AttemptStatus> outcomes;
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.empty());
+
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.size() == 2);
+        GERDOS_CHECK(outcomes.front().evidence);
+        GERDOS_CHECK(outcomes.back().evidence);
+
+        GERDOS_CHECK(measurements.count() == 2);
+
+        // Co-completing attempts observe identical contention conditions:
+        // one peer each, regardless of processing order.
+        const auto summary = measurements.summarize(
+            ResourceRef{
+                DeviceId{100},
+                ResourceId{200},
+            },
+            MeasurementQuantity::DURATION_NS);
+
+        GERDOS_CHECK(summary.observations == 2);
+        GERDOS_CHECK(summary.succeeded_observations == 1);
+        GERDOS_CHECK(
+            summary.total_value ==
+            2 * 2 * SimulatedBackend::ns_per_step);
+
+        measurements.for_each(
+            ResourceRef{
+                DeviceId{100},
+                ResourceId{200},
+            },
+            MeasurementQuantity::DURATION_NS,
+            [&](const MeasurementRecord& record) {
+                GERDOS_CHECK(
+                    record.observation.conditions.concurrent_attempts == 1);
+                GERDOS_CHECK(record.observation.value == 2 * SimulatedBackend::ns_per_step);
+            });
+    }
+
+    // ---------------------------------------------------------------------
+    // 12. Evidence survives removal of the attempted Operation
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        SimulatedBackend backend{2};
+        MeasurementRegistry measurements;
+
+        Executor executor(
+            fixture.executions,
+            fixture.operations,
+            fixture.devices,
+            fixture.data,
+            backend,
+            &measurements);
+
+        auto* execution = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{842},
+                OperationId{700},
+            });
+
+        GERDOS_CHECK(
+            execution->bind(
+                compute_binding(DataId{301}, DataResidencyId{410})));
+        GERDOS_CHECK(executor.start(ExecutionId{842}));
+
+        // The attempted Operation disappears while the work is in flight.
+        GERDOS_CHECK(fixture.operations.remove_operation(OperationId{700}));
+
+        std::vector<AttemptStatus> outcomes;
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.empty());
+
+        executor.advance(outcomes);
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(outcomes.front().evidence);
+
+        // The evidence is still recorded, with the attempted identity.
+        GERDOS_CHECK(measurements.count() == 1);
+
+        std::size_t seen = 0;
+        measurements.for_each(
+            ResourceRef{
+                DeviceId{100},
+                ResourceId{200},
+            },
+            MeasurementQuantity::DURATION_NS,
+            [&](const MeasurementRecord& record) {
+                ++seen;
+                GERDOS_CHECK(
+                    record.observation.operation == OperationId{700});
+                GERDOS_CHECK(
+                    record.observation.attempt == ExecutionId{842});
+            });
+
+        GERDOS_CHECK(seen == 1);
+    }
+
     return 0;
 }

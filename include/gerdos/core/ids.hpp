@@ -81,4 +81,31 @@ struct hash<gerdos::StrongId<Tag>> {
     }
 };
 
+template <>
+struct hash<gerdos::ResourceRef> {
+    std::size_t operator()(
+        const gerdos::ResourceRef& ref) const noexcept {
+        const auto first = std::hash<gerdos::DeviceId>{}(ref.device);
+        const auto second = std::hash<gerdos::ResourceId>{}(ref.resource);
+
+        return first ^
+               (second + std::size_t{0x9e3779b97f4a7c15ULL} +
+                    (first << 6) + (first >> 2));
+    }
+};
+
+template <>
+struct hash<gerdos::DataResidencyRef> {
+    std::size_t operator()(
+        const gerdos::DataResidencyRef& ref) const noexcept {
+        const auto first = std::hash<gerdos::DataId>{}(ref.data);
+        const auto second =
+            std::hash<gerdos::DataResidencyId>{}(ref.residency);
+
+        return first ^
+               (second + std::size_t{0x9e3779b97f4a7c15ULL} +
+                    (first << 6) + (first >> 2));
+    }
+};
+
 } // namespace std

@@ -104,6 +104,12 @@ public:
         std::vector<BackendCompletion> finished;
         backend_.poll(finished);
 
+        // Concurrency conditions are sampled once per completion batch:
+        // the peers sharing the runtime when the work finished, excluding
+        // the completing attempt itself.
+        const std::size_t concurrent =
+            count_running() > 0 ? count_running() - 1 : 0;
+
         for (const auto& completion : finished) {
             auto* execution =
                 executions_.find_execution(completion.execution);
@@ -135,24 +141,23 @@ public:
                     integrity,
                 });
 
-            if (measurements_ != nullptr) {
-                const auto* operation = operations_.find_operation(
-                    execution->description().operation);
+            bool evidence = true;
 
-                if (operation != nullptr) {
-                    MeasurementCollector::capture(
-                        *measurements_,
-                        *execution,
-                        *operation,
-                        completion.duration_ns,
-                        count_running());
-                }
+            if (measurements_ != nullptr) {
+                evidence = MeasurementCollector::capture(
+                    *measurements_,
+                    *execution,
+                    execution->description().operation,
+                    completion.succeeded,
+                    completion.duration_ns,
+                    concurrent);
             }
 
             outcomes.push_back(
                 AttemptStatus{
                     completion.execution,
                     integrity,
+                    evidence,
                 });
         }
     }

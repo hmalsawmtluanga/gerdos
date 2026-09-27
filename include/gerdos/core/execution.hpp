@@ -37,6 +37,7 @@ struct ExecutionResult {
 struct AttemptStatus {
     ExecutionId execution;
     AttemptIntegrity integrity;
+    bool evidence{true};
 };
 
 class Execution {
