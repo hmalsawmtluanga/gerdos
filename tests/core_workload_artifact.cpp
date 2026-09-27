@@ -193,6 +193,259 @@ int main(int argc, char** argv) {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // 3. Weight-scale pressure stages through capacity-fitting rounds
+    // ---------------------------------------------------------------------
+
+    {
+        // Four 1 MiB weight records against a 2 MiB ram budget: the full
+        // plan cannot fit, so the workload executes in sequenced rounds
+        // with explicit eviction between them. Each round is planned,
+        // admitted, executed, and measured independently; eviction
+        // preserves every logical Data; over-budget single operations
+        // would still refuse (none exists here — each op needs 1 MiB).
+        Machine pressured;
+        pressured.devices.find_device(DeviceId{100})
+            ->find_resource(ResourceId{101})
+            ->set_capacity(2u << 20);
+
+        CpuBackend pressured_backend;
+        Executor pressured_executor(
+            pressured.executions,
+            pressured.operations,
+            pressured.devices,
+            pressured.data,
+            pressured_backend,
+            &pressured.measurements);
+        BindingPlanner pressured_planner(
+            pressured.devices,
+            pressured.data,
+            pressured.topology,
+            pressured.measurements);
+
+        const auto pressured_parsed = parse_artifact(
+            load_text((directory + "/staged_weights.gwd").c_str()));
+        GERDOS_CHECK(pressured_parsed.ok);
+        GERDOS_CHECK(
+            pressured_parsed.artifact.workload.operations.size() == 4);
+
+        std::string pressured_reason;
+        GERDOS_CHECK(populate_registries(
+            pressured_parsed.artifact, pressured.devices, pressured.data,
+            pressured.operations, pressured_reason));
+
+        // The whole workload does not fit: capacity admits only a
+        // prefix. Rounds sequence explicitly: plan, execute, evict.
+        const auto full_plan =
+            pressured_planner.plan_attempts(pressured.operations);
+        GERDOS_CHECK(full_plan.size() < 4);
+        GERDOS_CHECK(!full_plan.empty());
+
+        // Round structure: one op per round (each needs a full 1 MiB
+        // against the 2 MiB budget shared with its output record... in
+        // fact each reduce writes one scalar into a fresh record, so
+        // demand per op is input 1 MiB + output scalar; two consecutive
+        // rounds' inputs (2 MiB) exactly fill the budget).
+        std::size_t rounds = 0;
+        std::size_t executed = 0;
+        std::size_t base_id = 4000;
+        std::vector<std::pair<DataId, DataResidencyId>> evicted;
+
+        while (executed < 4) {
+            const auto round =
+                pressured_planner.plan_attempts(pressured.operations);
+            GERDOS_CHECK(!round.empty());
+            GERDOS_CHECK(round.size() <= 2);
+            ++rounds;
+
+            for (const auto& step : round) {
+                const auto* operation =
+                    pressured.operations.find_operation(step.id);
+                GERDOS_CHECK(operation != nullptr);
+                PhysicalBindingValidator validator;
+                BindingResolver resolver(
+                    pressured.devices, pressured.data);
+                BindingAdmissibilityValidator admissibility;
+                ExecutionAdmissionValidator admission(
+                    pressured.devices, pressured.data);
+                GERDOS_CHECK(validator.validate(step.binding));
+                GERDOS_CHECK(
+                    resolver.resolve(step.binding).fully_resolved());
+                GERDOS_CHECK(
+                    admissibility.admissible(*operation, step.binding));
+                auto* execution = pressured.executions.create_execution(
+                    ExecutionDescription{
+                        ExecutionId{base_id}, step.id});
+                ++base_id;
+                GERDOS_CHECK(execution->bind(step.binding));
+                GERDOS_CHECK(admission.admit(*execution).has_value());
+                GERDOS_CHECK(
+                    pressured_executor.start(execution->description().id));
+                std::vector<AttemptStatus> outcomes;
+                pressured_executor.advance(outcomes);
+
+                while (outcomes.empty()) {
+                    pressured_executor.advance(outcomes);
+                }
+
+                GERDOS_CHECK(outcomes.size() == 1);
+                GERDOS_CHECK(
+                    outcomes.front().integrity ==
+                    AttemptIntegrity::COHERENT);
+                ++executed;
+
+                // Evict the consumed weights record: explicit removal
+                // preserves the logical Data object. Removal of a live
+                // record with no claim succeeds; the Data stays.
+                for (const auto input : operation->description().inputs) {
+                    auto* datum = pressured.data.find_data(input);
+                    GERDOS_CHECK(datum != nullptr);
+
+                    // One residency per weights record: remove it, keep
+                    // the Data.
+                    std::vector<DataResidencyId> records;
+                    datum->for_each_residency(
+                        [&](const DataResidency* record) {
+                            records.push_back(record->description().id);
+                        });
+
+                    for (const auto record : records) {
+                        if (datum->remove_residency(record)) {
+                            evicted.emplace_back(input, record);
+                        }
+                    }
+                }
+            }
+        }
+
+        GERDOS_CHECK(executed == 4);
+        GERDOS_CHECK(!evicted.empty());
+
+        // Eviction preserved every logical Data object.
+        for (const auto& [data_id, record] : evicted) {
+            (void)record;
+            GERDOS_CHECK(pressured.data.find_data(data_id) != nullptr);
+        }
+
+        // Each partial is the sum of 262144 fresh 1.0 elements. The
+        // partial records are 7102/7202/7302/7402 (data id with the
+        // trailing digit replaced), not data*10+1.
+        const std::pair<std::uint64_t, std::uint64_t> partials[] = {
+            {711, 7102},
+            {721, 7202},
+            {731, 7302},
+            {741, 7402},
+        };
+
+        for (const auto& [data_id, residency_id] : partials) {
+            const float value = pressured_backend.sample(
+                DataResidencyRef{
+                    DataId{data_id}, DataResidencyId{residency_id}},
+                0);
+            std::printf(
+                "partial %llu: %f (expect 262144)\n",
+                (unsigned long long)data_id,
+                value);
+            std::fflush(stdout);
+            GERDOS_CHECK(value == 262144.0f);
+        }
+
+        // Evidence grew once per executed attempt: four observations.
+        const auto pressured_evidence = pressured.measurements.summarize(
+            ResourceRef{DeviceId{100}, ResourceId{102}},
+            MeasurementQuantity::DURATION_NS);
+        std::printf(
+            "pressured evidence: %llu observations in %zu rounds\n",
+            (unsigned long long)
+                pressured_evidence.succeeded_observations,
+            rounds);
+        std::fflush(stdout);
+        GERDOS_CHECK(pressured_evidence.succeeded_observations == 4);
+    }
+
+    // ---------------------------------------------------------------------
+    // 4. Removal preconditions hold under pressure
+    // ---------------------------------------------------------------------
+
+    {
+        // A residency with a claimed update refuses removal; a Data with
+        // a claimed residency refuses removal; terminal-state executions
+        // allow removal afterwards. Exercised through the effects layer,
+        // like real attempts do — claims cannot be forged.
+        Machine guarded;
+        CpuBackend guarded_backend;
+        Executor guarded_executor(
+            guarded.executions,
+            guarded.operations,
+            guarded.devices,
+            guarded.data,
+            guarded_backend,
+            &guarded.measurements);
+
+        auto* datum = guarded.data.create_data(
+            DataDescription{DataId{800}, "guarded"});
+        (void)datum->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{8001},
+                    DataId{800},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "guarded",
+                },
+            });
+        (void)datum->find_residency(DataResidencyId{8001})
+            ->set_state(DataResidencyState::VALID);
+
+        (void)guarded.operations.create_operation(OperationDescription{
+            OperationId{880},
+            {DataId{800}},
+            {DataId{800}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{4, 1, 0.0f, 1.0f, 0.0f},
+        });
+
+        BindingPlanner guarded_planner(
+            guarded.devices,
+            guarded.data,
+            guarded.topology,
+            guarded.measurements);
+        const auto* operation =
+            guarded.operations.find_operation(OperationId{880});
+        const auto binding = guarded_planner.plan(*operation);
+        GERDOS_CHECK(binding.has_value());
+
+        auto* execution = guarded.executions.create_execution(
+            ExecutionDescription{ExecutionId{3800}, OperationId{880}});
+        GERDOS_CHECK(execution->bind(*binding));
+        GERDOS_CHECK(guarded_executor.start(ExecutionId{3800}));
+
+        // In-flight: the claimed record refuses removal, and the Data
+        // with the claimed residency refuses removal.
+        GERDOS_CHECK(
+            !guarded.data.find_data(DataId{800})->remove_residency(
+                DataResidencyId{8001}));
+        GERDOS_CHECK(!guarded.data.remove_data(DataId{800}));
+
+        std::vector<AttemptStatus> outcomes;
+        guarded_executor.advance(outcomes);
+
+        while (outcomes.empty()) {
+            guarded_executor.advance(outcomes);
+        }
+
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(
+            outcomes.front().integrity == AttemptIntegrity::COHERENT);
+
+        // Terminal: removal succeeds; the retired id stays retired.
+        GERDOS_CHECK(
+            guarded.data.find_data(DataId{800})->remove_residency(
+                DataResidencyId{8001}));
+        GERDOS_CHECK(
+            guarded.data.find_data(DataId{800}) != nullptr);
+    }
+
     return 0;
 }
 

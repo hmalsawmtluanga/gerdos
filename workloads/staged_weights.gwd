@@ -1,0 +1,39 @@
+# Weight-scale staging: four 1 MiB weight records against a 2 MiB device
+# budget. No two consecutive rounds fit together, so the workload
+# executes in sequenced rounds with explicit eviction between them.
+# Fresh allocations decode to 1.0; each round reduces its weights to a
+# scalar partial, then the partials combine.
+version 1
+workload staged-weights
+
+data 710 weights_a
+residency 710 7101 100 101 staged_a
+usable 710 7101
+data 711 partial_a
+residency 711 7102 100 101 partial_a
+
+data 720 weights_b
+residency 720 7201 100 101 staged_b
+usable 720 7201
+data 721 partial_b
+residency 721 7202 100 101 partial_b
+
+data 730 weights_c
+residency 730 7301 100 101 staged_c
+usable 730 7301
+data 731 partial_c
+residency 731 7302 100 101 partial_c
+
+data 740 weights_d
+residency 740 7401 100 101 staged_d
+usable 740 7401
+data 741 partial_d
+residency 741 7402 100 101 partial_d
+
+data 750 grand_total
+residency 750 7501 100 101 grand_total
+
+op 810 inputs=710 outputs=711 deps=- req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=262144 passes=1 ds=0 ss=1 c=0
+op 811 inputs=720 outputs=721 deps=- req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=262144 passes=1 ds=0 ss=1 c=0
+op 812 inputs=730 outputs=731 deps=- req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=262144 passes=1 ds=0 ss=1 c=0
+op 813 inputs=740 outputs=741 deps=- req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=262144 passes=1 ds=0 ss=1 c=0
