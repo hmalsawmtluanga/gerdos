@@ -266,18 +266,21 @@ Examples include:
 - storage connectivity
 - other accelerator interconnects
 
-A topology link or path may describe:
+A topology link declares:
 
 - source endpoint
 - destination endpoint
 - directionality
-- static bandwidth or capacity
-- latency characteristics
-- accessibility
-- peer-access capability
-- transfer mechanisms
-- measured effective throughput
-- contention characteristics
+- static declared attributes: bandwidth and latency, where zero means
+  uncharacterized
+
+Static attributes are declared expectations, never evidence. Observed link
+behavior — measured effective throughput, latency, and contention — belongs
+to Measurement evidence through a future measurement subject generalization,
+and never redefines link identity. Runtime capacity accounting is derived,
+not stored: the capacity a link has committed is computed from the in-flight
+attempts that traverse it, and belongs to the planning and execution layer
+that can see them. Topology links carry no mutable runtime state.
 
 Physical connectivity such as PCIe or NVLink therefore belongs to Topology,
 rather than being represented automatically as an `INTERCONNECT` resource.
