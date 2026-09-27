@@ -804,5 +804,392 @@ int main() {
         GERDOS_CHECK(!planner.plan(three_engines).has_value());
     }
 
+    // ---------------------------------------------------------------------
+    // 13. Dependency scheduling: chains and diamonds order correctly
+    // ---------------------------------------------------------------------
+
+    {
+        Machine chain;
+        BindingPlanner planner(
+            chain.devices,
+            chain.data,
+            chain.topology,
+            chain.measurements);
+
+        // Chain: 810 -> 811 -> 812, registered out of order. Each
+        // carries a satisfiable TRANSFER requirement so plan() succeeds
+        // and the graph logic is isolated from data state.
+        auto transferable = [](OperationId id,
+                               std::vector<OperationId> deps) {
+            return OperationDescription{
+                id,
+                {},
+                {},
+                deps,
+                {
+                    ResourceRequirement{
+                        ResourceBindingRole::TRANSFER,
+                        1,
+                    },
+                },
+            };
+        };
+
+        (void)chain.operations.create_operation(transferable(OperationId{812}, {OperationId{811}}));
+        (void)chain.operations.create_operation(transferable(OperationId{810}, {}));
+        (void)chain.operations.create_operation(transferable(OperationId{811}, {OperationId{810}}));
+
+        // The fixture's own operations (800/801/802, no dependencies)
+        // schedule too — the chain asserts relative order, not absolute
+        // membership: 810 before 811 before 812, all present.
+        const auto order = planner.schedule(chain.operations);
+        auto position = [&](OperationId id) -> std::size_t {
+            for (std::size_t i = 0; i < order.size(); ++i) {
+                if (order[i] == id) {
+                    return i;
+                }
+            }
+            return order.size();
+        };
+        GERDOS_CHECK(position(OperationId{810}) < order.size());
+        GERDOS_CHECK(position(OperationId{811}) < order.size());
+        GERDOS_CHECK(position(OperationId{812}) < order.size());
+        GERDOS_CHECK(position(OperationId{810}) < position(OperationId{811}));
+        GERDOS_CHECK(position(OperationId{811}) < position(OperationId{812}));
+
+        // Diamond: 820 fans to 821 + 822, joining at 823.
+        Machine diamond;
+        BindingPlanner diamond_planner(
+            diamond.devices,
+            diamond.data,
+            diamond.topology,
+            diamond.measurements);
+
+        (void)diamond.operations.create_operation(transferable(OperationId{823}, {OperationId{821}, OperationId{822}}));
+        (void)diamond.operations.create_operation(transferable(OperationId{822}, {OperationId{820}}));
+        (void)diamond.operations.create_operation(transferable(OperationId{821}, {OperationId{820}}));
+        (void)diamond.operations.create_operation(transferable(OperationId{820}, {}));
+
+        const auto diamond_order = diamond_planner.schedule(diamond.operations);
+        auto diamond_position = [&](OperationId id) -> std::size_t {
+            for (std::size_t i = 0; i < diamond_order.size(); ++i) {
+                if (diamond_order[i] == id) {
+                    return i;
+                }
+            }
+            return diamond_order.size();
+        };
+        GERDOS_CHECK(diamond_position(OperationId{820}) < diamond_order.size());
+        GERDOS_CHECK(diamond_position(OperationId{821}) < diamond_order.size());
+        GERDOS_CHECK(diamond_position(OperationId{822}) < diamond_order.size());
+        GERDOS_CHECK(diamond_position(OperationId{823}) < diamond_order.size());
+        GERDOS_CHECK(diamond_position(OperationId{820}) < diamond_position(OperationId{821}));
+        GERDOS_CHECK(diamond_position(OperationId{820}) < diamond_position(OperationId{822}));
+        GERDOS_CHECK(diamond_position(OperationId{821}) < diamond_position(OperationId{823}));
+        GERDOS_CHECK(diamond_position(OperationId{822}) < diamond_position(OperationId{823}));
+        // Siblings order deterministically by id.
+        GERDOS_CHECK(diamond_position(OperationId{821}) < diamond_position(OperationId{822}));
+    }
+
+    // ---------------------------------------------------------------------
+    // 14. Unready operations are excluded, never waited on
+    // ---------------------------------------------------------------------
+
+    {
+        Machine blocked;
+        BindingPlanner planner(
+            blocked.devices,
+            blocked.data,
+            blocked.topology,
+            blocked.measurements);
+
+        auto transferable = [](OperationId id,
+                               std::vector<OperationId> deps) {
+            return OperationDescription{
+                id,
+                {},
+                {},
+                deps,
+                {
+                    ResourceRequirement{
+                        ResourceBindingRole::TRANSFER,
+                        1,
+                    },
+                },
+            };
+        };
+
+        // 831 depends on 830, which names a dependency the registry
+        // does not hold (999): 830 is unready, 831 cascades unready.
+        // 832 is independent and ready.
+        (void)blocked.operations.create_operation(transferable(OperationId{830}, {OperationId{999}}));
+        (void)blocked.operations.create_operation(transferable(OperationId{831}, {OperationId{830}}));
+        (void)blocked.operations.create_operation(transferable(OperationId{832}, {}));
+
+        // Fixture ops stay ready; the blocked pair (830, 831) must be
+        // absent while independent 832 is present.
+        const auto order = planner.schedule(blocked.operations);
+        auto blocked_position = [&](OperationId id) -> bool {
+            for (const auto got : order) {
+                if (got == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GERDOS_CHECK(!blocked_position(OperationId{830}));
+        GERDOS_CHECK(!blocked_position(OperationId{831}));
+        GERDOS_CHECK(blocked_position(OperationId{832}));
+
+        // An operation whose own binding cannot plan is excluded even
+        // with satisfied dependencies: garbage requirement, no waiting.
+        Machine unplannable;
+        BindingPlanner unplannable_planner(
+            unplannable.devices,
+            unplannable.data,
+            unplannable.topology,
+            unplannable.measurements);
+
+        (void)unplannable.operations.create_operation(OperationDescription{
+            OperationId{840},
+            {},
+            {},
+            {},
+            {
+                ResourceRequirement{
+                    ResourceBindingRole::TRANSFER,
+                    99,
+                },
+            },
+        });
+        (void)unplannable.operations.create_operation(transferable(OperationId{841}, {}));
+
+        const auto ready = unplannable_planner.schedule(unplannable.operations);
+        auto ready_has = [&](OperationId id) -> bool {
+            for (const auto got : ready) {
+                if (got == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GERDOS_CHECK(!ready_has(OperationId{840}));
+        GERDOS_CHECK(ready_has(OperationId{841}));
+    }
+
+    // ---------------------------------------------------------------------
+    // 15. Cycles fail closed with the empty set
+    // ---------------------------------------------------------------------
+
+    {
+        Machine cyclic;
+        BindingPlanner planner(
+            cyclic.devices,
+            cyclic.data,
+            cyclic.topology,
+            cyclic.measurements);
+
+        auto transferable = [](OperationId id,
+                               std::vector<OperationId> deps) {
+            return OperationDescription{
+                id,
+                {},
+                {},
+                deps,
+                {
+                    ResourceRequirement{
+                        ResourceBindingRole::TRANSFER,
+                        1,
+                    },
+                },
+            };
+        };
+
+        // Two-cycle: 850 <-> 851. Neither can ever be ready.
+        (void)cyclic.operations.create_operation(transferable(OperationId{850}, {OperationId{851}}));
+        (void)cyclic.operations.create_operation(transferable(OperationId{851}, {OperationId{850}}));
+
+        // Fixture ops stay schedulable; the cyclic pair is excluded
+        // and — critically — the acyclic fixture ops still schedule.
+        // A PURE cycle (fixture removed) yields the empty set.
+        const auto order = planner.schedule(cyclic.operations);
+        auto cyclic_has = [&](OperationId id) -> bool {
+            for (const auto got : order) {
+                if (got == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GERDOS_CHECK(!cyclic_has(OperationId{850}));
+        GERDOS_CHECK(!cyclic_has(OperationId{851}));
+        GERDOS_CHECK(!order.empty());
+
+        // Self-dependency is a one-cycle: 852 -> 852.
+        Machine self;
+        BindingPlanner self_planner(
+            self.devices, self.data, self.topology, self.measurements);
+        (void)self.operations.create_operation(transferable(OperationId{852}, {OperationId{852}}));
+        const auto self_order = self_planner.schedule(self.operations);
+        auto self_has = [&](OperationId id) -> bool {
+            for (const auto got : self_order) {
+                if (got == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GERDOS_CHECK(!self_has(OperationId{852}));
+
+        // The cycle stays visible: dependencies still name each other,
+        // so the caller can break it. Retired ids are permanent (removal
+        // is forever), so breaking means withdrawing 851 — 850's
+        // dependency then dangles and 850 cascades unready — while a
+        // fresh operation schedules normally.
+        GERDOS_CHECK(cyclic.operations.remove_operation(OperationId{851}));
+        (void)cyclic.operations.create_operation(transferable(OperationId{853}, {}));
+        const auto repaired = planner.schedule(cyclic.operations);
+        auto repaired_has = [&](OperationId id) -> bool {
+            for (const auto got : repaired) {
+                if (got == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GERDOS_CHECK(!repaired_has(OperationId{850}));
+        GERDOS_CHECK(!repaired_has(OperationId{851}));
+        GERDOS_CHECK(repaired_has(OperationId{853}));
+    }
+
+    // ---------------------------------------------------------------------
+    // 16. Adversarial: failed outputs and claimed records stay unready
+    // ---------------------------------------------------------------------
+
+    {
+        Machine hostile;
+        BindingPlanner planner(
+            hostile.devices,
+            hostile.data,
+            hostile.topology,
+            hostile.measurements);
+
+        // A dependency on a removed operation: the dependent is
+        // excluded, not guessed at — a failed attempt's output is a
+        // contradiction the planner refuses.
+        (void)hostile.operations.create_operation(OperationDescription{
+            OperationId{860},
+            {DataId{501}},
+            {DataId{502}},
+            {},
+            {
+                ResourceRequirement{
+                    ResourceBindingRole::COMPUTE,
+                    1,
+                },
+            },
+        });
+        (void)hostile.operations.create_operation(OperationDescription{
+            OperationId{861},
+            {DataId{502}},
+            {DataId{502}},
+            {OperationId{860}},
+            {
+                ResourceRequirement{
+                    ResourceBindingRole::COMPUTE,
+                    1,
+                },
+            },
+        });
+        // The producer's output is usable (as if 860 completed): the
+        // consumer's later exclusion comes from the dangling dependency
+        // alone, not from data state — the adversarial separation.
+        (void)hostile.data.find_data(DataId{502})
+            ->find_residency(DataResidencyId{5201})
+            ->set_state(DataResidencyState::VALID);
+        auto hostile_has = [&](OperationId id) -> bool {
+            const auto scheduled = planner.schedule(hostile.operations);
+            for (const auto got : scheduled) {
+                if (got == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GERDOS_CHECK(hostile_has(OperationId{860}));
+        GERDOS_CHECK(hostile_has(OperationId{861}));
+
+        // The producer is withdrawn (its attempt failed; nothing
+        // produces its output): the consumer cascades unready.
+        GERDOS_CHECK(hostile.operations.remove_operation(OperationId{860}));
+        const auto after = planner.schedule(hostile.operations);
+        auto after_has = [&](OperationId id) -> bool {
+            for (const auto got : after) {
+                if (got == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GERDOS_CHECK(!after_has(OperationId{861}));
+
+        // Claimed records keep consumers unready: claim the only usable
+        // activation record through the effects layer, and an op reading
+        // it still binds (consuming reads are fine) — but an op that
+        // must PRODUCE onto the claimed record cannot plan, so a chain
+        // through it is excluded at the readiness probe. Pinned
+        // structurally: the producing op has no binding.
+        Machine claimed;
+        BindingPlanner claimed_planner(
+            claimed.devices,
+            claimed.data,
+            claimed.topology,
+            claimed.measurements);
+
+        (void)claimed.operations.create_operation(OperationDescription{
+            OperationId{870},
+            {DataId{501}},
+            {DataId{501}},
+            {},
+            {
+                ResourceRequirement{
+                    ResourceBindingRole::COMPUTE,
+                    1,
+                },
+            },
+        });
+
+        ExecutionRegistry claim_executions;
+        ExecutionEffects claim_effects(claimed.data, claim_executions);
+        auto* claimant = claim_executions.create_execution(
+            ExecutionDescription{ExecutionId{997}, OperationId{870}});
+        PhysicalBinding claim_binding;
+        claim_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{501}, DataResidencyId{5101}},
+            });
+        GERDOS_CHECK(claimant->bind(claim_binding));
+        GERDOS_CHECK(claim_effects.start(*claimant));
+
+        // Producing onto the claimed record cannot plan; the op is
+        // excluded from the ready set even with no dependencies, while
+        // unrelated fixture ops still schedule.
+        const auto* producer =
+            claimed.operations.find_operation(OperationId{870});
+        GERDOS_CHECK(!claimed_planner.plan(*producer).has_value());
+        const auto claimed_ready = claimed_planner.schedule(claimed.operations);
+        auto claimed_has = [&](OperationId id) -> bool {
+            for (const auto got : claimed_ready) {
+                if (got == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GERDOS_CHECK(!claimed_has(OperationId{870}));
+        GERDOS_CHECK(!claimed_ready.empty());
+    }
+
     return 0;
 }
