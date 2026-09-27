@@ -70,6 +70,10 @@ struct PhysicalBinding {
 [[nodiscard]] constexpr std::size_t work_source_index(
     const PhysicalBinding& binding,
     std::size_t producing_index) noexcept {
+    if (producing_index >= binding.data.size()) {
+        return binding.data.size();
+    }
+
     const auto& producing = binding.data[producing_index];
 
     for (std::size_t in = 0; in < binding.data.size(); ++in) {
