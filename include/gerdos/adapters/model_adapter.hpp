@@ -403,15 +403,26 @@ struct Adaptation {
         }
 
         case ModelOp::SOFTMAX:
+            // Composite decision (Phase 1b): multi-step computations
+            // are planner-level chains of single-form operations, not
+            // in-work step lists. The softmax chain decomposes to
+            // EXPONENTIAL + REDUCE_SUM + divide-by-sum — and the algebra
+            // has no division form, so the whole step is refused: a
+            // partial exp+reduce emission would masquerade as progress
+            // toward normalized outputs the workload cannot produce.
+            // The expressible prefix (EXPONENTIAL, REDUCE_SUM) is
+            // available as separate steps; normalization awaits a
+            // division-capable form in a later algebra extension.
             adaptation.refused.push_back(
-                "SOFTMAX: the algebra has no normalization yet — "
-                "compose EXPONENTIAL with REDUCE_SUM instead");
+                "SOFTMAX: refused as a composite — its EXPONENTIAL + "
+                "REDUCE_SUM prefix is expressible as separate chained "
+                "steps, but the closing divide-by-sum has no form yet");
             break;
 
         case ModelOp::ATTENTION:
             adaptation.refused.push_back(
-                "ATTENTION: depends on SOFTMAX, which the algebra "
-                "cannot express exactly");
+                "ATTENTION: depends on SOFTMAX, which is refused as a "
+                "composite until its closing divide-by-sum has a form");
             break;
         }
 
