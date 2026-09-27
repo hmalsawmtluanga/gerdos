@@ -4,6 +4,9 @@
 
 #include "gerdos/core/binding_admissibility.hpp"
 #include "gerdos/core/binding_planner.hpp"
+#include "gerdos/core/execution_admission.hpp"
+#include "gerdos/core/executor.hpp"
+#include "gerdos/sim/simulated_backend.hpp"
 #include "gerdos/core/execution_effects.hpp"
 #include "gerdos/core/execution_registry.hpp"
 #include "gerdos/core/operation_registry.hpp"
@@ -1189,6 +1192,279 @@ int main() {
         };
         GERDOS_CHECK(!claimed_has(OperationId{870}));
         GERDOS_CHECK(!claimed_ready.empty());
+    }
+
+    // ---------------------------------------------------------------------
+    // 17. Multi-attempt plans preserve order with gate-passable pairs
+    // ---------------------------------------------------------------------
+
+    {
+        Machine ordered;
+        BindingPlanner planner(
+            ordered.devices,
+            ordered.data,
+            ordered.topology,
+            ordered.measurements);
+
+        auto transferable = [](OperationId id,
+                               std::vector<OperationId> deps) {
+            return OperationDescription{
+                id,
+                {},
+                {},
+                deps,
+                {
+                    ResourceRequirement{
+                        ResourceBindingRole::TRANSFER,
+                        1,
+                    },
+                },
+            };
+        };
+
+        (void)ordered.operations.create_operation(transferable(OperationId{892}, {OperationId{891}}));
+        (void)ordered.operations.create_operation(transferable(OperationId{890}, {}));
+        (void)ordered.operations.create_operation(transferable(OperationId{891}, {OperationId{890}}));
+
+        const auto planned = planner.plan_attempts(ordered.operations);
+
+        // The chain's pairs appear in dependency order...
+        auto planned_position = [&](OperationId id) -> std::size_t {
+            for (std::size_t i = 0; i < planned.size(); ++i) {
+                if (planned[i].id == id) {
+                    return i;
+                }
+            }
+            return planned.size();
+        };
+        GERDOS_CHECK(planned_position(OperationId{890}) < planned.size());
+        GERDOS_CHECK(planned_position(OperationId{891}) < planned.size());
+        GERDOS_CHECK(planned_position(OperationId{892}) < planned.size());
+        GERDOS_CHECK(
+            planned_position(OperationId{890}) <
+            planned_position(OperationId{891}));
+        GERDOS_CHECK(
+            planned_position(OperationId{891}) <
+            planned_position(OperationId{892}));
+
+        // ...and every pair is individually gate-passable through the
+        // same chain a single plan faces.
+        PhysicalBindingValidator validator;
+        BindingResolver resolver(
+            ordered.devices, ordered.data);
+        BindingAdmissibilityValidator admissibility;
+        ExecutionAdmissionValidator admission(
+            ordered.devices, ordered.data);
+        ExecutionRegistry probe_executions;
+
+        for (const auto& attempt : planned) {
+            const auto* operation = ordered.operations.find_operation(attempt.id);
+            GERDOS_CHECK(operation != nullptr);
+            GERDOS_CHECK(validator.validate(attempt.binding));
+            GERDOS_CHECK(
+                resolver.resolve(attempt.binding).fully_resolved());
+            GERDOS_CHECK(
+                admissibility.admissible(*operation, attempt.binding));
+            Execution probe{
+                ExecutionDescription{ExecutionId{1900 + attempt.id.value()}, attempt.id}};
+            GERDOS_CHECK(probe.bind(attempt.binding));
+            GERDOS_CHECK(admission.admit(probe).has_value());
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // 18. The staged workload plans as stage/compute pairs; executed
+    //     attempts leave later pairs' bindings valid (atomicity)
+    // ---------------------------------------------------------------------
+
+    {
+        // Two-unit staged workload in the demo's shape: each unit stages
+        // (TRANSFER) then computes (COMPUTE), unit 2 depending on unit 1.
+        // The planner — not hand-pairing — produces stage, compute,
+        // stage, compute with the right mechanism roles.
+        Machine staged;
+        BindingPlanner planner(
+            staged.devices,
+            staged.data,
+            staged.topology,
+            staged.measurements);
+
+        auto* payload = staged.data.create_data(
+            DataDescription{DataId{600}, "payload"});
+        (void)payload->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6001},
+                    DataId{600},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "staged",
+                },
+            });
+        (void)payload->find_residency(DataResidencyId{6001})
+            ->set_state(DataResidencyState::VALID);
+
+        auto* result = staged.data.create_data(
+            DataDescription{DataId{601}, "result"});
+        (void)result->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6101},
+                    DataId{601},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "result",
+                },
+            });
+
+        auto* payload2 = staged.data.create_data(
+            DataDescription{DataId{602}, "payload2"});
+        (void)payload2->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6201},
+                    DataId{602},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "staged",
+                },
+            });
+        (void)payload2->find_residency(DataResidencyId{6201})
+            ->set_state(DataResidencyState::VALID);
+
+        auto* result2 = staged.data.create_data(
+            DataDescription{DataId{603}, "result2"});
+        (void)result2->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6301},
+                    DataId{603},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "result",
+                },
+            });
+
+        (void)staged.operations.create_operation(OperationDescription{
+            OperationId{910},
+            {DataId{600}},
+            {DataId{600}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::TRANSFER, 1}},
+        });
+        (void)staged.operations.create_operation(OperationDescription{
+            OperationId{911},
+            {DataId{600}},
+            {DataId{601}},
+            {OperationId{910}},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+        });
+        (void)staged.operations.create_operation(OperationDescription{
+            OperationId{912},
+            {DataId{602}},
+            {DataId{602}},
+            {OperationId{911}},
+            {ResourceRequirement{ResourceBindingRole::TRANSFER, 1}},
+        });
+        (void)staged.operations.create_operation(OperationDescription{
+            OperationId{913},
+            {DataId{602}},
+            {DataId{603}},
+            {OperationId{912}},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+        });
+
+        const auto planned = planner.plan_attempts(staged.operations);
+
+        // The two units' pairs in dependency order...
+        auto staged_position = [&](OperationId id) -> std::size_t {
+            for (std::size_t i = 0; i < planned.size(); ++i) {
+                if (planned[i].id == id) {
+                    return i;
+                }
+            }
+            return planned.size();
+        };
+        GERDOS_CHECK(staged_position(OperationId{910}) < planned.size());
+        GERDOS_CHECK(staged_position(OperationId{913}) < planned.size());
+        GERDOS_CHECK(
+            staged_position(OperationId{910}) <
+            staged_position(OperationId{911}));
+        GERDOS_CHECK(
+            staged_position(OperationId{911}) <
+            staged_position(OperationId{912}));
+        GERDOS_CHECK(
+            staged_position(OperationId{912}) <
+            staged_position(OperationId{913}));
+
+        // ...with stage pairs on TRANSFER mechanisms and compute pairs
+        // on COMPUTE mechanisms — the pairing structure, planned.
+        for (const auto& attempt : planned) {
+            const bool is_stage =
+                attempt.id == OperationId{910} ||
+                attempt.id == OperationId{912};
+            const bool is_compute =
+                attempt.id == OperationId{911} ||
+                attempt.id == OperationId{913};
+
+            if (!is_stage && !is_compute) {
+                continue;
+            }
+
+            GERDOS_CHECK(attempt.binding.resources.size() == 1);
+            GERDOS_CHECK(
+                attempt.binding.resources[0].role ==
+                (is_stage ? ResourceBindingRole::TRANSFER
+                          : ResourceBindingRole::COMPUTE));
+        }
+
+        // Per-attempt atomicity: execute the first pair through the
+        // deterministic simulator; the later pairs' already-planned
+        // bindings still gate-pass afterwards — the first attempt's
+        // evidence, state, and results do not invalidate them.
+        SimulatedBackend backend;
+        ExecutionRegistry executions;
+        Executor executor(
+            executions,
+            staged.operations,
+            staged.devices,
+            staged.data,
+            backend,
+            &staged.measurements);
+
+        {
+            const auto& first = planned[staged_position(OperationId{910})];
+            const auto* operation =
+                staged.operations.find_operation(first.id);
+            PhysicalBindingValidator validator;
+            GERDOS_CHECK(validator.validate(first.binding));
+            auto* execution = executions.create_execution(
+                ExecutionDescription{ExecutionId{2000}, first.id});
+            GERDOS_CHECK(execution->bind(first.binding));
+            GERDOS_CHECK(executor.start(ExecutionId{2000}));
+            std::vector<AttemptStatus> outcomes;
+            executor.advance(outcomes);
+            while (outcomes.empty()) {
+                executor.advance(outcomes);
+            }
+            GERDOS_CHECK(outcomes.size() == 1);
+            GERDOS_CHECK(
+                outcomes.front().integrity == AttemptIntegrity::COHERENT);
+            (void)operation;
+        }
+
+        PhysicalBindingValidator revalidator;
+        BindingResolver reresolver(staged.devices, staged.data);
+        BindingAdmissibilityValidator readmissibility;
+        for (const auto& attempt : planned) {
+            if (attempt.id != OperationId{912} &&
+                attempt.id != OperationId{913}) {
+                continue;
+            }
+            const auto* operation =
+                staged.operations.find_operation(attempt.id);
+            GERDOS_CHECK(revalidator.validate(attempt.binding));
+            GERDOS_CHECK(
+                reresolver.resolve(attempt.binding).fully_resolved());
+            GERDOS_CHECK(
+                readmissibility.admissible(*operation, attempt.binding));
+        }
     }
 
     return 0;
