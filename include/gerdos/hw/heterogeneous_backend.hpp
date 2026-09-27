@@ -76,6 +76,18 @@ public:
             return;
         }
 
+        // Warmup: one-time driver costs must not appear in measured work.
+        {
+            cl::CommandQueue warmup(context_, device_);
+            cl::Buffer scratch(
+                context_, CL_MEM_READ_WRITE, sizeof(float), nullptr);
+            cl::Kernel kernel(program_, "fill");
+            kernel.setArg(0, scratch);
+            warmup.enqueueNDRangeKernel(
+                kernel, cl::NullRange, cl::NDRange(1));
+            warmup.finish();
+        }
+
         available_ = true;
     }
 

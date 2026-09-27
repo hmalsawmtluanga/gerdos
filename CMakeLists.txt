@@ -129,6 +129,16 @@ if (OpenCL_FOUND)
     target_compile_definitions(gerdos_core_heterogeneous_test
         PRIVATE CL_HPP_TARGET_OPENCL_VERSION=300
                 CL_HPP_MINIMUM_OPENCL_VERSION=120)
+
+    gerdos_add_test(gerdos_core_real_benchmark
+        tests/core_real_benchmark.cpp)
+    target_include_directories(gerdos_core_real_benchmark_test
+        PRIVATE ${OpenCL_INCLUDE_DIRS})
+    target_link_libraries(gerdos_core_real_benchmark_test
+        PRIVATE ${OpenCL_LIBRARIES})
+    target_compile_definitions(gerdos_core_real_benchmark_test
+        PRIVATE CL_HPP_TARGET_OPENCL_VERSION=300
+                CL_HPP_MINIMUM_OPENCL_VERSION=120)
 else()
     message(STATUS
         "OpenCL not found: the heterogeneous backend test is not registered")
