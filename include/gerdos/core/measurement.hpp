@@ -141,12 +141,35 @@ public:
     [[nodiscard]] MeasurementSummary summarize(
         ResourceRef subject,
         MeasurementQuantity quantity) const noexcept {
+        return summarize(subject, quantity, OperationId{}, false);
+    }
+
+    // Like-for-like evidence: the observations of one attempted Operation on
+    // one subject. Comparisons across operations are not meaningful.
+    [[nodiscard]] MeasurementSummary summarize(
+        ResourceRef subject,
+        MeasurementQuantity quantity,
+        OperationId operation) const noexcept {
+        return summarize(subject, quantity, operation, true);
+    }
+
+private:
+    [[nodiscard]] MeasurementSummary summarize(
+        ResourceRef subject,
+        MeasurementQuantity quantity,
+        OperationId operation,
+        bool match_operation) const noexcept {
         MeasurementSummary summary;
 
         for (const auto index : indices_for(subject)) {
             const auto& record = records_[index];
 
             if (record.observation.quantity != quantity) {
+                continue;
+            }
+
+            if (match_operation &&
+                record.observation.operation != operation) {
                 continue;
             }
 
@@ -167,7 +190,6 @@ public:
         return summary;
     }
 
-private:
     [[nodiscard]] static constexpr bool valid_quantity(
         MeasurementQuantity quantity) noexcept {
         switch (quantity) {

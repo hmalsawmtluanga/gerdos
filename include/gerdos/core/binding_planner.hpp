@@ -6,6 +6,7 @@
 
 #include "gerdos/core/data_registry.hpp"
 #include "gerdos/core/device_registry.hpp"
+#include "gerdos/core/measurement.hpp"
 #include "gerdos/core/operation.hpp"
 #include "gerdos/core/physical_binding.hpp"
 #include "gerdos/core/topology.hpp"
@@ -40,10 +41,12 @@ public:
     BindingPlanner(
         const DeviceRegistry& devices,
         const DataRegistry& data,
-        const Topology& topology) noexcept
+        const Topology& topology,
+        const MeasurementRegistry& measurements) noexcept
         : devices_(devices),
           data_(data),
-          topology_(topology) {}
+          topology_(topology),
+          measurements_(measurements) {}
 
     [[nodiscard]] std::optional<PhysicalBinding> plan(
         const Operation& operation) const {
@@ -177,6 +180,7 @@ public:
             const auto chosen = choose_mechanisms(
                 requirement,
                 hops,
+                description.id,
                 binding);
 
             if (chosen < requirement.minimum) {
@@ -401,6 +405,44 @@ private:
         const TopologyLink* via{nullptr};
     };
 
+    // Measurement-informed preference: candidates with successful
+    // like-for-like evidence rank by mean observed duration — measured
+    // behavior outranks declared attributes. Candidates without such
+    // evidence, and evidence of failure, fall back to the declared rules.
+    [[nodiscard]] bool faster_mechanism(
+        const Candidate& left,
+        const Candidate& right,
+        OperationId operation) const noexcept {
+        const auto left_summary = measurements_.summarize(
+            left.ref, MeasurementQuantity::DURATION_NS, operation);
+        const auto right_summary = measurements_.summarize(
+            right.ref, MeasurementQuantity::DURATION_NS, operation);
+
+        const bool left_measured =
+            left_summary.succeeded_observations > 0;
+        const bool right_measured =
+            right_summary.succeeded_observations > 0;
+
+        if (left_measured != right_measured) {
+            return left_measured;
+        }
+
+        if (left_measured) {
+            const auto left_mean =
+                left_summary.succeeded_total_value /
+                left_summary.succeeded_observations;
+            const auto right_mean =
+                right_summary.succeeded_total_value /
+                right_summary.succeeded_observations;
+
+            if (left_mean != right_mean) {
+                return left_mean < right_mean;
+            }
+        }
+
+        return better_candidate(left, right);
+    }
+
     [[nodiscard]] static bool better_candidate(
         const Candidate& left,
         const Candidate& right) noexcept {
@@ -432,6 +474,7 @@ private:
     [[nodiscard]] std::size_t choose_mechanisms(
         const ResourceRequirement& requirement,
         const std::vector<const TopologyLink*>& hops,
+        OperationId operation,
         PhysicalBinding& binding) const noexcept {
         std::vector<Candidate> chosen;
 
@@ -480,7 +523,10 @@ private:
                             }
 
                             if (!found ||
-                                better_candidate(candidate, best_value)) {
+                                faster_mechanism(
+                                    candidate,
+                                    best_value,
+                                    operation)) {
                                 best_value = candidate;
                                 found = true;
                             }
@@ -533,6 +579,7 @@ private:
     const DeviceRegistry& devices_;
     const DataRegistry& data_;
     const Topology& topology_;
+    const MeasurementRegistry& measurements_;
 };
 
 } // namespace gerdos
