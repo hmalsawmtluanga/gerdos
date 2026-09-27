@@ -336,5 +336,81 @@ int main() {
             !validator.admissible(unconstrained_operation, binding));
     }
 
+    // ---------------------------------------------------------------------
+    // 7. Requirement minimums count distinct resources
+    // ---------------------------------------------------------------------
+
+    // One engine listed twice does not satisfy a minimum of two.
+    {
+        PhysicalBinding binding = compute_realization();
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{
+                    DeviceId{1},
+                    ResourceId{1},
+                },
+            });
+
+        GERDOS_CHECK(
+            !validator.admissible(two_compute_operation, binding));
+    }
+
+    // One resource bound in two roles satisfies one requirement per role.
+    const Operation dual_role_operation{OperationDescription{
+        OperationId{105},
+        {},
+        {},
+        {},
+        {
+            ResourceRequirement{
+                ResourceBindingRole::COMPUTE,
+                1,
+            },
+            ResourceRequirement{
+                ResourceBindingRole::TRANSFER,
+                1,
+            },
+        },
+    }};
+
+    {
+        PhysicalBinding binding;
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{
+                    DeviceId{1},
+                    ResourceId{1},
+                },
+            });
+
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::TRANSFER,
+                ResourceRef{
+                    DeviceId{1},
+                    ResourceId{1},
+                },
+            });
+
+        GERDOS_CHECK(validator.admissible(dual_role_operation, binding));
+    }
+
+    // Resource roles outside the binding role domain are inadmissible.
+    {
+        PhysicalBinding binding = compute_realization();
+        binding.resources.push_back(
+            ResourceBinding{
+                static_cast<ResourceBindingRole>(255),
+                ResourceRef{
+                    DeviceId{1},
+                    ResourceId{3},
+                },
+            });
+
+        GERDOS_CHECK(!validator.admissible(compute_operation, binding));
+    }
+
     return 0;
 }

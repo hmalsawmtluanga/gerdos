@@ -1012,5 +1012,68 @@ int main() {
         GERDOS_CHECK(seen == 1);
     }
 
+    // ---------------------------------------------------------------------
+    // 13. A failed attempt is retried by a later Execution
+    // ---------------------------------------------------------------------
+
+    {
+        Fixture fixture;
+        SimulatedBackend backend{1};
+        backend.set_failure(ExecutionId{850});
+
+        Executor executor(
+            fixture.executions,
+            fixture.operations,
+            fixture.devices,
+            fixture.data,
+            backend);
+
+        auto* first = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{850},
+                OperationId{700},
+            });
+
+        GERDOS_CHECK(
+            first->bind(compute_binding(DataId{301}, DataResidencyId{410})));
+        GERDOS_CHECK(executor.start(ExecutionId{850}));
+
+        std::vector<AttemptStatus> outcomes;
+        executor.advance(outcomes);
+
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(first->state() == ExecutionState::FAILED);
+        GERDOS_CHECK(
+            fixture.output_a->state() == DataResidencyState::UNAVAILABLE);
+
+        // The failed attempt released its claim, so a later attempt may
+        // retry the same work on the same representation.
+        backend.set_work(ExecutionId{851}, 1);
+
+        auto* retry = fixture.executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{851},
+                OperationId{700},
+            });
+
+        GERDOS_CHECK(
+            retry->bind(compute_binding(DataId{301}, DataResidencyId{410})));
+        GERDOS_CHECK(executor.start(ExecutionId{851}));
+
+        outcomes.clear();
+        executor.advance(outcomes);
+
+        GERDOS_CHECK(outcomes.size() == 1);
+        GERDOS_CHECK(outcomes.front().execution == ExecutionId{851});
+        GERDOS_CHECK(outcomes.front().integrity == AttemptIntegrity::COHERENT);
+        GERDOS_CHECK(retry->state() == ExecutionState::COMPLETED);
+        GERDOS_CHECK(fixture.output_a->state() == DataResidencyState::VALID);
+
+        // The failed attempt keeps its own history.
+        GERDOS_CHECK(first->has_result());
+        GERDOS_CHECK(first->result()->outcome == ExecutionState::FAILED);
+        GERDOS_CHECK(first->binding() != nullptr);
+    }
+
     return 0;
 }

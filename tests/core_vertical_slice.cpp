@@ -12,9 +12,9 @@ int main() {
     // 1. A synthetic heterogeneous machine
     //
     //     host (100)                 accelerator (200)
-    //      +-- storage  100 nvme      +-- memory  200 device-memory
-    //      +-- memory   101 ram       +-- compute 201 compute
-    //                                 +-- transfer 202 copy-engine
+    //      +-- memory   100 ram       +-- memory   200 device-memory
+    //      +-- storage  101 nvme      +-- compute  201 compute
+    //      +-- transfer 102 dma       +-- transfer 202 copy-engine
     // ---------------------------------------------------------------------
 
     DeviceRegistry devices;
@@ -43,8 +43,8 @@ int main() {
             ResourceDescription{
                 ResourceId{100},
                 DeviceId{100},
-                ResourceKind::STORAGE,
-                "nvme",
+                ResourceKind::MEMORY,
+                "ram",
             },
         }));
 
@@ -53,8 +53,18 @@ int main() {
             ResourceDescription{
                 ResourceId{101},
                 DeviceId{100},
-                ResourceKind::MEMORY,
-                "ram",
+                ResourceKind::STORAGE,
+                "nvme",
+            },
+        }));
+
+    GERDOS_CHECK(host->add_resource(
+        Resource{
+            ResourceDescription{
+                ResourceId{102},
+                DeviceId{100},
+                ResourceKind::TRANSFER,
+                "dma",
             },
         }));
 
@@ -92,6 +102,8 @@ int main() {
         ->set_availability(ResourceAvailability::AVAILABLE);
     host->find_resource(ResourceId{101})
         ->set_availability(ResourceAvailability::AVAILABLE);
+    host->find_resource(ResourceId{102})
+        ->set_availability(ResourceAvailability::AVAILABLE);
 
     accelerator->find_resource(ResourceId{200})
         ->set_availability(ResourceAvailability::AVAILABLE);
@@ -117,7 +129,7 @@ int main() {
                 DataId{500},
                 ResourceRef{
                     DeviceId{100},
-                    ResourceId{100},
+                    ResourceId{101},
                 },
                 "disk",
             },
@@ -130,7 +142,7 @@ int main() {
                 DataId{500},
                 ResourceRef{
                     DeviceId{100},
-                    ResourceId{101},
+                    ResourceId{100},
                 },
                 "staged",
             },
@@ -286,7 +298,7 @@ int main() {
             ResourceBindingRole::TRANSFER,
             ResourceRef{
                 DeviceId{100},
-                ResourceId{101},
+                ResourceId{102},
             },
         });
 

@@ -48,13 +48,22 @@ public:
             }
         }
 
+        for (const auto& resource_binding : binding.resources) {
+            const auto role = resource_binding.role;
+
+            if (role != ResourceBindingRole::COMPUTE &&
+                role != ResourceBindingRole::TRANSFER) {
+                return false;
+            }
+        }
+
         for (const auto& requirement :
              description.resource_requirements) {
             if (!requirement.valid()) {
                 return false;
             }
 
-            if (count_resource_entries(binding, requirement.role) <
+            if (count_distinct_resources(binding, requirement.role) <
                 requirement.minimum) {
                 return false;
             }
@@ -64,11 +73,12 @@ public:
     }
 
 private:
+    template <typename T>
     [[nodiscard]] static bool contains(
-        const std::vector<DataId>& references,
-        DataId id) noexcept {
-        for (const auto reference : references) {
-            if (reference == id) {
+        const std::vector<T>& references,
+        T reference) noexcept {
+        for (const auto existing : references) {
+            if (existing == reference) {
                 return true;
             }
         }
@@ -95,18 +105,26 @@ private:
         return false;
     }
 
-    [[nodiscard]] static std::size_t count_resource_entries(
+    // Requirement minimums count distinct resources: one engine listed
+    // twice does not satisfy a minimum of two. The same resource may still
+    // satisfy more than one role requirement when it is bound in each of
+    // those roles.
+    [[nodiscard]] static std::size_t count_distinct_resources(
         const PhysicalBinding& binding,
         ResourceBindingRole role) noexcept {
-        std::size_t count = 0;
+        std::vector<ResourceRef> distinct;
 
         for (const auto& resource_binding : binding.resources) {
-            if (resource_binding.role == role) {
-                ++count;
+            if (resource_binding.role != role) {
+                continue;
+            }
+
+            if (!contains(distinct, resource_binding.resource)) {
+                distinct.push_back(resource_binding.resource);
             }
         }
 
-        return count;
+        return distinct.size();
     }
 };
 

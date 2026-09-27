@@ -565,5 +565,70 @@ int main() {
     GERDOS_CHECK(
         !never_admitted.set_state(ExecutionState::RUNNING));
 
+    // ---------------------------------------------------------------------
+    // 11. Binding roles must name mechanisms of the right kind
+    // ---------------------------------------------------------------------
+
+    // The compute resource is a COMPUTE mechanism: binding it in TRANSFER
+    // role is incoherent.
+    {
+        Execution wrong_role{
+            ExecutionDescription{
+                ExecutionId{515},
+                OperationId{615},
+            }};
+
+        PhysicalBinding binding;
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{
+                    DataId{300},
+                    DataResidencyId{400},
+                },
+            });
+
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::TRANSFER,
+                compute_ref,
+            });
+
+        GERDOS_CHECK(wrong_role.bind(std::move(binding)));
+        GERDOS_CHECK(
+            !admission_validator.admit(wrong_role).has_value());
+        GERDOS_CHECK(!wrong_role.admitted());
+    }
+
+    // The memory resource is a place, not a mechanism: binding it in
+    // COMPUTE role is incoherent even though it is available.
+    {
+        Execution place_as_mechanism{
+            ExecutionDescription{
+                ExecutionId{516},
+                OperationId{616},
+            }};
+
+        PhysicalBinding binding;
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{
+                    DataId{300},
+                    DataResidencyId{400},
+                },
+            });
+
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                memory_ref,
+            });
+
+        GERDOS_CHECK(place_as_mechanism.bind(std::move(binding)));
+        GERDOS_CHECK(
+            !admission_validator.admit(place_as_mechanism).has_value());
+    }
+
     return 0;
 }
