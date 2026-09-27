@@ -1437,6 +1437,20 @@ same configure-time gate the OpenCL suites use. The core learns no new
 vocabulary: backend API spellings live in the backend directory, the
 documented vendor boundary.
 
+## Backend execution: bounded worker pools
+
+Every real backend runs work on a bounded worker pool (four workers)
+rather than one thread per attempt. Submission past the bounded queue
+(64 pending) is refused loudly — the seam's existing boolean refusal,
+which the executor already handles as rejection-atomic non-start —
+never a silent block. Destruction drains: the pool runs all queued
+work before joining workers, preserving the existing destructor
+guarantee, and the inspection surface stays valid only while idle.
+Pool size is fixed and deterministic, never hardware-derived: test
+outcomes must not depend on core count. The pool is generic C++
+machinery in the core (no vendor vocabulary); backends share the one
+semantic home.
+
 ## Kernel optimization: tiling and vectorization (still generic)
 
 Within each accelerator backend, matrix shapes may execute tiled
