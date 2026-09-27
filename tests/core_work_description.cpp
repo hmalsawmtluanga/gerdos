@@ -301,5 +301,164 @@ int main() {
             admission.admit(loud_attempt).has_value());
     }
 
+    // ---------------------------------------------------------------------
+    // 4. The seam rejects work that is not well-formed
+    // ---------------------------------------------------------------------
+
+    {
+        CpuBackend backend;
+
+        OperationDescription hostile{
+            OperationId{804},
+            {DataId{500}},
+            {DataId{501}},
+            {},
+            {
+                ResourceRequirement{ResourceBindingRole::COMPUTE, 1},
+            },
+            // Sizing that wraps elements * sizeof(float) into an
+            // undersized allocation.
+            WorkDescription{(std::size_t{1} << 61) + 1, 1, 0.0f, 1.0f, 0.0f},
+        };
+
+        const Operation hostile_operation{hostile};
+
+        PhysicalBinding binding;
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{500}, DataResidencyId{5001}},
+            });
+
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{501}, DataResidencyId{5101}},
+            });
+
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{100}, ResourceId{102}},
+            });
+
+        Execution hostile_attempt{
+            ExecutionDescription{ExecutionId{904}, OperationId{804}}};
+
+        GERDOS_CHECK(hostile_attempt.bind(binding));
+
+        // Rejected without touching an allocation.
+        GERDOS_CHECK(
+            !backend.submit(hostile_operation, hostile_attempt));
+        GERDOS_CHECK(backend.allocation_count() == 0);
+
+        // Zero work is not executable work: no vacuous success, no
+        // "infinitely fast" evidence.
+        OperationDescription empty{
+            OperationId{805},
+            {DataId{500}},
+            {DataId{501}},
+            {},
+            {
+                ResourceRequirement{ResourceBindingRole::COMPUTE, 1},
+            },
+            WorkDescription{},
+        };
+
+        const Operation empty_operation{empty};
+
+        Execution empty_attempt{
+            ExecutionDescription{ExecutionId{905}, OperationId{805}}};
+
+        GERDOS_CHECK(empty_attempt.bind(binding));
+        GERDOS_CHECK(!backend.submit(empty_operation, empty_attempt));
+        GERDOS_CHECK(backend.allocation_count() == 0);
+    }
+
+    // ---------------------------------------------------------------------
+    // 5. In-place aliasing is the iterated form
+    // ---------------------------------------------------------------------
+
+    {
+        Machine machine;
+
+        (void)machine.data.find_data(DataId{501})->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{5102},
+                    DataId{501},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "sole",
+                },
+            });
+
+        // An in-place update consumes a usable record.
+        (void)machine.data.find_data(DataId{501})
+            ->find_residency(DataResidencyId{5102})
+            ->set_state(DataResidencyState::VALID);
+
+        // One record consumed and produced: each pass composes over the
+        // previous result. dst starts at 1.0 with dst = dst*1 + dst*2:
+        // 1 -> 3 -> 9.
+        OperationDescription in_place{
+            OperationId{806},
+            {DataId{501}},
+            {DataId{501}},
+            {},
+            {
+                ResourceRequirement{ResourceBindingRole::COMPUTE, 1},
+            },
+            WorkDescription{4, 2, 1.0f, 2.0f, 0.0f},
+        };
+
+        (void)machine.operations.create_operation(in_place);
+
+        CpuBackend backend;
+
+        Executor executor(
+            machine.executions,
+            machine.operations,
+            machine.devices,
+            machine.data,
+            backend);
+
+        PhysicalBinding binding;
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{501}, DataResidencyId{5102}},
+            });
+
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{501}, DataResidencyId{5102}},
+            });
+
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{100}, ResourceId{102}},
+            });
+
+        auto* execution = machine.executions.create_execution(
+            ExecutionDescription{ExecutionId{906}, OperationId{806}});
+
+        GERDOS_CHECK(execution->bind(binding));
+        GERDOS_CHECK(executor.start(ExecutionId{906}));
+
+        std::vector<AttemptStatus> outcomes;
+        executor.advance(outcomes);
+
+        while (outcomes.empty()) {
+            executor.advance(outcomes);
+        }
+
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{501}, DataResidencyId{5102}},
+                0) == 9.0f);
+    }
+
     return 0;
 }

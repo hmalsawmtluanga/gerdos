@@ -207,7 +207,7 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
-    // 3. Real threads overlap real work
+    // 3. Claim arbitration serializes work on one representation
     // ---------------------------------------------------------------------
 
     {

@@ -267,6 +267,11 @@ int main() {
     const auto naive_ns = run_workload(
         naive_machine, naive_planner, naive_executor, staged.workload);
 
+    // The transfer phase costs the same in both arms (engine-independent
+    // movement) and therefore dilutes the compute signal; wall-clock is the
+    // symmetric verdict, engine means are the evidence. Durations include
+    // each engine's own launch accounting.
+
     // ---------------------------------------------------------------------
     // 2. Measurement-informed planning discovers both engines and learns
     //    which one is actually faster on this machine.
@@ -350,10 +355,90 @@ int main() {
     // Never lose the numbers to an aborted assertion.
     std::fflush(stdout);
 
-    // The claim, calibrated to this machine's physics: measured decisions
-    // beat declared order. The ratio itself is printed as evidence — its
-    // size belongs to the hardware, not to the assertion.
-    GERDOS_CHECK(informed_ns < naive_ns);
+    // ---------------------------------------------------------------------
+    // 5. Repetition: physical noise cannot decide the verdict
+    // ---------------------------------------------------------------------
+
+    std::uint64_t best_naive = naive_ns;
+    std::uint64_t best_informed = informed_ns;
+
+    for (int repetition = 1; repetition < 3; ++repetition) {
+        Machine naive_repeat;
+        HeterogeneousBackend naive_repeat_backend(
+            naive_repeat.data, DeviceId{200});
+        staged.populate(naive_repeat);
+
+        MeasurementRegistry naive_repeat_evidence;
+        BindingPlanner naive_repeat_planner(
+            naive_repeat.devices,
+            naive_repeat.data,
+            naive_repeat.topology,
+            blind);
+
+        Executor naive_repeat_executor(
+            naive_repeat.executions,
+            naive_repeat.operations,
+            naive_repeat.devices,
+            naive_repeat.data,
+            naive_repeat_backend,
+            &naive_repeat_evidence);
+
+        Machine informed_repeat;
+        HeterogeneousBackend informed_repeat_backend(
+            informed_repeat.data, DeviceId{200});
+        staged.populate(informed_repeat);
+
+        BindingPlanner informed_repeat_planner(
+            informed_repeat.devices,
+            informed_repeat.data,
+            informed_repeat.topology,
+            informed_repeat.measurements);
+
+        Executor informed_repeat_executor(
+            informed_repeat.executions,
+            informed_repeat.operations,
+            informed_repeat.devices,
+            informed_repeat.data,
+            informed_repeat_backend,
+            &informed_repeat.measurements);
+
+        const auto naive_repeat_ns = run_workload(
+            naive_repeat,
+            naive_repeat_planner,
+            naive_repeat_executor,
+            staged.workload);
+
+        const auto informed_repeat_ns = run_workload(
+            informed_repeat,
+            informed_repeat_planner,
+            informed_repeat_executor,
+            staged.workload);
+
+        std::printf(
+            "  repetition %d: naive %8.2f ms, informed %8.2f ms\n",
+            repetition,
+            naive_repeat_ns / 1e6,
+            informed_repeat_ns / 1e6);
+        std::fflush(stdout);
+
+        if (naive_repeat_ns < best_naive) {
+            best_naive = naive_repeat_ns;
+        }
+
+        if (informed_repeat_ns < best_informed) {
+            best_informed = informed_repeat_ns;
+        }
+    }
+
+    // The verdict uses the best observed run of each arm — the estimator
+    // least sensitive to physical noise. The measured engine gap is the
+    // mechanism: the informed run's engine mean must beat the baseline's.
+    GERDOS_CHECK(best_informed < best_naive);
+    GERDOS_CHECK(
+        informed_gpu.succeeded_total_value *
+                naive_host.succeeded_observations <
+            naive_host.succeeded_total_value *
+                informed_gpu.succeeded_observations);
 
     return 0;
 }

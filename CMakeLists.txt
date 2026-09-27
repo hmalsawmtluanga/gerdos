@@ -123,23 +123,23 @@ if (NOT OpenCL_FOUND AND DEFINED ENV{GERDOS_OPENCL_ROOT})
 endif()
 
 if (OpenCL_FOUND)
-    gerdos_add_test(gerdos_core_heterogeneous
+    gerdos_add_test(gerdos_core_hw_heterogeneous
         tests/core_heterogeneous_backend.cpp)
-    target_include_directories(gerdos_core_heterogeneous_test
+    target_include_directories(gerdos_core_hw_heterogeneous_test
         PRIVATE ${OpenCL_INCLUDE_DIRS})
-    target_link_libraries(gerdos_core_heterogeneous_test
+    target_link_libraries(gerdos_core_hw_heterogeneous_test
         PRIVATE ${OpenCL_LIBRARIES})
-    target_compile_definitions(gerdos_core_heterogeneous_test
+    target_compile_definitions(gerdos_core_hw_heterogeneous_test
         PRIVATE CL_HPP_TARGET_OPENCL_VERSION=300
                 CL_HPP_MINIMUM_OPENCL_VERSION=120)
 
-    gerdos_add_test(gerdos_core_real_benchmark
+    gerdos_add_test(gerdos_core_hw_real_benchmark
         tests/core_real_benchmark.cpp)
-    target_include_directories(gerdos_core_real_benchmark_test
+    target_include_directories(gerdos_core_hw_real_benchmark_test
         PRIVATE ${OpenCL_INCLUDE_DIRS})
-    target_link_libraries(gerdos_core_real_benchmark_test
+    target_link_libraries(gerdos_core_hw_real_benchmark_test
         PRIVATE ${OpenCL_LIBRARIES})
-    target_compile_definitions(gerdos_core_real_benchmark_test
+    target_compile_definitions(gerdos_core_hw_real_benchmark_test
         PRIVATE CL_HPP_TARGET_OPENCL_VERSION=300
                 CL_HPP_MINIMUM_OPENCL_VERSION=120)
 else()

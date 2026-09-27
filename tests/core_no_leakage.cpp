@@ -6,19 +6,14 @@
 #include <string>
 #include <vector>
 
-// The core must not depend on vendor APIs or model vocabulary
-// (DEVICE_RESOURCE_CONTRACT.md test requirements). This guard scans the core
-// headers for forbidden tokens so the rule is enforced rather than reviewed.
+// Model vocabulary is forbidden everywhere in the core tree. Platform
+// vocabulary is forbidden in the core itself; backend directories are the
+// documented vendor boundary and may name the platforms they encapsulate.
+// The guard scans headers so the rule is enforced rather than reviewed.
 int main(int argc, char** argv) {
     GERDOS_CHECK(argc == 2);
 
-    const std::vector<std::string> forbidden{
-        "cuda",
-        "rocm",
-        "sycl",
-        "nvidia",
-        "hipStream",
-        "cuStream",
+    const std::vector<std::string> model_tokens{
         "qwen",
         "llama",
         "deepseek",
@@ -27,6 +22,24 @@ int main(int argc, char** argv) {
         "kv_cache",
         "kvcache",
         "softmax",
+        "mixtral",
+        "gemma",
+        "bert",
+        "gpt",
+    };
+
+    const std::vector<std::string> platform_tokens{
+        "cuda",
+        "rocm",
+        "sycl",
+        "nvidia",
+        "opencl",
+        "OpenCL",
+        "cl::",
+        "clCreate",
+        "CL_",
+        "hipStream",
+        "cuStream",
     };
 
     std::size_t scanned = 0;
@@ -38,13 +51,22 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        const auto path = entry.path().string();
+        const bool in_core = path.find("/core/") != std::string::npos;
+
         std::ifstream input(entry.path());
         GERDOS_CHECK(input.good());
 
         std::string line;
         while (std::getline(input, line)) {
-            for (const auto& token : forbidden) {
+            for (const auto& token : model_tokens) {
                 GERDOS_CHECK(line.find(token) == std::string::npos);
+            }
+
+            if (in_core) {
+                for (const auto& token : platform_tokens) {
+                    GERDOS_CHECK(line.find(token) == std::string::npos);
+                }
             }
         }
 
