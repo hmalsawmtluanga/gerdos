@@ -1296,6 +1296,26 @@ compute shape with fewer than two consuming entries writes nothing
 rather than fabricating an operand. Distinct records of the same Data
 still alias — the same-Data consuming entry is the source by definition.
 
+Composite work is planner-level chaining, not an in-work step list:
+an operation declares exactly one form over its bound representations,
+and multi-step computations (exp → reduce → normalize, or any fused
+softmax-shaped chain) are expressed as multiple operations with data
+dependencies between them — the same chaining the planner, the gates,
+and the executor already handle. Rationale: a step list inside
+WorkDescription would duplicate the operation identity, dependency,
+admission-evidence, claim, and measurement machinery that exists once
+at the operation level; one semantic home per rule prohibits that
+duplication, and premature abstraction prohibits inventing a second
+composition language before the first (dependencies + planner chains)
+is shown insufficient. Fusion, when backends earn it in Phase 3, is a
+backend-internal execution choice over an already-admitted chain with
+identical values — never a new declaration language. Measurement
+attribution stays per operation (one duration per attempt); a fused
+chain's evidence is the sum of its admitted attempts' durations, and
+gates judge each operation's realization identically whether its
+neighbors fuse at execution or not — no gate inspects the work, fused
+or otherwise.
+
 Model adapters translate model semantics into this vocabulary; the core
 never sees model terms. The element type is declared per work
 description, one of three generic dtypes: `F32` (the default — every
