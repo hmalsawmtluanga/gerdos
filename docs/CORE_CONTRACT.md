@@ -1247,22 +1247,30 @@ evidence IS the exclusion (the same structural path as claim
 where they would corrupt means. Reservation (holding capacity across
 rounds) remains a later concern.
 
-Measurement-informed preference is discovery before exploitation, bounded
-by an exploration budget. While the evidence log is small, a mechanism with
-no successful evidence is sampled ahead of measured ones, so new and
-never-tried mechanisms are not starved by a first impression. Beyond the
-budget, measured behavior outranks unmeasured mechanisms entirely: later
-arrivals wait for a future exploration policy rather than starving proven
-engines. Once measured, candidates rank by mean observed successful
-duration: measured behavior outranks declared attributes, and faster
-outranks slower. Failure evidence is not speed evidence, and saturated
-totals cannot yield a meaningful mean — both leave a mechanism in the
-unmeasured class. The evidence scope is the mechanism's proven behavior
-across operations; means pool work shapes, so mechanisms must not be
-compared across divergent work shapes in this version. Work-shape-scoped
-comparison is a future refinement of the requirement model. Record and link
-selection remain declared-attribute based until measurement subjects
-generalize beyond mechanisms.
+Measurement-informed preference is discovery before exploitation,
+decided per comparison — never by a global log-size counter (one
+mechanism's discovery must not depend on unrelated mechanisms'
+traffic). A mechanism with no successful evidence is unmeasured; any
+successful observation makes it measured. An unmeasured candidate is
+sampled ahead of a measured one, so new and never-tried mechanisms are
+not starved by a first impression — including later arrivals, which
+start at zero observations and therefore earn exactly one bounded
+re-exploration sample against measured incumbents before means decide.
+Ties among unmeasured candidates break by declared attributes,
+deterministically. Once measured, candidates rank by mean observed
+successful duration: measured behavior outranks declared attributes,
+and faster outranks slower. Failure evidence is not speed evidence,
+and saturated totals cannot yield a meaningful mean — both leave a
+mechanism in the unmeasured class. Confidence in version zero is
+count-based (one success suffices); variance-aware comparison —
+distrusting a mean from few or spread observations — is future work
+the retained per-operation summaries are kept for. The evidence scope
+is the mechanism's proven behavior across operations; means pool work
+shapes, so mechanisms must not be compared across divergent work shapes
+in this version. Work-shape-scoped comparison is a future refinement of
+the requirement model. Record and link selection remain
+declared-attribute based until measurement subjects generalize beyond
+mechanisms.
 
 ## Real Backends: CPU
 
