@@ -1230,9 +1230,29 @@ resolved at submission; worker threads touch only the buffers they are
 given. A backend failure is not an incoherence: the attempt's effects apply
 and its completion is reported with its outcome.
 
-The amount of work is backend configuration until Operation work
-descriptions exist; that contract is the named boundary between identity and
-computation.
+## Operation Work Descriptions
+
+An Operation declares its computation as a work description: generic
+data-parallel semantics over the bound representations. Each producing
+representation is transformed toward `dst * destination_scale + source_scale
+* src + constant`, repeated `passes` times over `elements` float elements.
+Exact copying is the destination_scale 0, source_scale 1, constant 0,
+passes 1 case; a producing representation without a consuming source is
+transformed without the source term. The consuming record of the same Data
+supplies the source — or, for compute shapes, the first consuming entry.
+
+The work description is parameters, not kinds: there is no operation type
+anywhere in the core, and no gate inspects the work. Structural validation,
+runtime resolution, semantic admissibility, and execution admission judge an
+identical realization identically regardless of the work it declares —
+pinned by test. Backends interpret the work at the seam; extending the
+algebra changes no gate.
+
+Model adapters translate model semantics into this vocabulary; the core
+never sees model terms. The element type is float in this version. The
+algebra grows by declared forms as backends learn them.
+
+## Real Backends: CPU
 
 ## Real Backends: Heterogeneous Routing
 
