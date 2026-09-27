@@ -1234,6 +1234,32 @@ The amount of work is backend configuration until Operation work
 descriptions exist; that contract is the named boundary between identity and
 computation.
 
+## Real Backends: Heterogeneous Routing
+
+One backend seam may execute an attempt's work on more than one physical
+engine. The engine is chosen by the devices that own the attempt's bound
+mechanisms: attempts binding accelerator mechanisms execute real OpenCL
+kernels on that device, all other attempts execute the CPU engine. Which
+devices are accelerators is backend configuration, never vocabulary.
+
+The data plane is home-respecting: every representation has exactly one
+real allocation, living where its residency record says it lives — host
+memory for host-homed records, device memory for accelerator-homed ones.
+Work crossing homes performs real staging exactly as transfer engines
+mediate between host and device memory; movement is engine-independent and
+follows where the data lives.
+
+Kernel semantics are engine-independent: movement pairs are copied between
+representations, and compute pairs run the same arithmetic on either engine,
+reading the consuming record of the same Data — or, for compute shapes, the
+first consuming entry. An unpaired producing representation is written in
+place. Durations are real wall-clock nanoseconds measured where the work
+happens, on real background threads, and poll never blocks.
+
+The heterogeneous backend test requires an OpenCL toolchain and device; it
+is registered at configure time when the toolchain is found. All other tests
+remain accelerator-free.
+
 ## Runtime Integration
 
 The runtime integration layer — the executor — is the component that
