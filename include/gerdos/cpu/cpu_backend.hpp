@@ -182,6 +182,8 @@ private:
                 continue;
             }
 
+            // Update and movement shapes read the same Data's consuming
+            // record; compute shapes read the first consuming entry.
             float* destination = buffers[out];
             const float* origin = nullptr;
             std::size_t origin_index = 0;
@@ -194,6 +196,16 @@ private:
                     origin = buffers[in];
                     origin_index = in;
                     break;
+                }
+            }
+
+            if (origin == nullptr) {
+                for (std::size_t in = 0; in < binding.data.size(); ++in) {
+                    if (is_consuming(binding.data[in].role)) {
+                        origin = buffers[in];
+                        origin_index = in;
+                        break;
+                    }
                 }
             }
 
