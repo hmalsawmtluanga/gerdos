@@ -1,0 +1,43 @@
+# Decoder prefix layer: projections, shifts, exponentials, reductions,
+# means — the exactly-expressible scope. Fresh allocations decode to 1.0.
+# Q = LINEAR(ones(2x3), ones(3x2)) -> [[3,3],[3,3]]; shift is affine;
+# exp prefix over the raised 6-vector; max/mean close the statistics.
+version 1
+workload decoder-prefix
+
+data 600 weights_q
+residency 600 6001 100 101 weights_q
+usable 600 6001
+data 601 input_act
+residency 601 6002 100 101 input_act
+usable 601 6002
+data 602 proj_q
+residency 602 6003 100 101 proj_q
+
+data 610 shifted
+residency 610 6010 100 101 shifted
+usable 610 6010
+data 611 raised
+residency 611 6011 100 101 raised
+usable 611 6011
+data 612 total
+residency 612 6012 100 101 total
+usable 612 6012
+data 613 peak
+residency 613 6013 100 101 peak
+data 614 mean
+residency 614 6014 100 101 mean
+
+data 620 norm_in
+residency 620 6020 100 101 norm_in
+usable 620 6020
+data 621 norm_mean
+residency 621 6021 100 101 norm_mean
+
+op 700 inputs=600,601 outputs=602 deps=- req=COMPUTE:1 form=MATRIX_PRODUCT dtype=F32 elements=0 passes=1 ds=0 ss=1 c=0 rows=2 inner=3 columns=2
+op 701 inputs=610 outputs=610 deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=6 passes=1 ds=1 ss=2 c=1
+op 702 inputs=611 outputs=611 deps=- req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 703 inputs=611 outputs=612 deps=702 req=COMPUTE:1 form=EXPONENTIAL dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 704 inputs=612 outputs=613 deps=703 req=COMPUTE:1 form=REDUCE_MAX dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 705 inputs=612 outputs=614 deps=703 req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=6 passes=1 ds=0 ss=0.16666667 c=0
+op 706 inputs=620 outputs=621 deps=- req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=6 passes=1 ds=0 ss=0.16666667 c=0

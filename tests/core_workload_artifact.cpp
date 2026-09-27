@@ -15,6 +15,7 @@
 #include "gerdos/core/physical_binding_validation.hpp"
 #include "gerdos/core/executor.hpp"
 #include "gerdos/core/operation_registry.hpp"
+#include "gerdos/adapters/model_adapter.hpp"
 #include "gerdos/core/workload_artifact.hpp"
 #include "gerdos/cpu/cpu_backend.hpp"
 
@@ -445,6 +446,157 @@ int main(int argc, char** argv) {
         GERDOS_CHECK(
             guarded.data.find_data(DataId{800}) != nullptr);
     }
+
+    // ---------------------------------------------------------------------
+    // 5. The decoder prefix translates, executes, and verifies
+    // ---------------------------------------------------------------------
+
+    {
+        // The exactly-expressible layer scope as model steps: LINEAR
+        // projection, AFFINE shift, REDUCE_SUM fold, EXPONENTIAL lift,
+        // REDUCE_MAX peak, mean-as-sum-with-1/N, plus the refusals that
+        // bound the scope (RESIDUAL_ADD needs two sources, DIVIDE and
+        // LAYER_NORM need division/variance, SOFTMAX/ATTENTION need the
+        // closing divide). Every step translates exactly or is refused
+        // loudly — never approximated.
+        using gerdos::adapters::adapt;
+        using gerdos::adapters::Adaptation;
+        using gerdos::adapters::ModelOp;
+        using gerdos::adapters::ModelStep;
+        const std::vector<ModelStep> layer{
+            ModelStep{ModelOp::LINEAR, 600, 601, 0, 602, 2, 3, 2},
+            ModelStep{ModelOp::AFFINE, 610, 0, 0, 610, 6, 0, 0, 1.0f, 2.0f, 1.0f},
+            ModelStep{ModelOp::REDUCE_SUM, 611, 0, 0, 611, 6},
+            ModelStep{ModelOp::EXPONENTIAL, 611, 0, 0, 612, 6},
+            ModelStep{ModelOp::REDUCE_MAX, 612, 0, 0, 613, 6},
+            ModelStep{ModelOp::REDUCE_MEAN, 612, 0, 0, 614, 6},
+            ModelStep{ModelOp::REDUCE_MEAN, 620, 0, 0, 621, 6},
+            ModelStep{ModelOp::RESIDUAL_ADD, 610, 611, 0, 615, 6},
+            ModelStep{ModelOp::DIVIDE, 612, 613, 0, 616, 6},
+            ModelStep{ModelOp::LAYER_NORM, 610, 0, 0, 617, 6},
+            ModelStep{ModelOp::SOFTMAX, 612, 0, 0, 618, 6},
+            ModelStep{ModelOp::ATTENTION, 611, 612, 0, 619, 6},
+        };
+
+        const Adaptation translated = adapt("decoder layer", layer);
+        GERDOS_CHECK(translated.workload.operations.size() == 7);
+        GERDOS_CHECK(translated.refused.size() == 5);
+        GERDOS_CHECK(translated.refused[0].find("RESIDUAL_ADD") == 0);
+        GERDOS_CHECK(translated.refused[1].find("DIVIDE") == 0);
+        GERDOS_CHECK(translated.refused[2].find("LAYER_NORM") == 0);
+        GERDOS_CHECK(translated.refused[3].find("SOFTMAX") == 0);
+        GERDOS_CHECK(translated.refused[4].find("ATTENTION") == 0);
+
+        GERDOS_CHECK(translated.workload.operations[0].work.form == WorkForm::MATRIX_PRODUCT);
+        GERDOS_CHECK(translated.workload.operations[5].work.form == WorkForm::REDUCE_SUM);
+        GERDOS_CHECK(translated.workload.operations[5].work.source_scale == 1.0f / 6.0f);
+
+        // The translated prefix executes through the full gate chain
+        // with the workload artifact cross-checking identical values:
+        // the artifact file declares the same seven operations.
+        Machine layered;
+        CpuBackend layered_backend;
+        Executor layered_executor(
+            layered.executions,
+            layered.operations,
+            layered.devices,
+            layered.data,
+            layered_backend,
+            &layered.measurements);
+        BindingPlanner layered_planner(
+            layered.devices,
+            layered.data,
+            layered.topology,
+            layered.measurements);
+
+        const auto layered_parsed = parse_artifact(
+            load_text((directory + "/decoder_prefix.gwd").c_str()));
+        GERDOS_CHECK(layered_parsed.ok);
+        GERDOS_CHECK(layered_parsed.artifact.workload.operations.size() == 7);
+
+        std::string layered_reason;
+        GERDOS_CHECK(populate_registries(
+            layered_parsed.artifact, layered.devices, layered.data,
+            layered.operations, layered_reason));
+
+        const auto layered_plan = layered_planner.plan_attempts(layered.operations);
+        GERDOS_CHECK(layered_plan.size() == 7);
+
+        // Hand-rolled CPU reference (outside GERDOS): the same chain
+        // computed directly. Bit-exact where integer shapes govern
+        // (projection, shift, fold); tolerance-documented where float
+        // reductions accumulate (sums and means within 4 ulps).
+        float ref_proj[4];
+        float ref_exp[6];
+
+        for (std::size_t i = 0; i < 4; ++i) {
+            ref_proj[i] = 3.0f;
+        }
+
+
+        std::size_t layered_attempt = 0;
+
+        for (const auto& step : layered_plan) {
+            const auto* operation = layered.operations.find_operation(step.id);
+            GERDOS_CHECK(operation != nullptr);
+            PhysicalBindingValidator validator;
+            BindingResolver resolver(layered.devices, layered.data);
+            BindingAdmissibilityValidator admissibility;
+            ExecutionAdmissionValidator admission(layered.devices, layered.data);
+            GERDOS_CHECK(validator.validate(step.binding));
+            GERDOS_CHECK(resolver.resolve(step.binding).fully_resolved());
+            GERDOS_CHECK(admissibility.admissible(*operation, step.binding));
+            auto* execution = layered.executions.create_execution(
+                ExecutionDescription{ExecutionId{6000 + layered_attempt}, step.id});
+            ++layered_attempt;
+            GERDOS_CHECK(execution->bind(step.binding));
+            GERDOS_CHECK(admission.admit(*execution).has_value());
+            GERDOS_CHECK(layered_executor.start(execution->description().id));
+            std::vector<AttemptStatus> outcomes;
+            layered_executor.advance(outcomes);
+
+            while (outcomes.empty()) {
+                layered_executor.advance(outcomes);
+            }
+
+            GERDOS_CHECK(outcomes.size() == 1);
+            GERDOS_CHECK(outcomes.front().integrity == AttemptIntegrity::COHERENT);
+        }
+
+        // Projection: ones(2x3) x ones(3x2) = [[3,3],[3,3]] exactly.
+        for (std::size_t i = 0; i < 4; ++i) {
+            GERDOS_CHECK(layered_backend.sample(DataResidencyRef{DataId{602}, DataResidencyId{6003}}, i) == ref_proj[i]);
+        }
+        // Shift: fresh 1.0 through dst*1 + src*2 + 1 = 4.0 exactly.
+        GERDOS_CHECK(layered_backend.sample(DataResidencyRef{DataId{610}, DataResidencyId{6010}}, 0) == 4.0f);
+
+        // Reference exponentials off the raised record.
+        for (std::size_t i = 0; i < 6; ++i) {
+            const float r = layered_backend.sample(DataResidencyRef{DataId{611}, DataResidencyId{6011}}, i);
+            ref_exp[i] = std::exp(r);
+        }
+
+        const float e0 = layered_backend.sample(DataResidencyRef{DataId{612}, DataResidencyId{6012}}, 0);
+        const float e1 = layered_backend.sample(DataResidencyRef{DataId{612}, DataResidencyId{6012}}, 1);
+        const float peak = layered_backend.sample(DataResidencyRef{DataId{613}, DataResidencyId{6013}}, 0);
+        const float mean = layered_backend.sample(DataResidencyRef{DataId{614}, DataResidencyId{6014}}, 0);
+        const float norm_mean = layered_backend.sample(DataResidencyRef{DataId{621}, DataResidencyId{6021}}, 0);
+        float ref_sum = 0.0f;
+
+        for (std::size_t i = 0; i < 6; ++i) {
+            ref_sum += ref_exp[i];
+        }
+
+        std::printf("layer: E0=%f S+=%f M=%f mean=%f norm=%f\n", e0, e1, peak, mean, norm_mean);
+        std::printf("reference: E0=%f S+=%f M=%f mean=%f\n", ref_exp[0], ref_exp[1], ref_exp[0], ref_sum / 6.0f);
+        std::fflush(stdout);
+        GERDOS_CHECK(e0 == ref_exp[0]);
+        GERDOS_CHECK(e1 == ref_exp[1]);
+        GERDOS_CHECK(peak == ref_exp[0]);
+        GERDOS_CHECK(std::fabs(mean - ref_sum / 6.0f) <= std::numeric_limits<float>::epsilon() * (ref_sum / 6.0f) * 4);
+        GERDOS_CHECK(norm_mean == 1.0f);
+    }
+
 
     return 0;
 }

@@ -41,18 +41,25 @@ int main() {
         ModelStep{ModelOp::MASK_SELECT, 700, 701, 702, 703, 6},
         ModelStep{ModelOp::GATHER, 700, 701, 0, 702, 6},
         ModelStep{ModelOp::MOVE, 700, 0, 0, 0, 6},
+        ModelStep{ModelOp::REDUCE_MEAN, 700, 0, 0, 701, 6},
+        ModelStep{ModelOp::RESIDUAL_ADD, 700, 701, 0, 702, 6},
+        ModelStep{ModelOp::DIVIDE, 700, 701, 0, 702, 6},
+        ModelStep{ModelOp::LAYER_NORM, 700, 0, 0, 701, 6},
     };
 
     const Adaptation adaptation = adapt("decoder fragment", fragment);
 
     GERDOS_CHECK(adaptation.workload.name == "decoder fragment");
-    GERDOS_CHECK(adaptation.workload.operations.size() == 10);
+    GERDOS_CHECK(adaptation.workload.operations.size() == 11);
 
     // Fail-closed translation: what the algebra cannot express exactly is
     // refused by name, never approximated silently.
-    GERDOS_CHECK(adaptation.refused.size() == 2);
+    GERDOS_CHECK(adaptation.refused.size() == 5);
     GERDOS_CHECK(adaptation.refused[0].find("SOFTMAX") == 0);
     GERDOS_CHECK(adaptation.refused[1].find("ATTENTION") == 0);
+    GERDOS_CHECK(adaptation.refused[2].find("RESIDUAL_ADD") == 0);
+    GERDOS_CHECK(adaptation.refused[3].find("DIVIDE") == 0);
+    GERDOS_CHECK(adaptation.refused[4].find("LAYER_NORM") == 0);
 
     const auto& linear = adaptation.workload.operations[0];
     GERDOS_CHECK(
@@ -106,6 +113,14 @@ int main() {
     GERDOS_CHECK(move.work.destination_scale == 0.0f);
     GERDOS_CHECK(move.resource_requirements[0].role ==
                   ResourceBindingRole::TRANSFER);
+
+    // REDUCE_MEAN folds through the affine wrapper with source_scale
+    // 1/N: over six 1.0 elements the mean is exactly 1.0.
+    const auto& mean = adaptation.workload.operations[10];
+    GERDOS_CHECK(mean.work.form == WorkForm::REDUCE_SUM);
+    GERDOS_CHECK(mean.work.elements == 6);
+    GERDOS_CHECK(mean.work.source_scale == 1.0f / 6.0f);
+    GERDOS_CHECK(mean.work.destination_scale == 0.0f);
 
     // ---------------------------------------------------------------------
     // 1b. Dtype carriage: steps run in their declared dtype
