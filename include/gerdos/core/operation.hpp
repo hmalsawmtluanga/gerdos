@@ -44,6 +44,12 @@ enum class WorkForm : std::uint8_t {
     // dst[0] = dst[0] * destination_scale + source_scale * sum(src) +
     // constant; the remaining elements are left alone.
     REDUCE_SUM,
+    // dst = dst * destination_scale + source_scale * exp(src) +
+    // constant, elementwise.
+    EXPONENTIAL,
+    // dst[0] = dst[0] * destination_scale + source_scale * max(src) +
+    // constant; the remaining elements are left alone.
+    REDUCE_MAX,
 };
 
 // The declared computation of an attempt, expressed as generic data-parallel
@@ -51,8 +57,10 @@ enum class WorkForm : std::uint8_t {
 // copying is the elementwise form with destination_scale 0, source_scale 1,
 // constant 0, passes 1. The consuming record of the same Data supplies src —
 // or, for compute shapes, the first consuming entry. Shape fields are
-// interpreted by form. Gates never inspect the work; backends interpret it
-// at the seam.
+// interpreted by form. The exponential form applies the affine wrapper
+// around exp(src); the max-reduction form folds the operand maximum into
+// dst[0] and leaves the remaining elements alone. Gates never inspect the
+// work; backends interpret it at the seam.
 struct WorkDescription {
     std::size_t elements{0};
     std::size_t passes{0};
@@ -74,6 +82,8 @@ struct WorkDescription {
         switch (form) {
         case WorkForm::ELEMENTWISE_AFFINE:
         case WorkForm::REDUCE_SUM:
+        case WorkForm::EXPONENTIAL:
+        case WorkForm::REDUCE_MAX:
             return elements > 0 && passes > 0 && elements <= limit;
         case WorkForm::MATRIX_PRODUCT:
             return rows > 0 && inner > 0 && columns > 0 && passes > 0 &&

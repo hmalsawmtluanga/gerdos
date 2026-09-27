@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -280,6 +281,49 @@ private:
                     destination[0] =
                         destination[0] * work.destination_scale +
                         sum * work.source_scale + work.constant;
+                }
+
+                continue;
+            }
+
+            if (work.form == WorkForm::REDUCE_MAX) {
+                if (!has_source) {
+                    continue;
+                }
+
+                const float* origin = buffers[source_index];
+
+                for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                    float peak = origin[0];
+
+                    for (std::size_t i = 1; i < work.elements; ++i) {
+                        if (origin[i] > peak) {
+                            peak = origin[i];
+                        }
+                    }
+
+                    destination[0] =
+                        destination[0] * work.destination_scale +
+                        peak * work.source_scale + work.constant;
+                }
+
+                continue;
+            }
+
+            if (work.form == WorkForm::EXPONENTIAL) {
+                if (!has_source) {
+                    continue;
+                }
+
+                const float* origin = buffers[source_index];
+
+                for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                    for (std::size_t i = 0; i < work.elements; ++i) {
+                        destination[i] =
+                            destination[i] * work.destination_scale +
+                            std::exp(origin[i]) * work.source_scale +
+                            work.constant;
+                    }
                 }
 
                 continue;
