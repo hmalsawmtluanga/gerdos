@@ -2,7 +2,7 @@
 
 ## Global Execution Runtime for Dynamic Open Systems
 
-GERDOS is a model-agnostic inference runtime designed to extract useful
+GERDOS is a model-agnostic execution runtime designed to extract useful
 performance from heterogeneous and constrained hardware.
 
 Its purpose is to make modern open models practical across hardware

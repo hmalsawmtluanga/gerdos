@@ -7,7 +7,10 @@ Architecture contract v0.3.
 This document defines the conceptual boundaries of the GERDOS runtime. The core
 implementation currently establishes identity, ownership, resource and data
 residency state, topology identity, operations, executions, physical binding,
-and execution admission.
+structural validation, runtime resolution, semantic admissibility, execution
+admission, execution effects, execution results, the backend execution
+interface with its simulated implementation, runtime integration, and
+measurement evidence.
 
 The central architectural model is:
 
@@ -655,7 +658,9 @@ does not consume the supplied object.
 
 The core uses `bool` registration results for these ownership-adoption
 operations. `true` means that ownership was accepted by the containing object;
-`false` means that the object was not registered.
+`false` means that the object was not registered. Registration functions that
+take their argument by value consume it unconditionally; registration
+functions that take an rvalue reference consume it only on acceptance.
 
 Data identity and residency identity must not be inferred from enumeration
 position, ResourceId, DeviceId, memory address, or backend allocation handle.
@@ -690,6 +695,9 @@ referenced Operation need not already exist when the Operation is registered;
 forward references are permitted. A dependency expresses a logical
 prerequisite relationship and does not by itself define scheduling,
 synchronization primitives, queue selection, or physical execution ordering.
+Dependency graphs are not validated at registration: cycles and
+self-references are representable today, and graph validation and ordering
+semantics belong to a future planning contract.
 
 An Operation may declare capability requirements. Capability requirements are
 opaque to model architecture and backend implementation at the core level.
@@ -1434,6 +1442,10 @@ A record establishes:
 
 Queries accumulate values with saturating arithmetic; totals never wrap.
 Evidence is retained without limit; retention policy is future work.
+
+The observed Resource is the subject form of this contract. Observations of
+topology links or other entities require a future subject generalization and
+are not representable today.
 
 `MeasurementId` values are allocated by the owning Measurement Registry in
 observation order and are never reused; identifier order is observation order.

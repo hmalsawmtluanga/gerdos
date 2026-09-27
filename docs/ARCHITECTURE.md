@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-GERDOS is an inference runtime whose primary abstraction is not a particular
+GERDOS is an execution runtime whose primary abstraction is not a particular
 model or accelerator.
 
 The runtime manages execution across heterogeneous compute, memory, storage,
