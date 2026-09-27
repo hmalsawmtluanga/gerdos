@@ -1194,9 +1194,24 @@ Version-zero selection rules:
   same declared-attribute preference
 - movement between distinct records requires a covering topology link
 
-Claimed producing records are never planned onto. Planning does not order
-work, resolve dependencies, produce multi-attempt plans, or reserve capacity;
-those are later planning concerns.
+Claimed producing records are never planned onto.
+
+Dependency-graph scheduling orders work before binding it. The planner
+reads each operation's declared dependencies and returns ready
+operations in topological order: an operation is ready when every
+dependency names an operation the registry holds — dependencies name
+operations, never attempts, so a dependency on a failed attempt's
+output is a contradiction the planner refuses (fail-closed: no binding,
+never a guess at which retry counts). Readiness is a state predicate
+over residency usability and claim state, never wall-clock waiting: the
+planner never blocks, it returns the ready subset and leaves unready
+operations (unusable residencies, claimed records, dependencies the
+registry does not hold yet) for a later round. Cycles fail closed too:
+a dependency cycle yields no plan rather than a deadlock — the planner
+detects the cycle structurally (Kahn's algorithm over the declared
+graph) and returns the empty set with the cycle left visible in the
+declared dependencies for the caller to break. Multi-attempt plans,
+derived capacity, and reservation remain later planning concerns.
 
 Measurement-informed preference is discovery before exploitation, bounded
 by an exploration budget. While the evidence log is small, a mechanism with
