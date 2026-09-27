@@ -90,10 +90,24 @@ public:
                 observation,
             });
 
-        subject_index_[observation.subject].push_back(
-            records_.size() - 1);
+        // The record and its index entry commit together: an index failure
+        // rolls the record back so no identifier is consumed and no record
+        // is left unindexed.
+        try {
+            subject_index_[observation.subject].push_back(
+                records_.size() - 1);
+        } catch (...) {
+            records_.pop_back();
 
-        // The identifier is consumed only after the record exists.
+            const auto it = subject_index_.find(observation.subject);
+
+            if (it != subject_index_.end() && it->second.empty()) {
+                subject_index_.erase(it);
+            }
+
+            throw;
+        }
+
         ++next_id_;
 
         return id;

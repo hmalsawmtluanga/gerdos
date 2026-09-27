@@ -106,25 +106,35 @@ private:
     }
 
     // Requirement minimums count distinct resources: one engine listed
-    // twice does not satisfy a minimum of two. The same resource may still
-    // satisfy more than one role requirement when it is bound in each of
-    // those roles.
+    // twice does not satisfy a minimum of two. Counting allocates nothing,
+    // keeping the whole evaluation non-throwing.
     [[nodiscard]] static std::size_t count_distinct_resources(
         const PhysicalBinding& binding,
         ResourceBindingRole role) noexcept {
-        std::vector<ResourceRef> distinct;
+        std::size_t count = 0;
 
-        for (const auto& resource_binding : binding.resources) {
-            if (resource_binding.role != role) {
+        for (std::size_t i = 0; i < binding.resources.size(); ++i) {
+            if (binding.resources[i].role != role) {
                 continue;
             }
 
-            if (!contains(distinct, resource_binding.resource)) {
-                distinct.push_back(resource_binding.resource);
+            bool seen = false;
+
+            for (std::size_t j = 0; j < i; ++j) {
+                if (binding.resources[j].role == role &&
+                    binding.resources[j].resource ==
+                        binding.resources[i].resource) {
+                    seen = true;
+                    break;
+                }
+            }
+
+            if (!seen) {
+                ++count;
             }
         }
 
-        return distinct.size();
+        return count;
     }
 };
 
