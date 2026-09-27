@@ -188,6 +188,7 @@ The adversarial environment contains two devices.
 Host Device:
 - Resource 100: host RAM, kind MEMORY
 - Resource 101: NVMe storage, kind STORAGE
+- Resource 102: host DMA engine, kind TRANSFER
 
 Accelerator Device:
 - Resource 200: device-local memory, kind MEMORY
@@ -257,6 +258,26 @@ The scenario must exercise the following conditions independently:
 10. A transfer may fail and require a later Execution to retry.
 11. One residency may become UNAVAILABLE while another remains VALID.
 12. Capacity pressure may force placement or eviction decisions.
+
+Current status of each condition:
+
+| # | Condition | Status |
+|---|-----------|--------|
+| 1 | Multiple simultaneous residencies | exercised (identity, executor, and slice suites) |
+| 2 | Coexisting representations | exercised (adversarial suite) |
+| 3 | TRANSFERRING residency while work waits | exercised (slice, admission suites) |
+| 4 | Alternate residency substitution | partial: admission accepts any usable residency; substitution is a planner decision (deferred) |
+| 5 | Shared movement capacity contention | deferred before planning; single-writer update claims cover concurrent updates today |
+| 6 | Topology-constrained movement | deferred before planning; topology has no consumer yet |
+| 7 | Prefetch | deferred; the effects model supports creating residencies ahead of use |
+| 8 | Eviction preserving logical Data | exercised (identity suite: residency removal leaves Data) |
+| 9 | Resource unavailable while residency exists | exercised (adversarial suite) |
+| 10 | Transfer failure and retry by a later Execution | exercised (executor suite) |
+| 11 | One residency UNAVAILABLE while another VALID | exercised (admission and executor suites) |
+| 12 | Capacity pressure | deferred before planning |
+
+Conditions marked deferred remain open obligations for the planning layer and
+must be closed or re-scoped before measurement-informed planning is claimed.
 
 ### 11.5 Architectural invariants under test
 

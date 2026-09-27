@@ -954,6 +954,16 @@ been established for it. The state machine's binding requirement is structural:
 a binding value has been established. Admission is stricter and defines the
 executable physical realization. Both requirements apply.
 
+Admission is mechanically enforced, not advisory: establishing admission
+records evidence on the attempt, and the `RUNNING` transition is rejected
+without that evidence. The evidence can be established only by the
+execution-admission gate.
+
+Admission also enforces role and kind coherence: a `COMPUTE` resource binding
+must reference a compute resource, and a `TRANSFER` resource binding must
+reference a transfer resource. Memory and storage resources are places,
+reached through residencies, and are never bound as mechanisms.
+
 Admission evidence is established against the runtime state observed at
 admission time. If a referenced object is removed or its runtime state changes
 after admission, the evidence is not rewritten; re-evaluation is obtained by
@@ -983,7 +993,12 @@ A physical binding is semantically admissible for an Operation when:
 - every declared output `DataId` is referenced by at least one producing data
   binding
 - for every declared resource requirement, the binding contains at least the
-  required number of resource bindings in the required role
+  required number of distinct resources in the required role; one resource
+  listed twice does not satisfy a minimum of two, while one resource bound in
+  two roles may satisfy a requirement in each of those roles
+
+A binding containing a resource role value outside the binding role domains
+is inadmissible.
 
 A binding containing a role value outside the binding role domains is
 inadmissible. Bindings beyond the declared coverage and requirements are
