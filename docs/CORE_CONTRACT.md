@@ -1165,6 +1165,36 @@ Operation work descriptions — the generic semantics a real backend needs in
 order to perform computation — require a later contract. Until then, backends
 perform abstract work.
 
+## Binding Planning
+
+Binding planning produces one physical binding for an attempt of an Operation
+from the current runtime state. Planning is deterministic and fail-closed: it
+returns no binding rather than one that cannot pass structural validation,
+runtime resolution, semantic admissibility, and execution admission.
+
+Version-zero selection rules:
+
+- a declared input binds a consuming entry; a declared output binds a
+  producing entry; data declared as both consumes one record and produces to
+  a distinct reachable record (movement: `SOURCE`/`DESTINATION`), falling
+  back to in-place realization (`INPUT`/`OUTPUT`) only when the consuming
+  record is the Data's sole representation; with sibling records that are
+  unreachable or busy, planning fails loudly
+- consuming entries use usable records with available hosts, lowest
+  identifiers first
+- producing entries prefer distinct unclaimed records with available hosts,
+  reachable from the consuming record by a covering topology link and ranked
+  by that link's declared bandwidth, then latency, then identifier order
+- resource requirements are satisfied by distinct, available mechanisms whose
+  kind matches the required role; movement transfer mechanisms are chosen
+  from covering-link endpoints with the same declared-attribute preference
+- movement between distinct records requires a covering topology link
+
+Claimed producing records are never planned onto. Measurements are not
+consulted in this version. Planning does not order work, resolve dependencies,
+produce multi-attempt plans, or reserve capacity; those are later planning
+concerns.
+
 ## Runtime Integration
 
 The runtime integration layer — the executor — is the component that
