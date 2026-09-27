@@ -1,0 +1,20 @@
+# Softmax expressible prefix: exp -> sum, chained by data dependency.
+# Fresh allocations decode to 1.0, so the uniform input is implicit.
+version 1
+workload softmax-prefix
+
+data 700 input
+residency 700 7001 100 101 staged
+usable 700 7001
+data 701 raised
+residency 701 7002 100 101 raised
+usable 701 7002
+data 702 total
+residency 702 7003 100 101 total
+usable 702 7003
+data 703 peak
+residency 703 7004 100 101 peak
+
+op 800 inputs=700 outputs=701 deps=- req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 801 inputs=701 outputs=702 deps=800 req=COMPUTE:1 form=EXPONENTIAL dtype=F32 elements=6 passes=1 ds=1 ss=1 c=0
+op 802 inputs=702 outputs=703 deps=801 req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0

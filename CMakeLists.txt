@@ -193,4 +193,15 @@ add_test(
     COMMAND gerdos_core_no_leakage_test ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+add_executable(gerdos_core_workload_artifact_test
+    tests/core_workload_artifact.cpp
+)
+
+gerdos_configure_target(gerdos_core_workload_artifact_test)
+
+add_test(
+    NAME gerdos_core_workload_artifact
+    COMMAND gerdos_core_workload_artifact_test ${CMAKE_CURRENT_SOURCE_DIR}/workloads
+)
+
 
