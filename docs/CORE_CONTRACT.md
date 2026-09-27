@@ -1609,6 +1609,26 @@ A model is one possible producer of a workload.
 
 GERDOS must not require workloads to originate from models.
 
+## Decoder-layer translation scope (Phase 4c)
+
+One attention-adjacent layer shape translates through the adapter
+expressed only with the Phase-1 algebra: projections and mixes are
+LINEAR, shifts are AFFINE, the softmax prefix is EXPONENTIAL plus
+REDUCE_SUM, normalization-shaped statistics are REDUCE_SUM,
+REDUCE_MIN/MAX, and the new REDUCE_MEAN. Every step translates exactly
+or is refused loudly by name with its reason — never approximated
+silently. The closing divide-by-sum has no form, so SOFTMAX and
+ATTENTION stay refused; two-source adds (RESIDUAL_ADD) and
+variance/division normalizations (LAYER_NORM, DIVIDE) are refused too
+— the affine form reads one source per producing entry. The layer
+under test is the exactly-expressible prefix shape (projections,
+shifts, exponentials, reductions, means), which is the largest honest
+scope the algebra admits. Numerical verification
+is against a hand-rolled CPU reference checked in beside the test:
+bit-exact where integer shapes govern, tolerance-documented where
+float reductions accumulate. The comparison prints as evidence, never
+as a hidden fixture.
+
 ## Workload artifact format (version 1)
 
 The on-disk form of a workload is a line-oriented text format — the
