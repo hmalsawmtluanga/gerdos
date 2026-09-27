@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -56,11 +57,20 @@ enum class TopologyLinkDirection {
     BIDIRECTIONAL,
 };
 
+// The static declared performance of a link. Zero means uncharacterized;
+// these are declared expectations, not measurements. Measured link behavior
+// belongs to Measurement evidence.
+struct TopologyLinkAttributes {
+    std::uint64_t bandwidth_bytes_per_second{0};
+    std::uint64_t latency_ns{0};
+};
+
 struct TopologyLinkDescription {
     TopologyLinkId id;
     TopologyEndpoint source;
     TopologyEndpoint destination;
     TopologyLinkDirection direction;
+    TopologyLinkAttributes attributes{};
 };
 
 class TopologyLink {

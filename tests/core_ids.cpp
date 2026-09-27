@@ -898,5 +898,56 @@ int main() {
         GERDOS_CHECK(guarded_registry.remove_data(DataId{800}));
     }
 
+    // ---------------------------------------------------------------------
+    // Topology links carry static declared attributes only: zero means
+    // uncharacterized, and the values are preserved verbatim as description.
+    // ---------------------------------------------------------------------
+
+    {
+        Topology links;
+
+        GERDOS_CHECK(links.add_link(
+            TopologyLink{
+                TopologyLinkDescription{
+                    TopologyLinkId{90},
+                    TopologyEndpoint::device_endpoint(DeviceId{1}),
+                    TopologyEndpoint::device_endpoint(DeviceId{2}),
+                    TopologyLinkDirection::BIDIRECTIONAL,
+                    TopologyLinkAttributes{
+                        24'000'000'000,
+                        800,
+                    },
+                },
+            }));
+
+        const auto* link = links.find_link(TopologyLinkId{90});
+        GERDOS_CHECK(link != nullptr);
+
+        GERDOS_CHECK(
+            link->description().attributes.bandwidth_bytes_per_second ==
+            24'000'000'000);
+        GERDOS_CHECK(
+            link->description().attributes.latency_ns == 800);
+
+        // An uncharacterized link is valid and defaults to zero.
+        GERDOS_CHECK(links.add_link(
+            TopologyLink{
+                TopologyLinkDescription{
+                    TopologyLinkId{91},
+                    TopologyEndpoint::device_endpoint(DeviceId{2}),
+                    TopologyEndpoint::device_endpoint(DeviceId{1}),
+                    TopologyLinkDirection::BIDIRECTIONAL,
+                },
+            }));
+
+        const auto* uncharacterized = links.find_link(TopologyLinkId{91});
+        GERDOS_CHECK(uncharacterized != nullptr);
+        GERDOS_CHECK(
+            uncharacterized->description().attributes
+                .bandwidth_bytes_per_second == 0);
+        GERDOS_CHECK(
+            uncharacterized->description().attributes.latency_ns == 0);
+    }
+
     return 0;
 }
