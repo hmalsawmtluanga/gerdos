@@ -1248,6 +1248,15 @@ identical realization identically regardless of the work it declares —
 pinned by test. Backends interpret the work at the seam; extending the
 algebra changes no gate.
 
+Well-formed work is executable work: the seam rejects work descriptions
+with zero elements, zero passes, or sizing that cannot be allocated —
+hostile arithmetic must never reach an allocation or a kernel, and a
+vacuous success is not speed evidence. Identity registration accepts any
+declared work because registration is not execution.
+
+When the source is the destination record, the transform is defined as the
+iterated form: each pass composes over the previous result.
+
 Model adapters translate model semantics into this vocabulary; the core
 never sees model terms. The element type is float in this version. The
 algebra grows by declared forms as backends learn them.
