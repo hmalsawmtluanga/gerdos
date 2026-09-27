@@ -1418,6 +1418,25 @@ vocabulary is forbidden in the core.
 
 ## Real Backends: Heterogeneous Routing
 
+A second GPU family behind the same seam proves the vendor boundary is
+real, not a single-vendor relationship. The Vulkan compute backend
+owns accelerator-homed records and executes the full work algebra with
+identical semantics to the OpenCL path: both engines compute in F32
+with once-per-direction boundary conversion through the shared
+helpers, durations are real wall-clock nanoseconds on background
+threads, submission is rejection-atomic with shared storage ownership,
+and the inspection surface is valid only while idle. Which physical
+device serves the backend is configuration (first real GPU with a
+compute queue — software rasterizers are explicitly excluded, since a
+CPU-masquerading-as-GPU result would be a fabricated hardware claim).
+Compute shaders are compiled offline to SPIR-V and checked in as
+sources plus generated blobs; there is no runtime shader toolchain
+dependency. The backend reports availability (device, compute queue,
+and every pipeline created); without it, dependent tests abort at the
+same configure-time gate the OpenCL suites use. The core learns no new
+vocabulary: backend API spellings live in the backend directory, the
+documented vendor boundary.
+
 One backend seam may execute an attempt's work on more than one physical
 engine. The engine is chosen by the devices that own the attempt's bound
 mechanisms: attempts binding accelerator mechanisms execute real OpenCL
