@@ -512,7 +512,7 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
-    // 8. Discovery is bounded by the exploration budget
+    // 8. Discovery is per-comparison: no log size starves newcomers
     // ---------------------------------------------------------------------
 
     {
@@ -523,7 +523,10 @@ int main() {
             budgeted.topology,
             budgeted.measurements);
 
-        // Exhaust the exploration budget with unrelated evidence.
+        // Flood the log with unrelated evidence: under the old global
+        // budget this would exhaust discovery. The per-comparison rule
+        // ignores log size — discovery depends only on the compared
+        // pair's own observations.
         for (std::size_t i = 0; i < 32; ++i) {
             (void)budgeted.measurements.record(
                 MeasurementObservation{
@@ -548,15 +551,33 @@ int main() {
                 {},
             });
 
-        // With the budget exhausted, the unmeasured copy-engine no longer
-        // dislodges the measured dma: newcomers cannot starve proven
-        // engines forever.
+        // The unmeasured copy-engine is sampled ahead of measured dma:
+        // one bounded re-exploration sample, regardless of log size.
         const auto* operation =
             budgeted.operations.find_operation(OperationId{801});
 
         const auto binding = planner.plan(*operation);
         GERDOS_CHECK(binding.has_value());
-        GERDOS_CHECK(binding->resources[0].resource == dma);
+        GERDOS_CHECK(binding->resources[0].resource == copy_engine);
+
+        // After its one sample, means decide: a slow copy-engine sample
+        // (120 s) loses to dma's 60 s mean. Bounded re-exploration does
+        // not starve proven engines — it samples once, then submits to
+        // evidence.
+        (void)budgeted.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                copy_engine,
+                OperationId{801},
+                ExecutionId{201},
+                true,
+                120'000'000'000,
+                {},
+            });
+
+        const auto replan = planner.plan(*operation);
+        GERDOS_CHECK(replan.has_value());
+        GERDOS_CHECK(replan->resources[0].resource == dma);
     }
 
     // ---------------------------------------------------------------------
@@ -1775,6 +1796,74 @@ int main() {
         GERDOS_CHECK(
             moved->data[0].residency ==
             (DataResidencyRef{DataId{640}, DataResidencyId{6401}}));
+    }
+
+    // ---------------------------------------------------------------------
+    // 22. Later arrivals earn one bounded re-exploration sample
+    // ---------------------------------------------------------------------
+
+    {
+        // A transfer engine arrives mid-run: dma starts UNAVAILABLE
+        // (not yet arrived), so copy-engine serves and accrues fast
+        // evidence. When dma becomes AVAILABLE with zero observations,
+        // it is sampled once ahead of the measured incumbent — then
+        // means decide.
+        Machine arrival;
+        BindingPlanner planner(
+            arrival.devices,
+            arrival.data,
+            arrival.topology,
+            arrival.measurements);
+
+        arrival.devices.find_device(DeviceId{100})
+            ->find_resource(ResourceId{102})
+            ->set_availability(ResourceAvailability::UNAVAILABLE);
+
+        const auto* operation =
+            arrival.operations.find_operation(OperationId{801});
+
+        const auto first = planner.plan(*operation);
+        GERDOS_CHECK(first.has_value());
+        GERDOS_CHECK(first->resources[0].resource == copy_engine);
+
+        // Incumbent accrues fast evidence.
+        (void)arrival.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                copy_engine,
+                OperationId{801},
+                ExecutionId{300},
+                true,
+                10'000'000,
+                {},
+            });
+
+        // The engine arrives: unmeasured dma dislodges the measured
+        // incumbent exactly once.
+        arrival.devices.find_device(DeviceId{100})
+            ->find_resource(ResourceId{102})
+            ->set_availability(ResourceAvailability::AVAILABLE);
+
+        const auto sampled = planner.plan(*operation);
+        GERDOS_CHECK(sampled.has_value());
+        GERDOS_CHECK(sampled->resources[0].resource == dma);
+
+        // Its sample disappoints (1 s vs 10 ms): means reinstall the
+        // incumbent. One sample, then evidence rules.
+        (void)arrival.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                dma,
+                OperationId{801},
+                ExecutionId{301},
+                true,
+                1'000'000'000,
+                {},
+            });
+
+        const auto settled = planner.plan(*operation);
+        GERDOS_CHECK(settled.has_value());
+        GERDOS_CHECK(settled->resources[0].resource == copy_engine);
     }
 
     return 0;
