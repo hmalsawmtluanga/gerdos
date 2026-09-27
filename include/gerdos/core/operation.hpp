@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -46,6 +47,16 @@ struct WorkDescription {
     float destination_scale{1.0f};
     float source_scale{0.0f};
     float constant{0.0f};
+
+    // Well-formed executable work: non-empty and safely sized. Gates never
+    // inspect the work; the seam rejects work that is not well-formed
+    // rather than executing hostile arithmetic.
+    [[nodiscard]] constexpr bool valid() const noexcept {
+        return elements > 0 && passes > 0 &&
+               elements <=
+                   std::numeric_limits<std::size_t>::max() /
+                       sizeof(float);
+    }
 };
 
 // An Operation is one unit of declarative executable work: it references

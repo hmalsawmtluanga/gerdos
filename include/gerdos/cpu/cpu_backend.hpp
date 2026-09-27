@@ -41,35 +41,59 @@ public:
 
         const auto* binding = execution.binding();
 
-        if (binding == nullptr) {
+        // The seam rejects work that is not well-formed: hostile sizing
+        // must never reach an allocation or a kernel.
+        const auto work = operation.description().work;
+
+        if (binding == nullptr || !work.valid()) {
             return false;
         }
 
-        const auto work = operation.description().work;
         const bool succeeded = !failures_.contains(id);
         const auto bytes = work.elements * sizeof(float);
 
-        // Real allocations exist before the work begins, and the worker
-        // receives buffer pointers only — it never touches shared maps.
-        std::vector<float*> buffers;
+        // Rejection-atomic submission: allocations created here are rolled
+        // back if the work cannot be launched, so a refused submit leaves
+        // nothing behind.
+        std::vector<DataResidencyRef> created;
+        jobs_.reserve(jobs_.size() + 1);
 
-        for (const auto& entry : binding->data) {
-            buffers.push_back(
-                allocation(entry.residency, bytes).data());
+        try {
+            // Real allocations exist before the work begins, and the
+            // worker receives buffer pointers only.
+            std::vector<float*> buffers;
+
+            for (const auto& entry : binding->data) {
+                if (!allocations_.contains(entry.residency)) {
+                    created.push_back(entry.residency);
+                }
+
+                buffers.push_back(
+                    allocation(entry.residency, bytes).data());
+            }
+
+            jobs_.push_back(
+                Job{
+                    id,
+                    std::async(
+                        std::launch::async,
+                        [binding_copy = *binding,
+                         buffers = std::move(buffers),
+                         work,
+                         succeeded]() {
+                            return run(
+                                binding_copy, buffers, work, succeeded);
+                        }),
+                });
+        } catch (...) {
+            // The launch failed: nothing was enqueued, and allocations
+            // created for it are released.
+            for (const auto& ref : created) {
+                (void)allocations_.erase(ref);
+            }
+
+            return false;
         }
-
-        jobs_.push_back(
-            Job{
-                id,
-                std::async(
-                    std::launch::async,
-                    [binding_copy = *binding,
-                     buffers = std::move(buffers),
-                     work,
-                     succeeded]() {
-                        return run(binding_copy, buffers, work, succeeded);
-                    }),
-            });
 
         submitted_.insert(id);
         return true;

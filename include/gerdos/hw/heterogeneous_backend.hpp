@@ -30,8 +30,12 @@ namespace gerdos {
 // nanoseconds measured where the work happens.
 //
 // Both engines execute the operation's declared work — the same elementwise
-// affine semantics — and exact copying is the fast path. Work runs on real
-// background threads and poll never blocks.
+// affine semantics — and exact copying is the fast path.
+//
+// Threading contract: work runs on real background threads and poll never
+// blocks. Workers hold copied OpenCL handles and their own slots — never
+// this object's maps. The inspection surface is valid only while no jobs
+// are in flight, and destruction waits for outstanding work.
 class HeterogeneousBackend final : public ExecutionBackend {
 public:
     HeterogeneousBackend(
@@ -118,20 +122,12 @@ public:
 
         const auto* binding = execution.binding();
 
-        if (binding == nullptr) {
-            return false;
-        }
-
+        // The seam rejects work that is not well-formed: hostile sizing
+        // must never reach an allocation or a kernel.
         const auto work = operation.description().work;
-        const bool succeeded = !failures_.contains(id);
-        const auto bytes = work.elements * sizeof(float);
 
-        // Real allocations exist before the work begins, and the worker
-        // receives storage handles only — it never touches shared maps.
-        std::vector<Slot> slots;
-
-        for (const auto& entry : binding->data) {
-            slots.push_back(slot_for(entry.residency, bytes));
+        if (binding == nullptr || !work.valid()) {
+            return false;
         }
 
         const bool gpu = on_accelerator(*binding);
@@ -140,21 +136,59 @@ public:
             return false;
         }
 
-        jobs_.push_back(
-            Job{
-                id,
-                std::async(
-                    std::launch::async,
-                    [this,
-                     binding_copy = *binding,
-                     slots = std::move(slots),
-                     work,
-                     succeeded,
-                     gpu]() {
-                        return run(
-                            binding_copy, slots, work, succeeded, gpu);
-                    }),
-            });
+        const bool succeeded = !failures_.contains(id);
+        const auto bytes = work.elements * sizeof(float);
+
+        // Rejection-atomic submission: allocations created here are rolled
+        // back if the work cannot be launched. Workers receive copied
+        // OpenCL handles and storage slots only — never this object's maps.
+        std::vector<DataResidencyRef> created;
+        jobs_.reserve(jobs_.size() + 1);
+
+        try {
+            std::vector<Slot> slots;
+
+            for (const auto& entry : binding->data) {
+                if (!allocations_.contains(entry.residency)) {
+                    created.push_back(entry.residency);
+                }
+
+                slots.push_back(slot_for(entry.residency, bytes));
+            }
+
+            jobs_.push_back(
+                Job{
+                    id,
+                    std::async(
+                        std::launch::async,
+                        [context = context_,
+                         device = device_,
+                         program = program_,
+                         binding_copy = *binding,
+                         slots = std::move(slots),
+                         work,
+                         succeeded,
+                         gpu]() {
+                            return run(
+                                context,
+                                device,
+                                program,
+                                binding_copy,
+                                slots,
+                                work,
+                                succeeded,
+                                gpu);
+                        }),
+                });
+        } catch (...) {
+            // The launch failed: nothing was enqueued, and allocations
+            // created for it are released.
+            for (const auto& ref : created) {
+                (void)allocations_.erase(ref);
+            }
+
+            return false;
+        }
 
         submitted_.insert(id);
         return true;
@@ -339,9 +373,12 @@ private:
     }
 
     // The declared work. The engine is chosen by the bound mechanisms; data
-    // moves between declared homes with real staging. Workers touch only
-    // the slots they were given.
-    [[nodiscard]] Outcome run(
+    // moves between declared homes with real staging. Static by design: the
+    // worker touches only copied OpenCL handles and the slots it was given.
+    [[nodiscard]] static Outcome run(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
         const PhysicalBinding& binding,
         const std::vector<Slot>& slots,
         const WorkDescription& work,
@@ -350,11 +387,7 @@ private:
         const auto begin = std::chrono::steady_clock::now();
 
         // Staging across homes needs a real queue regardless of engine.
-        cl::CommandQueue queue;
-
-        if (available_) {
-            queue = cl::CommandQueue(context_, device_);
-        }
+        cl::CommandQueue queue(context, device);
 
         const bool exact_copy =
             work.passes == 1 && work.destination_scale == 0.0f &&
@@ -370,7 +403,7 @@ private:
             const bool has_source = source_index < binding.data.size();
 
             if (!has_source) {
-                fill(destination, queue, gpu, work);
+                fill(context, device, program, destination, queue, gpu, work);
                 continue;
             }
 
@@ -381,7 +414,15 @@ private:
                 continue;
             }
 
-            transform(origin, destination, queue, gpu, work);
+            transform(
+                context,
+                device,
+                program,
+                origin,
+                destination,
+                queue,
+                gpu,
+                work);
         }
 
         if (gpu) {
@@ -431,12 +472,15 @@ private:
 
     // The affine elementwise transform on either engine, with real staging
     // across homes.
-    void transform(
+    static void transform(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
         const Slot& origin,
         const Slot& destination,
         cl::CommandQueue& queue,
         bool gpu,
-        const WorkDescription& work) const {
+        const WorkDescription& work) {
         const auto elements = work.elements;
 
         if (gpu) {
@@ -445,7 +489,7 @@ private:
 
             if (!origin.on_device) {
                 staged_origin = cl::Buffer(
-                    context_,
+                    context,
                     CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
                     origin.bytes,
                     origin.host);
@@ -453,10 +497,10 @@ private:
 
             if (!destination.on_device) {
                 staged_destination = cl::Buffer(
-                    context_, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
             }
 
-            cl::Kernel kernel(program_, "transform");
+            cl::Kernel kernel(program, "transform");
             kernel.setArg(0, staged_destination);
             kernel.setArg(1, staged_origin);
             kernel.setArg(2, work.destination_scale);
@@ -483,7 +527,7 @@ private:
         std::vector<float> staged_destination(elements, 1.0f);
 
         if (origin.on_device) {
-            cl::CommandQueue staging(context_, device_);
+            cl::CommandQueue staging(context, device);
             staging.enqueueReadBuffer(
                 origin.device,
                 CL_TRUE,
@@ -496,7 +540,7 @@ private:
         }
 
         if (destination.on_device) {
-            cl::CommandQueue staging(context_, device_);
+            cl::CommandQueue staging(context, device);
             staging.enqueueReadBuffer(
                 destination.device,
                 CL_TRUE,
@@ -510,6 +554,8 @@ private:
                 destination.bytes);
         }
 
+        // Aliasing is defined as the iterated form: when the source is the
+        // destination record, each pass composes over the previous result.
         for (std::size_t pass = 0; pass < work.passes; ++pass) {
             for (std::size_t i = 0; i < elements; ++i) {
                 staged_destination[i] =
@@ -519,7 +565,7 @@ private:
         }
 
         if (destination.on_device) {
-            cl::CommandQueue staging(context_, device_);
+            cl::CommandQueue staging(context, device);
             staging.enqueueWriteBuffer(
                 destination.device,
                 CL_TRUE,
@@ -536,11 +582,14 @@ private:
 
     // The transform without a source: dst = dst * destination_scale +
     // constant.
-    void fill(
+    static void fill(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
         const Slot& destination,
         cl::CommandQueue& queue,
         bool gpu,
-        const WorkDescription& work) const {
+        const WorkDescription& work) {
         const auto elements = work.elements;
 
         if (gpu) {
@@ -548,10 +597,10 @@ private:
 
             if (!destination.on_device) {
                 staged = cl::Buffer(
-                    context_, CL_MEM_READ_WRITE, destination.bytes, nullptr);
+                    context, CL_MEM_READ_WRITE, destination.bytes, nullptr);
             }
 
-            cl::Kernel kernel(program_, "fill");
+            cl::Kernel kernel(program, "fill");
             kernel.setArg(0, staged);
             kernel.setArg(1, work.destination_scale);
             kernel.setArg(2, work.constant);
@@ -570,7 +619,7 @@ private:
         if (destination.on_device) {
             std::vector<float> staged(elements, 1.0f);
 
-            cl::CommandQueue staging(context_, device_);
+            cl::CommandQueue staging(context, device);
             staging.enqueueReadBuffer(
                 destination.device,
                 CL_TRUE,
