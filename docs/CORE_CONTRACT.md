@@ -1405,13 +1405,20 @@ recorded evidence.
 
 A record establishes:
 
-- what was measured — the measured quantity
+- what was measured — the measured quantity, the attempted Operation, the
+  attempt it belongs to, and whether the attempt's work succeeded
 - where it was measured — the observed Resource
 - under what conditions — the measurement conditions, currently the number
-  of attempts running concurrently at observation
+  of attempts running concurrently with the subject attempt: the peers
+  sharing the runtime when its work finished, sampled once per completion
+  batch so co-completing attempts observe identical conditions
 - when it was measured — the record's position in observation order
 - measurement confidence — the number and recency of supporting
-  observations, reported by queries rather than stored per record
+  observations, reported by queries rather than stored per record; queries
+  count successful evidence separately from time-to-failure evidence
+
+Queries accumulate values with saturating arithmetic; totals never wrap.
+Evidence is retained without limit; retention policy is future work.
 
 `MeasurementId` values are allocated by the owning Measurement Registry in
 observation order and are never reused; identifier order is observation order.
@@ -1423,10 +1430,16 @@ introduced together with the producers that can measure them. Static
 specifications never appear as measurement records.
 
 Measurement capture observes completed attempts: one duration observation is
-recorded for each Resource the attempt bound, carrying the Operation that was
-attempted and the conditions observed at completion. The backend execution
-interface supplies the observed duration, because work is measured where it
-is performed.
+recorded for each distinct Resource named by the attempt's resource bindings
+— the mechanisms the attempt used — carrying the Operation that was
+attempted, the attempt identity and outcome, and the conditions observed at
+completion. Resources that merely host a bound residency are not subjects of
+this observation. The observed duration is the whole attempt's duration,
+repeated per subject; summing values across subjects therefore double-counts
+and must not be read as total work. The backend execution interface supplies
+the observed duration, because work is measured where it is performed. The
+measured duration semantics are defined by the backend: for the simulated
+backend it is the configured work of the attempt.
 
 Queries summarize observations by subject and quantity and report the
 supporting observation count, the accumulated value, and the most recent
