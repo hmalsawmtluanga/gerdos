@@ -1195,7 +1195,230 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
-    // 17. Multi-attempt plans preserve order with gate-passable pairs
+    // 17. Derived capacity: contention excludes over-budget ops loudly
+    // ---------------------------------------------------------------------
+
+    {
+        // Two attempts, one memory budget: ram (101) declares room for
+        // exactly one 1.0 MB producing representation. Each op writes 1 MB
+        // (1 << 18 F32 elements = 1 MiB) to its own device-homed... no —
+        // home the outputs on ram so demand lands on the budgeted
+        // resource. Op order decides: first fits, second refused, its
+        // dependent cascades.
+        Machine budgeted;
+        BindingPlanner planner(
+            budgeted.devices,
+            budgeted.data,
+            budgeted.topology,
+            budgeted.measurements);
+
+        budgeted.devices.find_device(DeviceId{100})
+            ->find_resource(ResourceId{101})
+            ->set_capacity(1u << 20);
+
+        auto* first_out = budgeted.data.create_data(
+            DataDescription{DataId{610}, "first_out"});
+        (void)first_out->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6101},
+                    DataId{610},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "ram-home",
+                },
+            });
+
+        auto* second_out = budgeted.data.create_data(
+            DataDescription{DataId{611}, "second_out"});
+        (void)second_out->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6111},
+                    DataId{611},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "ram-home",
+                },
+            });
+
+        auto* third_out = budgeted.data.create_data(
+            DataDescription{DataId{612}, "third_out"});
+        (void)third_out->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6121},
+                    DataId{612},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "ram-home",
+                },
+            });
+
+        // Sources: usable records feeding each op (activation 5101 is
+        // usable in the fixture; reuse it for all three — consuming
+        // reads never conflict).
+        auto megabyte = [](OperationId id,
+                           DataId out,
+                           std::vector<OperationId> deps) {
+            return OperationDescription{
+                id,
+                {DataId{501}},
+                {out},
+                deps,
+                {
+                    ResourceRequirement{
+                        ResourceBindingRole::COMPUTE,
+                        1,
+                    },
+                },
+                WorkDescription{1 << 18, 1, 0.0f, 1.0f, 0.0f},
+            };
+        };
+
+        (void)budgeted.operations.create_operation(megabyte(OperationId{920}, DataId{610}, {}));
+        (void)budgeted.operations.create_operation(megabyte(OperationId{921}, DataId{611}, {}));
+        (void)budgeted.operations.create_operation(
+            megabyte(OperationId{922}, DataId{612}, {OperationId{921}}));
+
+        const auto ready = planner.schedule(budgeted.operations);
+        auto ready_has = [&](OperationId id) -> bool {
+            for (const auto got : ready) {
+                if (got == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // First megabyte fits the 1 MiB budget; the second (same
+        // resource, cumulative 2 MiB) is refused loudly by absence;
+        // the third depends on the refused second and cascades.
+        GERDOS_CHECK(ready_has(OperationId{920}));
+        GERDOS_CHECK(!ready_has(OperationId{921}));
+        GERDOS_CHECK(!ready_has(OperationId{922}));
+
+        // plan_attempts inherits the exclusion: no pair for refused ops.
+        const auto planned = planner.plan_attempts(budgeted.operations);
+        auto planned_has = [&](OperationId id) -> bool {
+            for (const auto& attempt : planned) {
+                if (attempt.id == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GERDOS_CHECK(planned_has(OperationId{920}));
+        GERDOS_CHECK(!planned_has(OperationId{921}));
+        GERDOS_CHECK(!planned_has(OperationId{922}));
+    }
+
+    // ---------------------------------------------------------------------
+    // 18. Unbounded resources never refuse; exact-fit fits
+    // ---------------------------------------------------------------------
+
+    {
+        Machine open;
+        BindingPlanner planner(
+            open.devices, open.data, open.topology, open.measurements);
+
+        // scratch (103) declares zero: unbounded. Two megabyte outputs
+        // home there; both schedule regardless of cumulative demand.
+        auto* first_out = open.data.create_data(
+            DataDescription{DataId{620}, "first_out"});
+        (void)first_out->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6201},
+                    DataId{620},
+                    ResourceRef{DeviceId{100}, ResourceId{103}},
+                    "scratch-home",
+                },
+            });
+
+        auto* second_out = open.data.create_data(
+            DataDescription{DataId{621}, "second_out"});
+        (void)second_out->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6202},
+                    DataId{621},
+                    ResourceRef{DeviceId{100}, ResourceId{103}},
+                    "scratch-home",
+                },
+            });
+
+        auto megabyte = [](OperationId id, DataId out) {
+            return OperationDescription{
+                id,
+                {DataId{501}},
+                {out},
+                {},
+                {
+                    ResourceRequirement{
+                        ResourceBindingRole::COMPUTE,
+                        1,
+                    },
+                },
+                WorkDescription{1 << 18, 1, 0.0f, 1.0f, 0.0f},
+            };
+        };
+
+        (void)open.operations.create_operation(megabyte(OperationId{930}, DataId{620}));
+        (void)open.operations.create_operation(megabyte(OperationId{931}, DataId{621}));
+
+        const auto ready = planner.schedule(open.operations);
+        auto ready_has = [&](OperationId id) -> bool {
+            for (const auto got : ready) {
+                if (got == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GERDOS_CHECK(ready_has(OperationId{930}));
+        GERDOS_CHECK(ready_has(OperationId{931}));
+
+        // Exact fit: ram declares exactly 1 MiB; one megabyte fits.
+        Machine exact;
+        BindingPlanner exact_planner(
+            exact.devices, exact.data, exact.topology, exact.measurements);
+        exact.devices.find_device(DeviceId{100})
+            ->find_resource(ResourceId{101})
+            ->set_capacity(1u << 20);
+
+        auto* exact_out = exact.data.create_data(
+            DataDescription{DataId{630}, "exact_out"});
+        (void)exact_out->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6301},
+                    DataId{630},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "ram-home",
+                },
+            });
+
+        (void)exact.operations.create_operation(OperationDescription{
+            OperationId{932},
+            {DataId{501}},
+            {DataId{630}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{1 << 18, 1, 0.0f, 1.0f, 0.0f},
+        });
+
+        const auto exact_ready = exact_planner.schedule(exact.operations);
+        auto exact_has = [&](OperationId id) -> bool {
+            for (const auto got : exact_ready) {
+                if (got == id) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GERDOS_CHECK(exact_has(OperationId{932}));
+    }
+
+    // ---------------------------------------------------------------------
+    // 19. Multi-attempt plans preserve order with gate-passable pairs
     // ---------------------------------------------------------------------
 
     {
@@ -1273,7 +1496,7 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
-    // 18. The staged workload plans as stage/compute pairs; executed
+    // 20. The staged workload plans as stage/compute pairs; executed
     //     attempts leave later pairs' bindings valid (atomicity)
     // ---------------------------------------------------------------------
 
