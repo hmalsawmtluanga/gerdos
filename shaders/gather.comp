@@ -1,0 +1,23 @@
+#version 450
+layout(local_size_x = 64) in;
+layout(binding = 0) buffer D { float d[]; };
+layout(binding = 1) buffer V { float v[]; };
+layout(binding = 2) buffer I { float idx[]; };
+layout(push_constant) uniform P { float dscale; float sscale; float bias; uint passes; uint n; } p;
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  if (i >= p.n) { return; }
+  float last_value = float(p.n - 1u);
+  int last = int(p.n - 1u);
+  for (uint pass = 0u; pass < p.passes; ++pass) {
+    float raw = idx[i];
+    int position = 0;
+    if (raw >= 0.0f && raw <= last_value) {
+      position = int(raw);
+      position = position > last ? last : position;
+    } else if (raw > last_value) {
+      position = last;
+    }
+    d[i] = d[i] * p.dscale + v[position] * p.sscale + p.bias;
+  }
+}

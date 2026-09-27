@@ -1,0 +1,13 @@
+#version 450
+layout(local_size_x = 1) in;
+layout(binding = 0) buffer D { float d[]; };
+layout(binding = 1) buffer O { float o[]; };
+layout(push_constant) uniform P { uint n; float dscale; float sscale; float bias; uint passes; } p;
+void main() {
+  if (gl_GlobalInvocationID.x != 0u) { return; }
+  for (uint pass = 0u; pass < p.passes; ++pass) {
+    float sum = 0.0f;
+    for (uint k = 0u; k < p.n; ++k) { sum += o[k]; }
+    d[0] = d[0] * p.dscale + sum * p.sscale + p.bias;
+  }
+}

@@ -1,0 +1,15 @@
+#version 450
+layout(local_size_x = 1) in;
+layout(binding = 0) buffer D { float d[]; };
+layout(binding = 1) buffer O { float o[]; };
+layout(push_constant) uniform P { uint n; float dscale; float sscale; float bias; uint passes; uint take_max; } p;
+void main() {
+  if (gl_GlobalInvocationID.x != 0u) { return; }
+  for (uint pass = 0u; pass < p.passes; ++pass) {
+    float v = o[0];
+    for (uint k = 1u; k < p.n; ++k) {
+      v = (p.take_max != 0u) ? max(v, o[k]) : min(v, o[k]);
+    }
+    d[0] = d[0] * p.dscale + v * p.sscale + p.bias;
+  }
+}
