@@ -1297,9 +1297,24 @@ rather than fabricating an operand. Distinct records of the same Data
 still alias — the same-Data consuming entry is the source by definition.
 
 Model adapters translate model semantics into this vocabulary; the core
-never sees model terms. The element type is float in this version. The
-algebra grows by declared forms as backends learn them — forms are
-backend-interpreted content, and no gate inspects which form is declared.
+never sees model terms. The element type is declared per work
+description, one of three generic dtypes: `F32` (the default — every
+existing construction site keeps its meaning), `F16`, or `I8`. Dtype is
+a parameter beside form, never a form split: no gate inspects it, and
+extending the dtype set changes no gate. Storage sizing counts elements
+dtype-agnostically, but byte sizing multiplies by the dtype width with
+the same overflow guard as element counts — hostile dtype/element
+combinations are seam-rejected before any allocation. Mixed-dtype
+attempts convert explicitly at the seam with round-half-away-from-zero
+semantics, verified bit-exactly on values both dtypes represent
+exactly; there is no silent reinterpretation. Every (form, dtype) pair
+executes on CPU loops and accelerator kernels with identical semantics —
+the CPU is the reference; I8 compares exact, F16 compares within a
+documented tolerance against host float. Dtype names are generic
+vocabulary allowed in the core; vendor-intrinsic spellings stay behind
+the backend seam. The algebra grows by declared forms as backends learn
+them — forms are backend-interpreted content, and no gate inspects
+which form is declared.
 
 ## Model Adapters
 
