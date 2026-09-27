@@ -107,6 +107,30 @@ int main() {
                   ResourceBindingRole::TRANSFER);
 
     // ---------------------------------------------------------------------
+    // 1b. Dtype carriage: steps run in their declared dtype
+    // ---------------------------------------------------------------------
+
+    {
+        using adapters::ModelStep;
+        std::vector<ModelStep> typed{
+            ModelStep{ModelOp::REDUCE_SUM, 700, 0, 0, 701, 6},
+            ModelStep{ModelOp::ELEMENTWISE_MIN, 700, 701, 0, 702, 6},
+        };
+        typed[0].dtype = WorkDtype::I8;
+        typed[1].dtype = WorkDtype::F16;
+        const Adaptation carried = adapt("typed", typed);
+        GERDOS_CHECK(carried.refused.empty());
+        GERDOS_CHECK(carried.workload.operations.size() == 2);
+        GERDOS_CHECK(
+            carried.workload.operations[0].work.dtype == WorkDtype::I8);
+        GERDOS_CHECK(
+            carried.workload.operations[1].work.dtype == WorkDtype::F16);
+        // Untyped steps default to F32.
+        GERDOS_CHECK(
+            adaptation.workload.operations[1].work.dtype == WorkDtype::F32);
+    }
+
+    // ---------------------------------------------------------------------
     // 2. A translated step executes on real hardware
     // ---------------------------------------------------------------------
 

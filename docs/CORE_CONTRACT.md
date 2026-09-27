@@ -1303,8 +1303,14 @@ existing construction site keeps its meaning), `F16`, or `I8`. Dtype is
 a parameter beside form, never a form split: no gate inspects it, and
 extending the dtype set changes no gate. Storage sizing counts elements
 dtype-agnostically, but byte sizing multiplies by the dtype width with
-the same overflow guard as element counts — hostile dtype/element
-combinations are seam-rejected before any allocation. Mixed-dtype
+the same overflow guard as element counts — combinations whose byte
+product would overflow are seam-rejected before any allocation (width
+1 cannot overflow, so SIZE_MAX I8 elements are well-formed by the
+rule). Allocations keep their own dtype across attempts: a record
+touched by one dtype then another keeps its storage and converts per
+operation in F32 — retargeting never wipes an operand. Only a missing
+record or an element-count mismatch reinitializes (fresh storage takes
+the work's dtype). Mixed-dtype
 attempts convert explicitly at the seam with round-half-away-from-zero
 semantics, verified bit-exactly on values both dtypes represent
 exactly; there is no silent reinterpretation. Every (form, dtype) pair
@@ -1314,8 +1320,7 @@ documented tolerance against host float. Conversion is structural, not
 per-kernel: both engines compute in F32 and convert once per direction
 at the home boundary with shared helpers, so engine pairs cannot
 disagree on conversion — only on F32 arithmetic in the last ulp, which
-is printed and tolerance-documented. A record retargeted to another
-dtype by a later attempt is reinitialized, never reinterpreted. Dtype
+is printed and tolerance-documented. Dtype
 names are generic
 vocabulary allowed in the core; vendor-intrinsic spellings stay behind
 the backend seam. The algebra grows by declared forms as backends learn

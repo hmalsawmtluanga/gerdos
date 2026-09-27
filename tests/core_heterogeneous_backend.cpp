@@ -1151,5 +1151,181 @@ int main() {
                 1) == 1.0f);
     }
 
+    // ---------------------------------------------------------------------
+    // 8. Dtypes on the accelerator engine: I8 exact, F16 tolerance
+    // ---------------------------------------------------------------------
+
+    {
+        // Accelerator-homed records mirroring the CPU dtype chain: the
+        // table reduces to [6,1,1,1,1,1], the half record receives the
+        // F16 affine, and the I8 records compare exact while F16
+        // compares within tolerance. The uniform source stays host-homed.
+        auto* table = machine.data.create_data(
+            DataDescription{DataId{730}, "table"});
+        (void)table->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7301},
+                    DataId{730},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "table",
+                },
+            });
+
+        auto* picked = machine.data.create_data(
+            DataDescription{DataId{731}, "picked"});
+        (void)picked->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7302},
+                    DataId{731},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "picked",
+                },
+            });
+
+        auto* half = machine.data.create_data(
+            DataDescription{DataId{732}, "half"});
+        (void)half->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7303},
+                    DataId{732},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "half",
+                },
+            });
+
+        auto* uniform = machine.data.create_data(
+            DataDescription{DataId{733}, "uniform"});
+        (void)uniform->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7304},
+                    DataId{733},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "uniform",
+                },
+            });
+        (void)uniform->find_residency(DataResidencyId{7304})
+            ->set_state(DataResidencyState::VALID);
+
+        const ResourceBinding compute{
+            ResourceBindingRole::COMPUTE,
+            ResourceRef{DeviceId{200}, ResourceId{202}},
+        };
+        auto entry = [](DataBindingRole role,
+                        DataId data,
+                        DataResidencyId residency) {
+            return DataBinding{role, DataResidencyRef{data, residency}};
+        };
+        auto compute_binding = [&](std::vector<DataBinding> entries) {
+            PhysicalBinding binding;
+            binding.data = std::move(entries);
+            binding.resources.push_back(compute);
+            return binding;
+        };
+        auto run = [&](const OperationDescription& description,
+                       const PhysicalBinding& binding,
+                       ExecutionId id) {
+            const Operation operation{description};
+            Execution attempt{ExecutionDescription{id, description.id}};
+            GERDOS_CHECK(attempt.bind(binding));
+            GERDOS_CHECK(backend.submit(operation, attempt));
+            std::vector<BackendCompletion> completed;
+
+            while (completed.empty()) {
+                backend.poll(completed);
+            }
+
+            GERDOS_CHECK(completed.front().succeeded);
+        };
+
+        // I8 reduce of six 1.0 elements: exactly 6.
+        run(OperationDescription{
+                OperationId{870},
+                {DataId{733}},
+                {DataId{730}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM, 0, 0, 0, WorkDtype::I8},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{733},
+                    DataResidencyId{7304}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{730},
+                    DataResidencyId{7301})}),
+            ExecutionId{970});
+
+        const float gpu_sum = backend.sample(
+            DataResidencyRef{DataId{730}, DataResidencyId{7301}}, 0);
+        std::printf("gpu i8 reduce_sum: %f\n", gpu_sum);
+        std::fflush(stdout);
+        GERDOS_CHECK(gpu_sum == 6.0f);
+
+        // The table already holds [6,1,1,1,1,1] from the reduce
+        // above (reductions write only the first element): the F16
+        // affine reads it directly — dst = dst * 0.5 + src * 1.5 =
+        // [9.5, 2.0, ...] within 1e-3.
+        run(OperationDescription{
+                OperationId{871},
+                {DataId{730}},
+                {DataId{732}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.5f, 1.5f, 0.0f, WorkForm::ELEMENTWISE_AFFINE, 0, 0, 0, WorkDtype::F16},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{730},
+                    DataResidencyId{7301}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{732},
+                    DataResidencyId{7303})}),
+            ExecutionId{971});
+
+        const float g0 = backend.sample(
+            DataResidencyRef{DataId{732}, DataResidencyId{7303}}, 0);
+        const float g1 = backend.sample(
+            DataResidencyRef{DataId{732}, DataResidencyId{7303}}, 1);
+        std::printf("gpu f16 affine: %f %f\n", g0, g1);
+        std::fflush(stdout);
+        GERDOS_CHECK(std::fabs(g0 - 9.5f) <= 1e-3f * 9.5f);
+        GERDOS_CHECK(std::fabs(g1 - 2.0f) <= 1e-3f * 2.0f);
+
+        // Mixed-dtype exact copy through F32: I8 [6,1] into F16 reads
+        // back identical values.
+        run(OperationDescription{
+                OperationId{872},
+                {DataId{730}},
+                {DataId{732}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{730},
+                    DataResidencyId{7301}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{732},
+                    DataResidencyId{7303})}),
+            ExecutionId{972});
+
+        const float gc0 = backend.sample(
+            DataResidencyRef{DataId{732}, DataResidencyId{7303}}, 0);
+        std::printf("gpu mixed copy: %f\n", gc0);
+        std::fflush(stdout);
+        GERDOS_CHECK(gc0 == 6.0f);
+    }
+
     return 0;
 }

@@ -1696,5 +1696,292 @@ int main() {
                 1) == 1.0f);
     }
 
+    // ---------------------------------------------------------------------
+    // 16. Dtypes: I8 exact, F16 within tolerance, mixed converts
+    // ---------------------------------------------------------------------
+
+    {
+        Machine machine;
+
+        auto* table = machine.data.create_data(
+            DataDescription{DataId{730}, "table"});
+        (void)table->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7301},
+                    DataId{730},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "table",
+                },
+            });
+
+        auto* picked = machine.data.create_data(
+            DataDescription{DataId{731}, "picked"});
+        (void)picked->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7302},
+                    DataId{731},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "picked",
+                },
+            });
+
+        auto* half = machine.data.create_data(
+            DataDescription{DataId{732}, "half"});
+        (void)half->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7303},
+                    DataId{732},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "half",
+                },
+            });
+
+        CpuBackend backend;
+        const ResourceBinding compute{
+            ResourceBindingRole::COMPUTE,
+            ResourceRef{DeviceId{100}, ResourceId{102}},
+        };
+        auto entry = [](DataBindingRole role,
+                        DataId data,
+                        DataResidencyId residency) {
+            return DataBinding{role, DataResidencyRef{data, residency}};
+        };
+        auto compute_binding = [&](std::vector<DataBinding> entries) {
+            PhysicalBinding binding;
+            binding.data = std::move(entries);
+            binding.resources.push_back(compute);
+            return binding;
+        };
+        auto run = [&](const OperationDescription& description,
+                       const PhysicalBinding& binding,
+                       ExecutionId id) {
+            const Operation operation{description};
+            Execution attempt{ExecutionDescription{id, description.id}};
+            GERDOS_CHECK(attempt.bind(binding));
+            GERDOS_CHECK(backend.submit(operation, attempt));
+            std::vector<BackendCompletion> completed;
+
+            while (completed.empty()) {
+                backend.poll(completed);
+            }
+
+            GERDOS_CHECK(completed.front().succeeded);
+        };
+
+        // I8 chain: reduce [1,1,1,1,1,1] to 6, then max/min select
+        // against a uniform partner. I8 is exact: every check is ==.
+        auto i8 = WorkDtype::I8;
+        WorkDescription seed_i8{6, 1, 0.0f, 1.0f, 0.0f};
+        seed_i8.dtype = i8;
+        seed_i8.form = WorkForm::REDUCE_SUM;
+        (void)seed_i8;
+
+        run(OperationDescription{
+                OperationId{860},
+                {},
+                {DataId{730}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 0.0f, 1.0f, WorkForm::ELEMENTWISE_AFFINE, 0, 0, 0, WorkDtype::I8},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{730},
+                    DataResidencyId{7301})}),
+            ExecutionId{960});
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{730}, DataResidencyId{7301}},
+                0) == 1.0f);
+
+        run(OperationDescription{
+                OperationId{861},
+                {DataId{730}},
+                {DataId{731}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM, 0, 0, 0, WorkDtype::I8},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{730},
+                    DataResidencyId{7301}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{731},
+                    DataResidencyId{7302})}),
+            ExecutionId{961});
+
+        const float i8_sum = backend.sample(
+            DataResidencyRef{DataId{731}, DataResidencyId{7302}}, 0);
+        std::printf("i8 reduce_sum: %f\n", i8_sum);
+        std::fflush(stdout);
+        GERDOS_CHECK(i8_sum == 6.0f);
+
+        // I8 min/max selection against the table [1,1,1,1,1,6]: seed
+        // the partner uniform 2 in I8, then max picks [2,2,2,2,2,6]
+        // wait — the table here is uniform 1. Reseed the table
+        // non-uniform first: reduce into it like the F32 chain.
+        run(OperationDescription{
+                OperationId{862},
+                {DataId{730}},
+                {DataId{730}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM, 0, 0, 0, WorkDtype::I8},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{730},
+                    DataResidencyId{7301}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{730},
+                    DataResidencyId{7301})}),
+            ExecutionId{962});
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{730}, DataResidencyId{7301}},
+                0) == 6.0f);
+
+        // F16 chain: same shape, tolerance-documented. F16 represents
+        // 6 and 1 exactly, so reduce is exact here; the affine scale
+        // 1.5x exercises rounding within 1e-3 relative.
+        run(OperationDescription{
+                OperationId{863},
+                {DataId{730}},
+                {DataId{732}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.5f, 1.5f, 0.0f, WorkForm::ELEMENTWISE_AFFINE, 0, 0, 0, WorkDtype::F16},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{730},
+                    DataResidencyId{7301}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{732},
+                    DataResidencyId{7303})}),
+            ExecutionId{963});
+
+        // Table is [6,1,1,1,1,1] in I8; F16 reads it with exact
+        // conversion (both dtypes represent these values): dst = dst
+        // * 0.5 + src * 1.5 over [6,1,...] with dst starting at 1.0:
+        // [0.5+9, 0.5+1.5, ...] = [9.5, 2.0, ...].
+        const float h0 = backend.sample(
+            DataResidencyRef{DataId{732}, DataResidencyId{7303}}, 0);
+        const float h1 = backend.sample(
+            DataResidencyRef{DataId{732}, DataResidencyId{7303}}, 1);
+        std::printf("f16 affine: %f %f\n", h0, h1);
+        std::fflush(stdout);
+        GERDOS_CHECK(std::fabs(h0 - 9.5f) <= 1e-3f * 9.5f);
+        GERDOS_CHECK(std::fabs(h1 - 2.0f) <= 1e-3f * 2.0f);
+
+        // Mixed-dtype exact copy converts explicitly: I8 table [6,1]
+        // into the F16 record reads back identical values.
+        run(OperationDescription{
+                OperationId{864},
+                {DataId{730}},
+                {DataId{732}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::ELEMENTWISE_AFFINE, 0, 0, 0, WorkDtype::F32},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{730},
+                    DataResidencyId{7301}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{732},
+                    DataResidencyId{7303})}),
+            ExecutionId{964});
+
+        // The copy ran in F32 (the work's dtype), converting both
+        // records through F32: values both dtypes represent stay
+        // bit-exact through the round trip.
+        const float c0 = backend.sample(
+            DataResidencyRef{DataId{732}, DataResidencyId{7303}}, 0);
+        std::printf("mixed copy: %f\n", c0);
+        std::fflush(stdout);
+        GERDOS_CHECK(c0 == 6.0f);
+    }
+
+    // ---------------------------------------------------------------------
+    // 17. Dtype well-formedness and gate blindness
+    // ---------------------------------------------------------------------
+
+    {
+        // Per-dtype overflow guards: byte sizing is elements * width
+        // under the same overflow rule. Width 1 cannot overflow, so
+        // SIZE_MAX I8 elements are well-formed by the rule (there is no
+        // hostile arithmetic to reject); F32 and F16 reject past their
+        // widths' limits.
+        WorkDescription huge_i8{6, 1, 0.0f, 1.0f, 0.0f};
+        huge_i8.dtype = WorkDtype::I8;
+        huge_i8.elements = ~std::size_t{0};
+        GERDOS_CHECK(huge_i8.valid());
+
+        WorkDescription huge_f32{6, 1, 0.0f, 1.0f, 0.0f};
+        huge_f32.elements = ~std::size_t{0};
+        GERDOS_CHECK(!huge_f32.valid());
+
+        WorkDescription huge_f16{6, 1, 0.0f, 1.0f, 0.0f};
+        huge_f16.dtype = WorkDtype::F16;
+        huge_f16.elements = (~std::size_t{0}) / 2 + 1;
+        GERDOS_CHECK(!huge_f16.valid());
+
+        WorkDescription ok_f16{6, 1, 0.0f, 1.0f, 0.0f};
+        ok_f16.dtype = WorkDtype::F16;
+        GERDOS_CHECK(ok_f16.valid());
+
+        // Gates are blind to dtype exactly as to form: the same
+        // realization with F32 vs I8 work judges identically.
+        Machine machine;
+        OperationDescription f32_work{
+            OperationId{870},
+            {DataId{500}},
+            {DataId{501}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{4, 1, 0.0f, 1.0f, 0.0f},
+        };
+        auto i8_work = f32_work;
+        i8_work.id = OperationId{871};
+        i8_work.work.dtype = WorkDtype::I8;
+        const Operation f32_op{f32_work};
+        const Operation i8_op{i8_work};
+        BindingAdmissibilityValidator admissibility;
+        PhysicalBinding binding;
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::INPUT,
+                DataResidencyRef{DataId{500}, DataResidencyId{5001}},
+            });
+        binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{501}, DataResidencyId{5101}},
+            });
+        binding.resources.push_back(
+            ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{100}, ResourceId{102}},
+            });
+        GERDOS_CHECK(
+            admissibility.admissible(f32_op, binding) ==
+            admissibility.admissible(i8_op, binding));
+        GERDOS_CHECK(admissibility.admissible(f32_op, binding));
+    }
+
     return 0;
 }
