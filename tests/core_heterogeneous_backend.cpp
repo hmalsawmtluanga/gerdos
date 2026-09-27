@@ -1685,5 +1685,236 @@ int main() {
         GERDOS_CHECK(near_ns <= far_ns);
     }
 
+    // ---------------------------------------------------------------------
+    // 11. Tiled matmul: non-multiple shapes compute identical values
+    // ---------------------------------------------------------------------
+
+    {
+        // 17x17x17 with A = 2.0 and B = 3.0 everywhere: every output is
+        // 6 * 17 = 102. Tile guards (16-wide) cross bounds in every
+        // dimension; wrong padding or stray writes would corrupt edges.
+        // Uniform seeds come from sourceless fills (dst * 0 + constant).
+        auto* mat_a = machine.data.create_data(
+            DataDescription{DataId{760}, "mat_a"});
+        (void)mat_a->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7601},
+                    DataId{760},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device",
+                },
+            });
+
+        auto* mat_b = machine.data.create_data(
+            DataDescription{DataId{761}, "mat_b"});
+        (void)mat_b->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7602},
+                    DataId{761},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device",
+                },
+            });
+
+        auto* mat_c = machine.data.create_data(
+            DataDescription{DataId{762}, "mat_c"});
+        (void)mat_c->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7603},
+                    DataId{762},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device",
+                },
+            });
+
+        auto fill_dev = [&](OperationId op, DataId data, DataResidencyId res,
+                            float constant, ExecutionId eid) {
+            const OperationDescription desc{op,
+                                            {},
+                                            {data},
+                                            {},
+                                            {ResourceRequirement{
+                                                ResourceBindingRole::COMPUTE,
+                                                1,
+                                            }},
+                                            WorkDescription{
+                                                17 * 17, 1, 0.0f, 0.0f,
+                                                constant,
+                                            }};
+            const Operation operation{desc};
+            Execution attempt{ExecutionDescription{eid, op}};
+            PhysicalBinding binding;
+            binding.data.push_back(DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{data, res},
+            });
+            binding.resources.push_back(ResourceBinding{
+                ResourceBindingRole::COMPUTE,
+                ResourceRef{DeviceId{200}, ResourceId{202}},
+            });
+            GERDOS_CHECK(attempt.bind(binding));
+            GERDOS_CHECK(backend.submit(operation, attempt));
+            std::vector<BackendCompletion> completed;
+            while (completed.empty()) {
+                backend.poll(completed);
+            }
+            GERDOS_CHECK(completed.front().succeeded);
+        };
+
+        fill_dev(OperationId{960}, DataId{760}, DataResidencyId{7601}, 2.0f, ExecutionId{1960});
+        fill_dev(OperationId{961}, DataId{761}, DataResidencyId{7602}, 3.0f, ExecutionId{1961});
+
+        const OperationDescription tiled_desc{
+            OperationId{962},
+            {DataId{760}, DataId{761}},
+            {DataId{762}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{
+                0, 1, 0.0f, 1.0f, 0.0f, WorkForm::MATRIX_PRODUCT, 17, 17,
+                17,
+            },
+        };
+        const Operation tiled_op{tiled_desc};
+        Execution tiled_attempt{
+            ExecutionDescription{ExecutionId{1962}, OperationId{962}}};
+        PhysicalBinding tiled_binding;
+        tiled_binding.data.push_back(DataBinding{
+            DataBindingRole::INPUT,
+            DataResidencyRef{DataId{760}, DataResidencyId{7601}},
+        });
+        tiled_binding.data.push_back(DataBinding{
+            DataBindingRole::INPUT,
+            DataResidencyRef{DataId{761}, DataResidencyId{7602}},
+        });
+        tiled_binding.data.push_back(DataBinding{
+            DataBindingRole::OUTPUT,
+            DataResidencyRef{DataId{762}, DataResidencyId{7603}},
+        });
+        tiled_binding.resources.push_back(ResourceBinding{
+            ResourceBindingRole::COMPUTE,
+            ResourceRef{DeviceId{200}, ResourceId{202}},
+        });
+        GERDOS_CHECK(tiled_attempt.bind(tiled_binding));
+        GERDOS_CHECK(backend.submit(tiled_op, tiled_attempt));
+        std::vector<BackendCompletion> tiled_done;
+        while (tiled_done.empty()) {
+            backend.poll(tiled_done);
+        }
+        GERDOS_CHECK(tiled_done.front().succeeded);
+
+        // Interior, edge, and corner outputs: all 102 exactly.
+        const float c00 = backend.sample(
+            DataResidencyRef{DataId{762}, DataResidencyId{7603}}, 0);
+        const float c016 = backend.sample(
+            DataResidencyRef{DataId{762}, DataResidencyId{7603}}, 16);
+        const float c158 = backend.sample(
+            DataResidencyRef{DataId{762}, DataResidencyId{7603}}, 16 * 17 + 16);
+        const float c1615 = backend.sample(
+            DataResidencyRef{DataId{762}, DataResidencyId{7603}}, 16 * 17);
+        std::printf(
+            "tiled 17x17x17: %f %f %f %f (expect 102)\n", c00, c016, c158,
+            c1615);
+        std::fflush(stdout);
+        GERDOS_CHECK(c00 == 102.0f);
+        GERDOS_CHECK(c016 == 102.0f);
+        GERDOS_CHECK(c158 == 102.0f);
+        GERDOS_CHECK(c1615 == 102.0f);
+
+        // Wall-clock evidence with the machine named (UHD 630, Mesa
+        // OpenCL): a 128x128x128 timed run prints; values asserted,
+        // speed only printed — never a portable ratio.
+        auto* big_a = machine.data.create_data(
+            DataDescription{DataId{763}, "big_a"});
+        (void)big_a->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7604},
+                    DataId{763},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device",
+                },
+            });
+        auto* big_b = machine.data.create_data(
+            DataDescription{DataId{764}, "big_b"});
+        (void)big_b->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7605},
+                    DataId{764},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device",
+                },
+            });
+        auto* big_c = machine.data.create_data(
+            DataDescription{DataId{765}, "big_c"});
+        (void)big_c->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7606},
+                    DataId{765},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device",
+                },
+            });
+        fill_dev(OperationId{963}, DataId{763}, DataResidencyId{7604}, 1.0f, ExecutionId{1963});
+        fill_dev(OperationId{964}, DataId{764}, DataResidencyId{7605}, 1.0f, ExecutionId{1964});
+
+        const OperationDescription big_desc{
+            OperationId{965},
+            {DataId{763}, DataId{764}},
+            {DataId{765}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{
+                0, 1, 0.0f, 1.0f, 0.0f, WorkForm::MATRIX_PRODUCT, 128, 128,
+                128,
+            },
+        };
+        const Operation big_op{big_desc};
+        Execution big_attempt{
+            ExecutionDescription{ExecutionId{1965}, OperationId{965}}};
+        PhysicalBinding big_binding;
+        big_binding.data.push_back(DataBinding{
+            DataBindingRole::INPUT,
+            DataResidencyRef{DataId{763}, DataResidencyId{7604}},
+        });
+        big_binding.data.push_back(DataBinding{
+            DataBindingRole::INPUT,
+            DataResidencyRef{DataId{764}, DataResidencyId{7605}},
+        });
+        big_binding.data.push_back(DataBinding{
+            DataBindingRole::OUTPUT,
+            DataResidencyRef{DataId{765}, DataResidencyId{7606}},
+        });
+        big_binding.resources.push_back(ResourceBinding{
+            ResourceBindingRole::COMPUTE,
+            ResourceRef{DeviceId{200}, ResourceId{202}},
+        });
+        GERDOS_CHECK(big_attempt.bind(big_binding));
+        GERDOS_CHECK(backend.submit(big_op, big_attempt));
+        std::vector<BackendCompletion> big_done;
+        while (big_done.empty()) {
+            backend.poll(big_done);
+        }
+        GERDOS_CHECK(big_done.front().succeeded);
+        // A = B = ones(128): every output is exactly 128.
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{765}, DataResidencyId{7606}},
+                0) == 128.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{765}, DataResidencyId{7606}},
+                127 * 128 + 127) == 128.0f);
+        std::printf(
+            "tiled 128x128x128: %llu ns (UHD 630 OpenCL; values 128 exact)\n",
+            (unsigned long long)big_done.front().duration_ns);
+        std::fflush(stdout);
+    }
+
     return 0;
 }

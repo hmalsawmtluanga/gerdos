@@ -414,6 +414,61 @@ int main() {
         GERDOS_CHECK(backend.sample(DataResidencyRef{DataId{723}, DataResidencyId{7204}}, 1) == 8.0f);
         GERDOS_CHECK(backend.sample(DataResidencyRef{DataId{723}, DataResidencyId{7204}}, 2) == 3.0f);
         GERDOS_CHECK(backend.sample(DataResidencyRef{DataId{723}, DataResidencyId{7204}}, 3) == 3.0f);
+
+        // Tiled path: 17x17x17 with A = 2.0, B = 3.0 gives 102
+        // everywhere — tile guards cross bounds in every dimension.
+        auto* tile_a = machine.data.create_data(
+            DataDescription{DataId{724}, "tile_a"});
+        Machine::record(
+            *tile_a, DataResidencyId{7241},
+            ResourceRef{DeviceId{200}, ResourceId{201}}, "device");
+        auto* tile_b = machine.data.create_data(
+            DataDescription{DataId{725}, "tile_b"});
+        Machine::record(
+            *tile_b, DataResidencyId{7242},
+            ResourceRef{DeviceId{200}, ResourceId{201}}, "device");
+        auto* tile_c = machine.data.create_data(
+            DataDescription{DataId{726}, "tile_c"});
+        Machine::record(
+            *tile_c, DataResidencyId{7243},
+            ResourceRef{DeviceId{200}, ResourceId{201}}, "device");
+        auto fill_n = [&](OperationId op, DataId data, DataResidencyId res, float constant, ExecutionId eid) {
+            run(
+                OperationDescription{op, {}, {data}, {}, {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}}, WorkDescription{17 * 17, 1, 0.0f, 0.0f, constant}},
+                [&] {
+                    auto binding = compute_on(gpu_compute);
+                    binding.data.push_back(entry(DataBindingRole::OUTPUT, data, res));
+                    return binding;
+                }(),
+                eid);
+        };
+        fill_n(OperationId{822}, DataId{724}, DataResidencyId{7241}, 2.0f, ExecutionId{922});
+        fill_n(OperationId{823}, DataId{725}, DataResidencyId{7242}, 3.0f, ExecutionId{923});
+        run(
+            OperationDescription{
+                OperationId{824},
+                {DataId{724}, DataId{725}},
+                {DataId{726}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{0, 1, 0.0f, 1.0f, 0.0f, WorkForm::MATRIX_PRODUCT, 17, 17, 17},
+            },
+            [&] {
+                auto binding = compute_on(gpu_compute);
+                binding.data.push_back(entry(DataBindingRole::INPUT, DataId{724}, DataResidencyId{7241}));
+                binding.data.push_back(entry(DataBindingRole::INPUT, DataId{725}, DataResidencyId{7242}));
+                binding.data.push_back(entry(DataBindingRole::OUTPUT, DataId{726}, DataResidencyId{7243}));
+                return binding;
+            }(),
+            ExecutionId{924});
+        const float t00 = backend.sample(DataResidencyRef{DataId{726}, DataResidencyId{7243}}, 0);
+        const float t016 = backend.sample(DataResidencyRef{DataId{726}, DataResidencyId{7243}}, 16);
+        const float t158 = backend.sample(DataResidencyRef{DataId{726}, DataResidencyId{7243}}, 16 * 17 + 16);
+        std::printf("vk tiled 17x17x17: %f %f %f (expect 102)\n", t00, t016, t158);
+        std::fflush(stdout);
+        GERDOS_CHECK(t00 == 102.0f);
+        GERDOS_CHECK(t016 == 102.0f);
+        GERDOS_CHECK(t158 == 102.0f);
     }
 
     // ---------------------------------------------------------------------
