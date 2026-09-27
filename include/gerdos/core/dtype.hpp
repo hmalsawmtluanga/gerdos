@@ -95,6 +95,12 @@ using F16Bits = std::uint16_t;
             ++kept;
         }
 
+        // Round-up can carry out of the mantissa into the exponent:
+        // kept == 0x400 is min normal (2^-14), not subnormal zero.
+        if (kept >= 0x400u) {
+            return static_cast<F16Bits>((sign << 15) | (1u << 10));
+        }
+
         return static_cast<F16Bits>(
             (sign << 15) | (kept & 0x3ffu));
     }

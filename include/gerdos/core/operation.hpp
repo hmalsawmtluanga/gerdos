@@ -119,15 +119,15 @@ struct WorkDescription {
     std::size_t columns{0};
     WorkDtype dtype{WorkDtype::F32};
 
-    // Well-formed executable work: non-empty and safely sized. The byte
-    // sizing multiplies by the dtype width under the same overflow guard
-    // as the element counts. Gates never inspect the work; the seam
-    // rejects work that is not well-formed rather than executing hostile
-    // arithmetic.
+    // Well-formed executable work: non-empty and safely sized. Every
+    // engine stages F32 compute scratch (four bytes per element), so the
+    // bound is the scratch width — not the stored width: a narrow stored
+    // dtype does not admit counts the scratch cannot hold. Gates never
+    // inspect the work; the seam rejects work that is not well-formed
+    // rather than executing hostile arithmetic.
     [[nodiscard]] constexpr bool valid() const noexcept {
         constexpr auto max_bytes = std::numeric_limits<std::size_t>::max();
-        const auto width = dtype_bytes(dtype);
-        const auto limit = max_bytes / width;
+        constexpr auto limit = max_bytes / sizeof(float);
 
         if (dtype != WorkDtype::F32 && dtype != WorkDtype::F16 &&
             dtype != WorkDtype::I8) {

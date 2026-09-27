@@ -53,6 +53,13 @@ public:
     // New code must not branch on it.
     static constexpr std::size_t kExplorationBudget = 32;
 
+    // Proven incumbents keep their plans: an unmeasured candidate wins
+    // only while the measured incumbent is unproven (fewer successes).
+    // Two successes — not one lucky sample. Closes the churn residual
+    // where endless newcomers steal every plan; late arrivals past proof
+    // wait, disclosed in the contract.
+    static constexpr std::size_t kProvenSuccesses = 2;
+
     BindingPlanner(
         const DeviceRegistry& devices,
         const DataRegistry& data,
@@ -859,6 +866,16 @@ private:
             // Discovery: the unmeasured mechanism is sampled — including
             // later arrivals, which earn one bounded re-exploration
             // sample against measured incumbents before means decide.
+            // Proven incumbents hold: past proof the measured behavior
+            // stands and the newcomer waits (churn residual closed).
+            const auto incumbent_successes =
+                left_measured ? left_summary.succeeded_observations
+                              : right_summary.succeeded_observations;
+
+            if (incumbent_successes >= kProvenSuccesses) {
+                return left_measured;
+            }
+
             return !left_measured;
         }
 

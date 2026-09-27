@@ -44,7 +44,11 @@ public:
     // Destruction waits for outstanding work: the futures own it.
     ~HeterogeneousBackend() {
         for (auto& job : jobs_) {
-            (void)job.result.get();
+            try {
+                (void)job.result.get();
+            } catch (...) {
+                // Destruction joins; throwing here would terminate.
+            }
         }
     }
 
@@ -431,14 +435,23 @@ public:
                 continue;
             }
 
-            const auto outcome = job.result.get();
+            // Seam containment: a worker that throws instead of
+            // returning (allocation failure under pressure) reports a
+            // failed zero-duration completion with bookkeeping intact —
+            // exceptions never escape poll.
+            try {
+                const auto outcome = job.result.get();
 
-            completed.push_back(
-                BackendCompletion{
-                    job.id,
-                    outcome.succeeded,
-                    outcome.duration_ns,
-                });
+                completed.push_back(
+                    BackendCompletion{
+                        job.id,
+                        outcome.succeeded,
+                        outcome.duration_ns,
+                    });
+            } catch (...) {
+                completed.push_back(
+                    BackendCompletion{job.id, false, 0});
+            }
         }
 
         jobs_ = std::move(remaining);

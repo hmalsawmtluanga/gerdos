@@ -33,7 +33,11 @@ public:
     // Destruction waits for outstanding work: the futures own it.
     ~CpuBackend() {
         for (auto& job : jobs_) {
-            (void)job.result.get();
+            try {
+                (void)job.result.get();
+            } catch (...) {
+                // Destruction joins; throwing here would terminate.
+            }
         }
     }
 
@@ -66,8 +70,10 @@ public:
         // Rejection-atomic submission: workers hold shared ownership of
         // their storage, so replacements cannot dangle under a live job,
         // and a failed launch restores exactly what it changed.
-        // Allocations are byte buffers in the work's dtype; a record
-        // retargeted to another dtype reinitializes, never reinterprets.
+        // Allocations keep their own dtype across attempts and convert
+        // per operation; only a missing record or an element-count
+        // mismatch reallocates (fresh storage takes the work's dtype).
+        // Retargeting on dtype alone would wipe the operand.
         std::vector<std::pair<DataResidencyRef, std::optional<Allocation>>> undo;
         jobs_.reserve(jobs_.size() + 1);
 
@@ -169,14 +175,23 @@ public:
                 continue;
             }
 
-            const auto outcome = job.result.get();
+            // Seam containment: a worker that throws instead of
+            // returning (allocation failure under pressure) reports a
+            // failed zero-duration completion with bookkeeping intact —
+            // exceptions never escape poll.
+            try {
+                const auto outcome = job.result.get();
 
-            completed.push_back(
-                BackendCompletion{
-                    job.id,
-                    outcome.succeeded,
-                    outcome.duration_ns,
-                });
+                completed.push_back(
+                    BackendCompletion{
+                        job.id,
+                        outcome.succeeded,
+                        outcome.duration_ns,
+                    });
+            } catch (...) {
+                completed.push_back(
+                    BackendCompletion{job.id, false, 0});
+            }
         }
 
         jobs_ = std::move(remaining);
