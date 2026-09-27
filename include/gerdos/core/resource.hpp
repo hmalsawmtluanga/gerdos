@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -40,6 +41,11 @@ struct ResourceDescription {
     DeviceId owner;
     ResourceKind kind;
     std::string name;
+    // Declared total byte capacity for memory/storage resources. Zero
+    // means unbounded or unknown: never a refusal. Not identity — a
+    // resource keeps its capacity across availability transitions, and
+    // references stay valid whatever it declares.
+    std::size_t capacity_bytes{0};
 };
 
 class Resource {
@@ -66,6 +72,12 @@ public:
 
     void set_availability(ResourceAvailability state) noexcept {
         availability_ = state;
+    }
+
+    // Declared total byte capacity. Runtime state like availability:
+    // adjustable without touching identity, references stay valid.
+    void set_capacity(std::size_t bytes) noexcept {
+        description_.capacity_bytes = bytes;
     }
 
 private:

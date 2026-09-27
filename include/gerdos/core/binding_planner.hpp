@@ -350,17 +350,140 @@ public:
 
         // Readiness probe: keep only operations whose binding plans
         // successfully — usability and claim state evaluated by plan(),
-        // the one semantic home. Order preserved.
+        // the one semantic home — and whose derived demand fits declared
+        // capacity. Demand accumulates in scheduled order per home
+        // memory/storage resource; over-budget operations are excluded
+        // with dependents cascading. Order preserved.
         std::vector<OperationId> ready;
+        std::vector<OperationId> dropped;
+        std::vector<std::pair<ResourceRef, std::size_t>> committed;
         for (const auto id : ordered) {
             const auto* operation = present_by_id(id);
 
-            if (operation != nullptr && plan(*operation).has_value()) {
-                ready.push_back(id);
+            if (operation == nullptr) {
+                continue;
             }
+
+            // Cascaded capacity exclusion: dependents of dropped
+            // operations are themselves dropped.
+            bool blocked = false;
+            for (const auto dependency :
+                 operation->description().dependencies) {
+                for (const auto dropped_id : dropped) {
+                    if (dropped_id == dependency) {
+                        blocked = true;
+                        break;
+                    }
+                }
+
+                if (blocked) {
+                    break;
+                }
+            }
+
+            if (blocked) {
+                dropped.push_back(id);
+                continue;
+            }
+
+            const auto binding = plan(*operation);
+
+            if (!binding.has_value()) {
+                continue;
+            }
+
+            if (!fits_capacity(
+                    *operation, *binding, committed)) {
+                dropped.push_back(id);
+                continue;
+            }
+
+            ready.push_back(id);
         }
 
         return ready;
+    }
+
+    // Derived demand check: accumulate this attempt's producing-entry
+    // bytes per home memory/storage resource; refuse (false) when any
+    // declared (nonzero) total would be exceeded. Zero total means
+    // unbounded. Overflow-safe: compares without wrapping.
+    [[nodiscard]] bool fits_capacity(
+        const Operation& operation,
+        const PhysicalBinding& binding,
+        std::vector<std::pair<ResourceRef, std::size_t>>& committed) const {
+        const auto& work = operation.description().work;
+        const auto bytes =
+            work.storage_elements() * work.storage_bytes();
+        std::vector<std::pair<ResourceRef, std::size_t>> claims;
+
+        for (const auto& entry : binding.data) {
+            if (!is_producing(entry.role)) {
+                continue;
+            }
+
+            const auto* datum = data_.find_data(entry.residency.data);
+
+            if (datum == nullptr) {
+                continue;
+            }
+
+            const auto* record =
+                datum->find_residency(entry.residency.residency);
+
+            if (record == nullptr) {
+                continue;
+            }
+
+            const auto home = record->description().resource;
+            const auto* device = devices_.find_device(home.device);
+
+            if (device == nullptr) {
+                continue;
+            }
+
+            const auto* resource = device->find_resource(home.resource);
+
+            if (resource == nullptr) {
+                continue;
+            }
+
+            const auto kind = resource->description().kind;
+
+            if (kind != ResourceKind::MEMORY &&
+                kind != ResourceKind::STORAGE) {
+                continue;
+            }
+
+            const auto total = resource->description().capacity_bytes;
+
+            if (total == 0) {
+                continue;
+            }
+
+            std::size_t used = bytes;
+            for (const auto& [ref, amount] : committed) {
+                if (ref == home) {
+                    used += amount;
+
+                    if (used < amount) {
+                        return false;
+                    }
+                }
+            }
+
+            if (used > total) {
+                return false;
+            }
+
+            claims.emplace_back(home, bytes);
+        }
+
+        for (const auto& claim : claims) {
+            committed.push_back(claim);
+        }
+
+        return true;
     }
 
     // One planned attempt: the operation plus its physical binding,
