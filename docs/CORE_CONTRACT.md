@@ -1136,8 +1136,12 @@ perform abstract work.
 
 ## Runtime Integration
 
-The runtime integration layer — the executor — is the only component that
-advances an attempt through its lifecycle. It composes the established gates
+The runtime integration layer — the executor — is the component that
+advances an attempt through its lifecycle. The `RUNNING` transition is
+mechanically gated on admission evidence; direct structural transitions
+outside the executor remain possible but cannot start an unadmitted
+attempt, and any bypass that skips finishing effects leaves a stale update
+claim for a later attempt to take over. It composes the established gates
 as mandatory steps rather than optional advice:
 
     semantic admissibility
