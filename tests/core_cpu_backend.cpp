@@ -312,12 +312,19 @@ int main() {
 
     {
         // The core's registries still hold identities only; real buffers
-        // live inside the backend.
+        // live inside the backend. The device-homed record's allocation
+        // reflects the last writer: §1's movement sized it at 2^18, then
+        // §3's compute attempt — whose planner prefers the engine-local
+        // device copy (§2d locality) — resized it to op 801's storage.
+        // The size is derived from the operation, not hardcoded.
+        const auto* compute =
+            machine.operations.find_operation(OperationId{801});
+        GERDOS_CHECK(compute != nullptr);
         GERDOS_CHECK(backend.allocation_count() > 0);
         GERDOS_CHECK(
             backend.allocation_bytes(
                 DataResidencyRef{DataId{500}, DataResidencyId{5002}}) ==
-            (std::size_t{1} << 18));
+            compute->description().work.storage_elements());
     }
 
     return 0;

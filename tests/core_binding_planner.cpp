@@ -1690,5 +1690,92 @@ int main() {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // 21. Locality: engine-local usable copies beat lower identifiers
+    // ---------------------------------------------------------------------
+
+    {
+        // Two usable copies of one Data: low-id on host ram, high-id on
+        // device memory. The only compute engine is the accelerator's,
+        // so the device-homed copy must win despite its higher id —
+        // identifier order would pick the host copy.
+        Machine local;
+        BindingPlanner planner(
+            local.devices, local.data, local.topology, local.measurements);
+
+        auto* both = local.data.create_data(
+            DataDescription{DataId{640}, "both"});
+        (void)both->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6401},
+                    DataId{640},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "host-copy",
+                },
+            });
+        (void)both->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6402},
+                    DataId{640},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device-copy",
+                },
+            });
+        (void)both->find_residency(DataResidencyId{6401})
+            ->set_state(DataResidencyState::VALID);
+        (void)both->find_residency(DataResidencyId{6402})
+            ->set_state(DataResidencyState::VALID);
+
+        auto* out = local.data.create_data(
+            DataDescription{DataId{641}, "out"});
+        (void)out->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6403},
+                    DataId{641},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device-out",
+                },
+            });
+
+        (void)local.operations.create_operation(OperationDescription{
+            OperationId{940},
+            {DataId{640}},
+            {DataId{641}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{64, 1, 0.0f, 1.0f, 0.0f},
+        });
+
+        const auto* compute =
+            local.operations.find_operation(OperationId{940});
+        const auto binding = planner.plan(*compute);
+        GERDOS_CHECK(binding.has_value());
+        GERDOS_CHECK(binding->data.size() == 2);
+        GERDOS_CHECK(
+            binding->data[0].residency ==
+            (DataResidencyRef{DataId{640}, DataResidencyId{6402}}));
+
+        // Without a compute requirement there is no engine: legacy
+        // lowest-identifier order picks the host copy.
+        (void)local.operations.create_operation(OperationDescription{
+            OperationId{941},
+            {DataId{640}},
+            {DataId{640}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::TRANSFER, 1}},
+        });
+
+        const auto* movement =
+            local.operations.find_operation(OperationId{941});
+        const auto moved = planner.plan(*movement);
+        GERDOS_CHECK(moved.has_value());
+        GERDOS_CHECK(
+            moved->data[0].residency ==
+            (DataResidencyRef{DataId{640}, DataResidencyId{6401}}));
+    }
+
     return 0;
 }

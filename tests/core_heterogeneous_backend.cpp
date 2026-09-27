@@ -1,5 +1,6 @@
 #include "test_check.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <optional>
@@ -1550,6 +1551,138 @@ int main() {
         GERDOS_CHECK(std::fabs(gsum - (e0 + 5.0f * e1)) <= 1e-4f * (e0 + 5.0f * e1));
         GERDOS_CHECK(gmax == ge0);
         GERDOS_CHECK(std::fabs(ge1 - e1) <= 1e-4f * e1);
+    }
+
+    // ---------------------------------------------------------------------
+    // 10. Locality payoff on real hardware: engine-local feeds beat
+    //     staged feeds
+    // ---------------------------------------------------------------------
+
+    {
+        // Same accelerator compute engine, two feed scenarios: one input
+        // usable only on device memory (no staging), one usable only on
+        // host ram (real download). 1M streaming elements x 16 passes —
+        // the staging gap dwarfs physical noise; the assertion is
+        // non-strict (equal passes) with both durations printed.
+        auto* near_data = machine.data.create_data(
+            DataDescription{DataId{750}, "near"});
+        (void)near_data->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7501},
+                    DataId{750},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "host-copy",
+                },
+            });
+        (void)near_data->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7502},
+                    DataId{750},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device-copy",
+                },
+            });
+        Machine::usable(near_data, DataResidencyId{7502});
+
+        auto* far_data = machine.data.create_data(
+            DataDescription{DataId{751}, "far"});
+        (void)far_data->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7511},
+                    DataId{751},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "host-copy",
+                },
+            });
+        (void)far_data->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7512},
+                    DataId{751},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device-copy",
+                },
+            });
+        Machine::usable(far_data, DataResidencyId{7511});
+
+        auto* near_out = machine.data.create_data(
+            DataDescription{DataId{752}, "near-out"});
+        (void)near_out->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7503},
+                    DataId{752},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device-out",
+                },
+            });
+
+        auto* far_out = machine.data.create_data(
+            DataDescription{DataId{753}, "far-out"});
+        (void)far_out->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7504},
+                    DataId{753},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "device-out",
+                },
+            });
+
+        (void)machine.operations.create_operation(OperationDescription{
+            OperationId{950},
+            {DataId{750}},
+            {DataId{752}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{1 << 20, 16, 0.5f, 1.5f, 0.0f},
+        });
+        (void)machine.operations.create_operation(OperationDescription{
+            OperationId{951},
+            {DataId{751}},
+            {DataId{753}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{1 << 20, 16, 0.5f, 1.5f, 0.0f},
+        });
+
+        const ResourceRef gpu_compute{DeviceId{200}, ResourceId{202}};
+        auto timed_run = [&](OperationId op_id, ExecutionId exec_id) {
+            const auto* operation =
+                machine.operations.find_operation(op_id);
+            const auto binding = planner.plan(*operation);
+            GERDOS_CHECK(binding.has_value());
+            GERDOS_CHECK(binding->resources[0].resource == gpu_compute);
+            auto* execution = machine.executions.create_execution(
+                ExecutionDescription{exec_id, op_id});
+            GERDOS_CHECK(execution->bind(*binding));
+            GERDOS_CHECK(executor.start(exec_id));
+            const auto begin = std::chrono::steady_clock::now();
+            run_to_completion(executor, exec_id);
+            const auto end = std::chrono::steady_clock::now();
+            return static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    end - begin)
+                    .count());
+        };
+
+        // Warmup first: one-time driver costs must not decide the verdict.
+        // (The backend constructor already warms up; this warms the timed
+        // path itself.)
+        (void)timed_run(OperationId{950}, ExecutionId{1950});
+
+        const auto near_ns = timed_run(OperationId{950}, ExecutionId{1951});
+        const auto far_ns = timed_run(OperationId{951}, ExecutionId{1952});
+
+        std::printf(
+            "locality payoff: near %.2f ms, far %.2f ms\n",
+            near_ns / 1e6,
+            far_ns / 1e6);
+        std::fflush(stdout);
+        GERDOS_CHECK(near_ns <= far_ns);
     }
 
     return 0;
