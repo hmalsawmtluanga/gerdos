@@ -1866,5 +1866,58 @@ int main() {
         GERDOS_CHECK(settled->resources[0].resource == copy_engine);
     }
 
+    // ---------------------------------------------------------------------
+    // 23. Proven incumbents hold against newcomer churn (audit A3)
+    // ---------------------------------------------------------------------
+
+    {
+        // An incumbent with two successes is proven: a stream of
+        // never-tried newcomers no longer steals every plan (the M1
+        // churn residual, closed per-comparison). With one success the
+        // incumbent is unproven and the newcomer still samples once.
+        Machine churn;
+        BindingPlanner planner(
+            churn.devices, churn.data, churn.topology, churn.measurements);
+
+        const auto* operation =
+            churn.operations.find_operation(OperationId{801});
+
+        auto record_success = [&](ResourceRef ref, ExecutionId eid,
+                                  std::uint64_t ns) {
+            (void)churn.measurements.record(
+                MeasurementObservation{
+                    MeasurementQuantity::DURATION_NS,
+                    ref,
+                    OperationId{801},
+                    eid,
+                    true,
+                    ns,
+                    {},
+                });
+        };
+
+        // One success: incumbent unproven — newcomer samples once.
+        record_success(dma, ExecutionId{400}, 50'000'000);
+        const auto sampled = planner.plan(*operation);
+        GERDOS_CHECK(sampled.has_value());
+        GERDOS_CHECK(sampled->resources[0].resource == copy_engine);
+
+        // Second success: incumbent proven — the next newcomer waits.
+        // (The first newcomer was sampled but recorded nothing, so it
+        // is still the unmeasured challenger.)
+        record_success(dma, ExecutionId{401}, 50'000'000);
+        const auto held = planner.plan(*operation);
+        GERDOS_CHECK(held.has_value());
+        GERDOS_CHECK(held->resources[0].resource == dma);
+
+        // A FURTHER distinct newcomer also waits: churn closed, not
+        // merely delayed one round. (No new mechanism exists in this
+        // fixture beyond the pair; the same challenger re-planned
+        // stands in for the stream — still unmeasured, still refused.)
+        const auto held_again = planner.plan(*operation);
+        GERDOS_CHECK(held_again.has_value());
+        GERDOS_CHECK(held_again->resources[0].resource == dma);
+    }
+
     return 0;
 }

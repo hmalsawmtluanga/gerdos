@@ -2,10 +2,12 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <optional>
 #include <vector>
 
 #include "gerdos/core/binding_admissibility.hpp"
+#include "gerdos/core/dtype.hpp"
 #include "gerdos/core/execution_admission.hpp"
 #include "gerdos/core/execution_registry.hpp"
 #include "gerdos/core/executor.hpp"
@@ -378,6 +380,57 @@ int main() {
         GERDOS_CHECK(empty_attempt.bind(binding));
         GERDOS_CHECK(!backend.submit(empty_operation, empty_attempt));
         GERDOS_CHECK(backend.allocation_count() == 0);
+
+        // Audit A2: rule-admitted but unallocatable work is refused at
+        // the seam without escaping: elements at the scratch bound are
+        // valid, but no machine holds 4 EB — submit returns false (undo
+        // path), the backend stays usable, and a following small submit
+        // succeeds with polling intact.
+        constexpr auto scratch_bound =
+            std::numeric_limits<std::size_t>::max() / sizeof(float);
+        OperationDescription boundary{
+            OperationId{806},
+            {DataId{500}},
+            {DataId{501}},
+            {},
+            {
+                ResourceRequirement{ResourceBindingRole::COMPUTE, 1},
+            },
+            WorkDescription{
+                scratch_bound, 1, 0.0f, 1.0f, 0.0f,
+            },
+        };
+        GERDOS_CHECK(boundary.work.valid());
+
+        const Operation boundary_operation{boundary};
+        Execution boundary_attempt{
+            ExecutionDescription{ExecutionId{906}, OperationId{806}}};
+        GERDOS_CHECK(boundary_attempt.bind(binding));
+        GERDOS_CHECK(!backend.submit(boundary_operation, boundary_attempt));
+        GERDOS_CHECK(backend.allocation_count() == 0);
+
+        // Bookkeeping intact: a small submit still works afterwards.
+        OperationDescription small{
+            OperationId{807},
+            {DataId{500}},
+            {DataId{501}},
+            {},
+            {
+                ResourceRequirement{ResourceBindingRole::COMPUTE, 1},
+            },
+            WorkDescription{4, 1, 0.0f, 1.0f, 0.0f},
+        };
+        const Operation small_operation{small};
+        Execution small_attempt{
+            ExecutionDescription{ExecutionId{907}, OperationId{807}}};
+        GERDOS_CHECK(small_attempt.bind(binding));
+        GERDOS_CHECK(backend.submit(small_operation, small_attempt));
+
+        std::vector<BackendCompletion> small_done;
+        while (small_done.empty()) {
+            backend.poll(small_done);
+        }
+        GERDOS_CHECK(small_done.front().succeeded);
     }
 
     // ---------------------------------------------------------------------
@@ -2205,15 +2258,17 @@ int main() {
     // ---------------------------------------------------------------------
 
     {
-        // Per-dtype overflow guards: byte sizing is elements * width
-        // under the same overflow rule. Width 1 cannot overflow, so
-        // SIZE_MAX I8 elements are well-formed by the rule (there is no
-        // hostile arithmetic to reject); F32 and F16 reject past their
-        // widths' limits.
+        // Scratch-bound well-formedness: every engine stages F32
+        // scratch (four bytes per element), so the bound is the scratch
+        // width for every dtype — a narrow stored width does not admit
+        // counts the scratch cannot hold (audit A2). SIZE_MAX is
+        // ill-formed at any dtype; max/4 boundary is well-formed.
+        constexpr auto max_count =
+            std::numeric_limits<std::size_t>::max() / sizeof(float);
         WorkDescription huge_i8{6, 1, 0.0f, 1.0f, 0.0f};
         huge_i8.dtype = WorkDtype::I8;
         huge_i8.elements = ~std::size_t{0};
-        GERDOS_CHECK(huge_i8.valid());
+        GERDOS_CHECK(!huge_i8.valid());
 
         WorkDescription huge_f32{6, 1, 0.0f, 1.0f, 0.0f};
         huge_f32.elements = ~std::size_t{0};
@@ -2224,9 +2279,30 @@ int main() {
         huge_f16.elements = (~std::size_t{0}) / 2 + 1;
         GERDOS_CHECK(!huge_f16.valid());
 
+        WorkDescription edge_i8{6, 1, 0.0f, 1.0f, 0.0f};
+        edge_i8.dtype = WorkDtype::I8;
+        edge_i8.elements = max_count;
+        GERDOS_CHECK(edge_i8.valid());
+
+        WorkDescription over_i8{6, 1, 0.0f, 1.0f, 0.0f};
+        over_i8.dtype = WorkDtype::I8;
+        over_i8.elements = max_count + 1;
+        GERDOS_CHECK(!over_i8.valid());
+
         WorkDescription ok_f16{6, 1, 0.0f, 1.0f, 0.0f};
         ok_f16.dtype = WorkDtype::F16;
         GERDOS_CHECK(ok_f16.valid());
+
+        // F16 subnormal boundary (audit A1): round-half-away carries
+        // into the exponent — 2^-14 minus half an LSB rounds UP to min
+        // normal, never wraps to zero. Literals are exact in F32
+        // (powers of two and their 24-bit differences).
+        const float two14 = 1.0f / 16384.0f;
+        constexpr float lsb25 = 2.98023223876953125e-8f;
+        GERDOS_CHECK(f32_to_f16(two14) == 0x0400);
+        GERDOS_CHECK(f32_to_f16(two14 - lsb25) == 0x0400);
+        GERDOS_CHECK(f32_to_f16(two14 - 2 * lsb25) == 0x03FF);
+        GERDOS_CHECK(f16_to_f32(0x0400) == two14);
 
         // Gates are blind to dtype exactly as to form: the same
         // realization with F32 vs I8 work judges identically.
