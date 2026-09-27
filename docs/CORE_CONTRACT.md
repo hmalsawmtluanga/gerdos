@@ -1260,6 +1260,13 @@ The heterogeneous backend test requires an OpenCL toolchain and device; it
 is registered at configure time when the toolchain is found. All other tests
 remain accelerator-free.
 
+Comparative claims on real hardware are established by structural assertions
+— which engines actually ran — plus wall-clock comparison with the ratio
+printed as evidence. Benchmarks print before asserting, so no aborted
+assertion can hide its numbers. Work shapes are chosen where the engines
+genuinely diverge; where hardware is equal, evidence shows equality, and the
+claimed speedup belongs to the machine, never to the contract.
+
 ## Runtime Integration
 
 The runtime integration layer — the executor — is the component that
