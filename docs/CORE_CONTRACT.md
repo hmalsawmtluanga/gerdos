@@ -1259,7 +1259,18 @@ iterated form: each pass composes over the previous result.
 
 Model adapters translate model semantics into this vocabulary; the core
 never sees model terms. The element type is float in this version. The
-algebra grows by declared forms as backends learn them.
+algebra grows by declared forms as backends learn them — forms are
+backend-interpreted content, and no gate inspects which form is declared.
+
+## Model Adapters
+
+The adapter layer is the documented model boundary: the one place model
+terms may exist. Adapters translate model-semantic descriptions into the
+core's generic work vocabulary, and translation is fail-closed — a step the
+algebra cannot express exactly is refused by name with its reason, never
+approximated silently. The leakage guard enforces the boundary: model
+vocabulary is forbidden everywhere except the adapter layer, and platform
+vocabulary is forbidden in the core.
 
 ## Real Backends: CPU
 
