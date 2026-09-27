@@ -1252,6 +1252,22 @@ apply elementwise to every producing entry; the maximum-reduction form
 writes only its first element and leaves the rest alone, exactly as the
 sum-reduction form does.
 
+Comparison and selection close the remaining gap the roadmap names. The
+minimum-reduction form mirrors the maximum: `dst[0] = dst[0] *
+destination_scale + source_scale * min(src) + constant`. Two elementwise
+selection forms take the first two consuming entries as operands A and B:
+`dst * destination_scale + source_scale * min(A, B) + constant` and the
+same wrapper around `max(A, B)`. A three-operand selection form takes the
+first three consuming entries as predicate P, value A, and value B:
+`dst * destination_scale + source_scale * (P != 0 ? A : B) + constant`.
+A two-operand gather form takes the first two consuming entries as the
+value table V and the index table I: `dst * destination_scale +
+source_scale * V[clamp(I)] + constant`, where each index is truncated
+toward zero and clamped into the table range, so hostile index content
+can never read out of bounds. All comparison and selection forms apply
+elementwise to every producing entry; the minimum-reduction form writes
+only its first element, exactly as the other reductions do.
+
 The work description is parameters, not kinds: there is no operation type
 anywhere in the core, and no gate inspects the work. Structural validation,
 runtime resolution, semantic admissibility, and execution admission judge an
@@ -1269,10 +1285,12 @@ execution.
 
 When the source is the destination record, the transform is defined as the
 iterated form: each pass composes over the previous result. This holds for
-every elementwise form, including the exponential: an in-place exponential
-pass reads the value the previous pass wrote. Both reduction forms are
-also iterated: each pass re-folds the unchanged source into the running
-first element.
+every elementwise form, including the exponential and the two-operand and
+three-operand selections: an in-place pass reads the values the previous
+pass wrote. All three reduction forms are also iterated: each pass
+re-folds the unchanged source into the running first element. The gather
+form snapshots its value table per pass for the same reason: an in-place
+gather reads the table the previous pass wrote.
 
 Model adapters translate model semantics into this vocabulary; the core
 never sees model terms. The element type is float in this version. The
