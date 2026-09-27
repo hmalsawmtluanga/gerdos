@@ -1206,11 +1206,14 @@ never a guess at which retry counts). Readiness is a state predicate
 over residency usability and claim state, never wall-clock waiting: the
 planner never blocks, it returns the ready subset and leaves unready
 operations (unusable residencies, claimed records, dependencies the
-registry does not hold yet) for a later round. Cycles fail closed too:
-a dependency cycle yields no plan rather than a deadlock — the planner
-detects the cycle structurally (Kahn's algorithm over the declared
-graph) and returns the empty set with the cycle left visible in the
-declared dependencies for the caller to break. Multi-attempt plans,
+registry does not hold yet) for a later round, and unready
+operations cascade: dependents of excluded operations are themselves
+excluded. Cycles fail closed too: cyclic nodes are excluded and never
+scheduled — never deadlocked — while acyclic ready work is still
+returned; a pure cycle yields the empty set. The planner detects the
+cycle structurally (Kahn's algorithm over the declared graph) and the
+cycle stays visible in the declared dependencies for the caller to
+break. Multi-attempt plans,
 derived capacity, and reservation remain later planning concerns.
 
 Measurement-informed preference is discovery before exploitation, bounded
