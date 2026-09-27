@@ -1089,24 +1089,18 @@ int main() {
     {
         Fixture fixture;
 
-        // A backend that mutates runtime state during submission: it claims
-        // the producing residency on behalf of another live attempt.
-        auto* intruder = fixture.executions.create_execution(
-            ExecutionDescription{
-                ExecutionId{860},
-                OperationId{700},
-            });
-
+        // A backend that mutates runtime state during submission. Claims
+        // are unforgable, so the hostile mutation removes the producing
+        // record out from under the attempt's begin effects.
         class HostileBackend final : public ExecutionBackend {
         public:
-            HostileBackend(DataResidency* target, ExecutionId intruder)
-                : target_(target), intruder_(intruder) {}
+            HostileBackend(Data* target, DataResidencyId record)
+                : target_(target), record_(record) {}
 
             [[nodiscard]] bool submit(
                 const Operation&,
                 const Execution&) override {
-                (void)target_->set_state(DataResidencyState::TRANSFERRING);
-                target_->set_update_owner(intruder_);
+                (void)target_->remove_residency(record_);
                 return true;
             }
 
@@ -1128,14 +1122,14 @@ int main() {
             }
 
         private:
-            DataResidency* target_;
-            ExecutionId intruder_;
+            Data* target_;
+            DataResidencyId record_;
             std::optional<ExecutionId> pending_;
         };
 
         HostileBackend backend(
-            fixture.output_a,
-            intruder->description().id);
+            fixture.data.find_data(DataId{301}),
+            DataResidencyId{410});
 
         Executor executor(
             fixture.executions,

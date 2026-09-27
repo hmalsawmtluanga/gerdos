@@ -152,6 +152,22 @@ public:
         return apply_outcome(*binding, execution.description().id, target);
     }
 
+    // Releases every claim held by an attempt whose update can no longer
+    // complete, so that its remaining representations cannot be wedged.
+    // This is the explicit-release path of the claim contract: claims are
+    // released by finishing, by takeover, or here.
+    void release_claims_of(ExecutionId owner) const noexcept {
+        data_registry_.for_each_data(
+            [&](Data* data) {
+                data->for_each_residency(
+                    [&](DataResidency* residency) {
+                        if (residency->update_owner() == owner) {
+                            residency->set_update_owner(ExecutionId{});
+                        }
+                    });
+            });
+    }
+
 private:
     [[nodiscard]] DataResidency* resolve(
         DataResidencyRef ref) const noexcept {
@@ -176,20 +192,6 @@ private:
         const auto owner = residency.update_owner();
 
         return owner.valid() && owner != id && live(owner);
-    }
-
-    // Releases every claim held by an attempt whose update can no longer
-    // complete, so that its remaining representations cannot be wedged.
-    void release_claims_of(ExecutionId owner) const noexcept {
-        data_registry_.for_each_data(
-            [&](Data* data) {
-                data->for_each_residency(
-                    [&](DataResidency* residency) {
-                        if (residency->update_owner() == owner) {
-                            residency->set_update_owner(ExecutionId{});
-                        }
-                    });
-            });
     }
 
     [[nodiscard]] bool apply_claim(

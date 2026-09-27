@@ -4,6 +4,8 @@
 
 #include "gerdos/core/binding_admissibility.hpp"
 #include "gerdos/core/binding_planner.hpp"
+#include "gerdos/core/execution_effects.hpp"
+#include "gerdos/core/execution_registry.hpp"
 #include "gerdos/core/operation_registry.hpp"
 #include "gerdos/core/physical_binding_resolver.hpp"
 #include "gerdos/core/physical_binding_validation.hpp"
@@ -724,9 +726,27 @@ int main() {
             ->find_resource(ResourceId{203})
             ->set_availability(ResourceAvailability::AVAILABLE);
 
+        // The claim is created through the effects layer, like real
+        // attempts do — claims cannot be forged.
         auto* weights = edges.data.find_data(DataId{500});
         auto* candidate = weights->find_residency(DataResidencyId{5002});
-        candidate->set_update_owner(ExecutionId{999});
+
+        ExecutionRegistry claim_executions;
+        ExecutionEffects claim_effects(edges.data, claim_executions);
+
+        auto* claimant = claim_executions.create_execution(
+            ExecutionDescription{ExecutionId{999}, OperationId{800}});
+
+        PhysicalBinding claim_binding;
+        claim_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{500}, DataResidencyId{5002}},
+            });
+
+        GERDOS_CHECK(claimant->bind(claim_binding));
+        GERDOS_CHECK(claim_effects.start(*claimant));
+        GERDOS_CHECK(candidate->update_owner() == ExecutionId{999});
 
         const auto moved = planner.plan(*movement);
         GERDOS_CHECK(moved.has_value());

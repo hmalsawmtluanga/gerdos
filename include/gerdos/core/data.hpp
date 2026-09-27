@@ -40,13 +40,10 @@ public:
 
     // The attempt whose update is in progress, if any. The claim is
     // meaningful only while the state is update-in-progress; leaving that
-    // state releases it.
+    // state releases it. Claims are owned by the effects layer and cannot
+    // be forged: only ExecutionEffects may set or clear them.
     [[nodiscard]] ExecutionId update_owner() const noexcept {
         return update_owner_;
-    }
-
-    void set_update_owner(ExecutionId owner) noexcept {
-        update_owner_ = owner;
     }
 
     [[nodiscard]] bool usable() const noexcept {
@@ -68,6 +65,12 @@ public:
     }
 
 private:
+    friend class ExecutionEffects;
+
+    void set_update_owner(ExecutionId owner) noexcept {
+        update_owner_ = owner;
+    }
+
     DataResidencyDescription description_;
     DataResidencyState state_{DataResidencyState::UNAVAILABLE};
     ExecutionId update_owner_{};

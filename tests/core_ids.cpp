@@ -6,6 +6,8 @@
 #include "gerdos/core/data_registry.hpp"
 #include "gerdos/core/device.hpp"
 #include "gerdos/core/device_registry.hpp"
+#include "gerdos/core/execution_effects.hpp"
+#include "gerdos/core/execution_registry.hpp"
 #include "gerdos/core/ids.hpp"
 #include "gerdos/core/resource.hpp"
 #include "gerdos/core/topology.hpp"
@@ -878,11 +880,28 @@ int main() {
             guarded->find_residency(DataResidencyId{900});
         GERDOS_CHECK(guard_record != nullptr);
 
-        GERDOS_CHECK(
-            guard_record->set_state(DataResidencyState::TRANSFERRING));
+        // A claimed update protects the record. Claims are created
+        // through the effects layer — they cannot be forged.
+        ExecutionRegistry guard_executions;
+        ExecutionEffects guard_effects(guarded_registry, guard_executions);
 
-        // A claimed update protects the record.
-        guard_record->set_update_owner(ExecutionId{9000});
+        auto* guard_attempt = guard_executions.create_execution(
+            ExecutionDescription{
+                ExecutionId{9000},
+                OperationId{9000},
+            });
+
+        PhysicalBinding guard_binding;
+        guard_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{800}, DataResidencyId{900}},
+            });
+
+        GERDOS_CHECK(guard_attempt->bind(guard_binding));
+        GERDOS_CHECK(guard_effects.start(*guard_attempt));
+        GERDOS_CHECK(
+            guard_record->state() == DataResidencyState::TRANSFERRING);
         GERDOS_CHECK(guarded->has_claimed_update());
 
         GERDOS_CHECK(!guarded->remove_residency(DataResidencyId{900}));
@@ -891,7 +910,7 @@ int main() {
 
         // An update-in-progress state without a claim protects nothing: a
         // claim held by an attempt that can no longer complete is released.
-        guard_record->set_update_owner(ExecutionId{});
+        guard_effects.release_claims_of(ExecutionId{9000});
         GERDOS_CHECK(!guarded->has_claimed_update());
 
         GERDOS_CHECK(guarded->remove_residency(DataResidencyId{900}));
