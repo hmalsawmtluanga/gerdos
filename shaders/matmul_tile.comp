@@ -1,0 +1,32 @@
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(binding = 0) buffer D { float d[]; };
+layout(binding = 1) buffer A { float a[]; };
+layout(binding = 2) buffer B { float b[]; };
+layout(push_constant) uniform P { uint rows; uint inner; uint columns; float dscale; float sscale; float bias; uint passes; } p;
+shared float at[16][16];
+shared float bt[16][16];
+void main() {
+  uint row = gl_WorkGroupID.y * 16 + gl_LocalInvocationID.y;
+  uint col = gl_WorkGroupID.x * 16 + gl_LocalInvocationID.x;
+  uint lid1 = gl_LocalInvocationID.y;
+  uint lid0 = gl_LocalInvocationID.x;
+  for (uint pass = 0u; pass < p.passes; ++pass) {
+    float acc = 0.0f;
+    for (uint t = 0u; t < (p.inner + 15u) / 16u; ++t) {
+      uint arow = row;
+      uint acol = t * 16u + lid0;
+      at[lid1][lid0] = (arow < p.rows && acol < p.inner) ? a[arow * p.inner + acol] : 0.0f;
+      uint brow = t * 16u + lid1;
+      uint bcol = col;
+      bt[lid1][lid0] = (brow < p.inner && bcol < p.columns) ? b[brow * p.columns + bcol] : 0.0f;
+      barrier();
+      for (uint k = 0u; k < 16u; ++k) { acc += at[lid1][k] * bt[k][lid0]; }
+      barrier();
+    }
+    uint index = row * p.columns + col;
+    if (row < p.rows && col < p.columns) {
+      d[index] = d[index] * p.dscale + acc * p.sscale + p.bias;
+    }
+  }
+}

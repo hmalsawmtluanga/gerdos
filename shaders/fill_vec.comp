@@ -1,0 +1,20 @@
+#version 450
+layout(local_size_x = 64) in;
+layout(binding = 0) buffer D { float d[]; };
+layout(push_constant) uniform P { float dscale; float sscale; float bias; uint passes; uint n; } p;
+void main() {
+  uint i = gl_GlobalInvocationID.x * 4u;
+  if (i >= p.n) { return; }
+  uint remaining = p.n - i;
+  for (uint pass = 0u; pass < p.passes; ++pass) {
+    if (remaining >= 4u) {
+      vec4 dd = vec4(d[i], d[i+1u], d[i+2u], d[i+3u]);
+      vec4 r = dd * p.dscale + p.bias;
+      d[i] = r.x; d[i+1u] = r.y; d[i+2u] = r.z; d[i+3u] = r.w;
+    } else {
+      for (uint k = 0u; k < remaining; ++k) {
+        d[i + k] = d[i + k] * p.dscale + p.bias;
+      }
+    }
+  }
+}
