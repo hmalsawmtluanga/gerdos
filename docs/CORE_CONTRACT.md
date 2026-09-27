@@ -1182,8 +1182,14 @@ Version-zero selection rules:
   back to in-place realization (`INPUT`/`OUTPUT`) only when the consuming
   record is the Data's sole representation; with sibling records that are
   unreachable or busy, planning fails loudly
-- consuming entries use usable records with available hosts, lowest
-  identifiers first
+- consuming entries use usable records with available hosts, ranked
+  by engine locality first, then identifier order: the planner chooses
+  compute mechanisms before placing data, and prefers usable copies
+  homed on a chosen compute engine's device (zero staging) over remote
+  copies. Operations without a compute requirement, and ties among
+  equally local copies, fall back to lowest identifiers first.
+  Locality is structural (declared homes and chosen mechanisms), never
+  a measurement — measured transfer cost stays a Phase 2e concern
 - producing entries prefer distinct unclaimed records with available hosts,
   reachable from the consuming record by a covering topology link and ranked
   by that link's declared bandwidth, then latency, then identifier order
