@@ -1215,6 +1215,25 @@ comparison is a future refinement of the requirement model. Record and link
 selection remain declared-attribute based until measurement subjects
 generalize beyond mechanisms.
 
+## Real Backends: CPU
+
+The CPU backend is the first backend performing real work on real hardware.
+It owns real allocations for the representations it touches — the core's
+data plane lives behind the seam — and executes real kernels over them:
+movement pairs are copied between representations, compute pairs run
+arithmetic between them. Observed durations are real wall-clock nanoseconds
+measured where the work happens, and flow through the same completion and
+evidence path as every other backend.
+
+Work runs on real background threads and poll never blocks. Allocations are
+resolved at submission; worker threads touch only the buffers they are
+given. A backend failure is not an incoherence: the attempt's effects apply
+and its completion is reported with its outcome.
+
+The amount of work is backend configuration until Operation work
+descriptions exist; that contract is the named boundary between identity and
+computation.
+
 ## Runtime Integration
 
 The runtime integration layer — the executor — is the component that
