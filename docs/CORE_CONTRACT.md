@@ -1310,7 +1310,13 @@ semantics, verified bit-exactly on values both dtypes represent
 exactly; there is no silent reinterpretation. Every (form, dtype) pair
 executes on CPU loops and accelerator kernels with identical semantics —
 the CPU is the reference; I8 compares exact, F16 compares within a
-documented tolerance against host float. Dtype names are generic
+documented tolerance against host float. Conversion is structural, not
+per-kernel: both engines compute in F32 and convert once per direction
+at the home boundary with shared helpers, so engine pairs cannot
+disagree on conversion — only on F32 arithmetic in the last ulp, which
+is printed and tolerance-documented. A record retargeted to another
+dtype by a later attempt is reinitialized, never reinterpreted. Dtype
+names are generic
 vocabulary allowed in the core; vendor-intrinsic spellings stay behind
 the backend seam. The algebra grows by declared forms as backends learn
 them — forms are backend-interpreted content, and no gate inspects
