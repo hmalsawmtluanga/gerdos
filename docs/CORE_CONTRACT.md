@@ -952,20 +952,23 @@ rewritten is not yet usable. Its referenced Resource must still be available.
 Effective residency usability is evaluated as defined by the Data Residency
 contract: a usable residency state and an available referenced Resource.
 
-Admission is observational. It does not mutate registries, the Execution, its
-binding, or runtime state. On success it produces execution-scoped admission
-evidence that identifies the admitted Execution. Admission evidence can be
-produced only by the admission gate.
+The admission verdict is observational. It does not mutate registries, the
+Execution, its binding, or runtime state. On success it produces an
+execution-scoped evidence token that identifies the admitted Execution; only
+this gate can produce such evidence. Recording the evidence on the attempt —
+which enables its `RUNNING` transition — is a separate step performed at the
+commit point, after the backend has accepted the work.
 
 An Execution may transition from `PENDING` to `RUNNING` only after admission has
 been established for it. The state machine's binding requirement is structural:
 a binding value has been established. Admission is stricter and defines the
 executable physical realization. Both requirements apply.
 
-Admission is mechanically enforced, not advisory: establishing admission
-records evidence on the attempt, and the `RUNNING` transition is rejected
-without that evidence. The evidence can be established only by the
-execution-admission gate.
+Admission is mechanically enforced, not advisory: the `RUNNING` transition
+is rejected unless admission evidence has been recorded on the attempt, and
+that record can be established only from admission-gate evidence, for that
+attempt, exactly once. Rejected admission never establishes evidence, and a
+rejected begin leaves no evidence behind.
 
 Admission also enforces role and kind coherence: a `COMPUTE` resource binding
 must reference a compute resource, and a `TRANSFER` resource binding must
@@ -1002,8 +1005,10 @@ A physical binding is semantically admissible for an Operation when:
   binding
 - for every declared resource requirement, the binding contains at least the
   required number of distinct resources in the required role; one resource
-  listed twice does not satisfy a minimum of two, while one resource bound in
-  two roles may satisfy a requirement in each of those roles
+  listed twice does not satisfy a minimum of two. A resource bound in two
+  roles is structurally well-formed but cannot pass admission: mechanism
+  coherence pins one resource to one role, so it never satisfies two
+  requirements in practice
 
 A binding containing a resource role value outside the binding role domains
 is inadmissible.
@@ -1169,7 +1174,9 @@ as mandatory steps rather than optional advice:
 
     semantic admissibility
         -> execution admission
+        -> update-claim arbitration
         -> backend submission
+        -> admission evidence recording
         -> start effects
         -> RUNNING
         -> backend work
@@ -1179,15 +1186,15 @@ as mandatory steps rather than optional advice:
         -> measurement capture
 
 Beginning an attempt is rejection-atomic: unless the backend accepts the
-attempt, no gate verdict, residency state, execution state, or result is
-changed. Given admission succeeded, start effects and the RUNNING transition
-cannot be rejected.
+attempt, no gate verdict — including admission evidence — residency state,
+execution state, or result is changed. Given recorded admission evidence and
+free update claims, the RUNNING transition cannot be rejected.
 
 Completion is applied in the fixed sequence: terminal transition, finish
 effects, result recording, measurement capture. Completions for attempts that
-are not `RUNNING` are discarded. Every completion is reported with its
-integrity: a completion whose finishing effects were rejected is reported as
-incoherent and its result is recorded as `EFFECTS_REJECTED`; nothing in the
+are not `RUNNING` are discarded. Every applied completion is reported with
+its integrity: a completion whose finishing effects were rejected is reported
+as incoherent and its result is recorded as `EFFECTS_REJECTED`; nothing in the
 completion path discards an effects verdict.
 
 Cancellation of an attempt is performed by the executor: a `PENDING` attempt
@@ -1198,9 +1205,11 @@ Runtime object removal is preconditioned on lifecycle state:
 
 - an Execution may be removed only in a terminal state; an in-flight attempt
   must be cancelled first
-- a Data Residency whose update is in progress cannot be removed; its
-  in-progress state must be resolved first
-- a Data object cannot be removed while one of its residencies is updating
+- a Data Residency whose update is claimed by an attempt cannot be removed;
+  the claim must be resolved or released first. An update-in-progress state
+  without a claim does not protect the record
+- a Data object cannot be removed while one of its residencies holds a
+  claimed update
 
 These preconditions keep the finishing effects applicable: removing the
 objects an attempt must finalize would strand their state silently.
