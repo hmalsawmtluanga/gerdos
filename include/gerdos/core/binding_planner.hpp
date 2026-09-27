@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -29,15 +30,26 @@ namespace gerdos {
 //     hosts, ranked by the best covering link for movement, then identifier
 //     order
 //   - resource requirements are satisfied by distinct, available mechanisms
-//     whose kind matches the required role; movement transfer mechanisms are
-//     chosen from covering-link endpoints, preferring declared bandwidth,
-//     then latency, then identifier order
+//     whose kind matches the required role; movement transfer mechanisms must
+//     sit on the devices at the ends of a covering link — link endpoints are
+//     the data locations, and engines drive hops between them — preferred by
+//     declared bandwidth, then latency, then identifier order
 //   - movement between distinct records requires a covering topology link
 //
-// Claimed producing records are never planned onto. Measurements are not
-// consulted in this version.
+// Claimed producing records are never planned onto. Measurement-informed
+// preference is discovery before exploitation, bounded by an exploration
+// budget: unmeasured mechanisms are sampled while the evidence log is small,
+// and once measured, mean successful duration decides. Failure evidence is
+// not speed evidence, and saturated totals are not evidence of speed.
 class BindingPlanner {
 public:
+    // Discovery is bounded: while the evidence log holds fewer
+    // observations than this budget, unmeasured mechanisms are sampled
+    // ahead of measured ones. Beyond it, measured behavior outranks
+    // unmeasured mechanisms and later arrivals wait for a future
+    // exploration policy.
+    static constexpr std::size_t kExplorationBudget = 32;
+
     BindingPlanner(
         const DeviceRegistry& devices,
         const DataRegistry& data,
@@ -418,13 +430,24 @@ private:
         const auto right_summary = measurements_.summarize(
             right.ref, MeasurementQuantity::DURATION_NS);
 
+        // Saturated totals cannot yield a meaningful mean: such evidence
+        // falls back to the unmeasured class rather than lying about speed.
         const bool left_measured =
-            left_summary.succeeded_observations > 0;
+            left_summary.succeeded_observations > 0 &&
+            left_summary.succeeded_total_value <
+                std::numeric_limits<std::uint64_t>::max();
         const bool right_measured =
-            right_summary.succeeded_observations > 0;
+            right_summary.succeeded_observations > 0 &&
+            right_summary.succeeded_total_value <
+                std::numeric_limits<std::uint64_t>::max();
 
         if (left_measured != right_measured) {
-            return !left_measured;
+            // Inside the budget, discovery: the unmeasured mechanism is
+            // sampled. Beyond it, exploitation: measured behavior wins.
+            const bool discovery_remains =
+                measurements_.count() < kExplorationBudget;
+
+            return discovery_remains ? !left_measured : left_measured;
         }
 
         if (left_measured) {
@@ -556,15 +579,13 @@ private:
         for (const auto* hop : hops) {
             const auto& description = hop->description();
 
+            // A mechanism drives a hop when it sits on either endpoint
+            // device: link endpoints are the data locations, and the
+            // engines that move data between them live on the devices at
+            // the ends of the link.
             const bool on_path =
                 description.source.device == ref.device ||
-                description.destination.device == ref.device ||
-                (description.source.kind ==
-                     TopologyEndpointKind::RESOURCE &&
-                 description.source.resource == ref.resource) ||
-                (description.destination.kind ==
-                     TopologyEndpointKind::RESOURCE &&
-                 description.destination.resource == ref.resource);
+                description.destination.device == ref.device;
 
             if (on_path && better_link(hop, best)) {
                 best = hop;

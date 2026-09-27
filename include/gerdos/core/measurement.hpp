@@ -144,8 +144,9 @@ public:
         return summarize(subject, quantity, OperationId{}, false);
     }
 
-    // Like-for-like evidence: the observations of one attempted Operation on
-    // one subject. Comparisons across operations are not meaningful.
+    // The observations of one attempted Operation on one subject, retained
+    // for future work-shape-scoped planning. The version-zero planner ranks
+    // by the subject's aggregate behavior instead.
     [[nodiscard]] MeasurementSummary summarize(
         ResourceRef subject,
         MeasurementQuantity quantity,
