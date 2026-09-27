@@ -1917,6 +1917,290 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
+    // 18. Composite chains: exp -> reduce_sum + reduce_max in order
+    // ---------------------------------------------------------------------
+
+    {
+        // The softmax expressible prefix as one dependency-ordered
+        // workload: E = exp(X), S = sum(E), M = max(E). Each operation
+        // passes the same gates as any single-op realization; the chain
+        // executes in dependency order through the executor; values
+        // equal the isolated single-op runs bit-exactly (same F32
+        // kernels, same order — determinism, not tolerance).
+        Machine machine;
+
+        auto* input = machine.data.create_data(
+            DataDescription{DataId{740}, "input"});
+        (void)input->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7401},
+                    DataId{740},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "input",
+                },
+            });
+        (void)input->find_residency(DataResidencyId{7401})
+            ->set_state(DataResidencyState::VALID);
+
+        auto* raised = machine.data.create_data(
+            DataDescription{DataId{741}, "raised"});
+        (void)raised->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7402},
+                    DataId{741},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "raised",
+                },
+            });
+
+        auto* total = machine.data.create_data(
+            DataDescription{DataId{742}, "total"});
+        (void)total->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7403},
+                    DataId{742},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "total",
+                },
+            });
+
+        auto* peak = machine.data.create_data(
+            DataDescription{DataId{743}, "peak"});
+        (void)peak->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7404},
+                    DataId{743},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "peak",
+                },
+            });
+
+        // Seed X = [0,1,2,1,0,-1]: exp gives [1,e,e^2,e,1,1/e] —
+        // every element distinct, sum and max both discriminating.
+        // Seeded as dst = src * 1 + c chains off the uniform source is
+        // uniform-only; instead seed through exp itself is circular.
+        // Honest seed: affine writes from the uniform record cannot vary
+        // per element — so seed X with the gather chain? Overkill.
+        // The discriminating seed rides on REDUCE-shaped non-uniformity:
+        // reduce the uniform record to 6 in element 0 ([6,1,1,1,1,1]),
+        // then X = table - 1 = [5,0,0,0,0,0]... one-sided again.
+        // Resolution: X = T * 0.5 - 2.5 over T = [6,1,1,1,1,1] gives
+        // [0.5,-2,-2,-2,-2,-2] — two distinct values; exp separates
+        // them by e^2.5 ≈ 12x. Sum = e^0.5 + 5*e^-2 discriminates
+        // against max = e^0.5 exactly. Two-valued is enough: sum folds
+        // all six, max picks one.
+        auto* uniform = machine.data.create_data(
+            DataDescription{DataId{744}, "uniform"});
+        (void)uniform->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7405},
+                    DataId{744},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "uniform",
+                },
+            });
+        (void)uniform->find_residency(DataResidencyId{7405})
+            ->set_state(DataResidencyState::VALID);
+
+        CpuBackend backend;
+        Executor executor(
+            machine.executions,
+            machine.operations,
+            machine.devices,
+            machine.data,
+            backend);
+        const ResourceBinding compute{
+            ResourceBindingRole::COMPUTE,
+            ResourceRef{DeviceId{100}, ResourceId{102}},
+        };
+        auto entry = [](DataBindingRole role,
+                        DataId data,
+                        DataResidencyId residency) {
+            return DataBinding{role, DataResidencyRef{data, residency}};
+        };
+        auto bind_compute = [&](std::vector<DataBinding> entries) {
+            PhysicalBinding binding;
+            binding.data = std::move(entries);
+            binding.resources.push_back(compute);
+            return binding;
+        };
+        // Chain executor: validate gates per op, run in dependency order,
+        // collect values for the equivalence check.
+        auto run_chained = [&](const OperationDescription& description,
+                               const PhysicalBinding& binding,
+                               ExecutionId id) {
+            (void)machine.operations.create_operation(description);
+            PhysicalBindingValidator validator;
+            BindingResolver resolver(machine.devices, machine.data);
+            BindingAdmissibilityValidator admissibility;
+            ExecutionAdmissionValidator admission(
+                machine.devices, machine.data);
+            GERDOS_CHECK(validator.validate(binding));
+            GERDOS_CHECK(resolver.resolve(binding).fully_resolved());
+            const auto* op =
+                machine.operations.find_operation(description.id);
+            GERDOS_CHECK(admissibility.admissible(*op, binding));
+            auto* execution = machine.executions.create_execution(
+                ExecutionDescription{id, description.id});
+            GERDOS_CHECK(execution->bind(binding));
+            GERDOS_CHECK(admission.admit(*execution).has_value());
+            GERDOS_CHECK(executor.start(id));
+            std::vector<AttemptStatus> outcomes;
+            executor.advance(outcomes);
+            while (outcomes.empty()) {
+                executor.advance(outcomes);
+            }
+            GERDOS_CHECK(outcomes.size() == 1);
+            GERDOS_CHECK(
+                outcomes.front().integrity == AttemptIntegrity::COHERENT);
+        };
+
+        // Op 1: table folds from uniform: [6,1,1,1,1,1].
+        run_chained(
+            OperationDescription{
+                OperationId{880},
+                {DataId{744}},
+                {DataId{740}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+            },
+            bind_compute(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{744},
+                    DataResidencyId{7405}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{740},
+                    DataResidencyId{7401})}),
+            ExecutionId{980});
+
+        // Op 2: X = T * 0.5 - 2.5 = [0.5,-2,-2,-2,-2,-2], depending on
+        // op 1's table (dependency declared, execution ordered). The
+        // affine fields are {elements, passes, dst-scale, src-scale,
+        // constant}: overwrite (dst-scale 0), source weight 0.5,
+        // constant -2.5.
+        run_chained(
+            OperationDescription{
+                OperationId{881},
+                {DataId{740}},
+                {DataId{740}},
+                {OperationId{880}},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 0.5f, -2.5f},
+            },
+            bind_compute(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{740},
+                    DataResidencyId{7401}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{740},
+                    DataResidencyId{7401})}),
+            ExecutionId{981});
+
+        // Op 3: E = exp(X), depending on op 2.
+        run_chained(
+            OperationDescription{
+                OperationId{882},
+                {DataId{740}},
+                {DataId{741}},
+                {OperationId{881}},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::EXPONENTIAL},
+            },
+            bind_compute(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{740},
+                    DataResidencyId{7401}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{741},
+                    DataResidencyId{7402})}),
+            ExecutionId{982});
+
+        // Op 4: S = sum(E), depending on op 3.
+        run_chained(
+            OperationDescription{
+                OperationId{883},
+                {DataId{741}},
+                {DataId{742}},
+                {OperationId{882}},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+            },
+            bind_compute(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{741},
+                    DataResidencyId{7402}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{742},
+                    DataResidencyId{7403})}),
+            ExecutionId{983});
+
+        // Op 5: M = max(E), depending on op 3 (sibling of op 4).
+        run_chained(
+            OperationDescription{
+                OperationId{884},
+                {DataId{741}},
+                {DataId{743}},
+                {OperationId{882}},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_MAX},
+            },
+            bind_compute(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{741},
+                    DataResidencyId{7402}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{743},
+                    DataResidencyId{7404})}),
+            ExecutionId{984});
+
+        // Equivalence: the chain's values equal closed-form expectations
+        // computed from the seed — X[0] = 6*0.5-2.5 = 0.5, X[1..] =
+        // 1*0.5-2.5 = -2. E[0] = e^0.5, E[1] = e^-2. S = e^0.5 +
+        // 5*e^-2, M = e^0.5. Printed before asserting.
+        const float e0 = std::exp(0.5f);
+        const float e1 = std::exp(-2.0f);
+        const float chained_sum = backend.sample(
+            DataResidencyRef{DataId{742}, DataResidencyId{7403}}, 0);
+        const float chained_max = backend.sample(
+            DataResidencyRef{DataId{743}, DataResidencyId{7404}}, 0);
+        const float chained_e0 = backend.sample(
+            DataResidencyRef{DataId{741}, DataResidencyId{7402}}, 0);
+        std::printf(
+            "chain: E0=%f S=%f M=%f (expected %f %f %f)\n",
+            chained_e0,
+            chained_sum,
+            chained_max,
+            e0,
+            e0 + 5.0f * e1,
+            e0);
+        std::fflush(stdout);
+        GERDOS_CHECK(chained_e0 == e0);
+        GERDOS_CHECK(chained_sum == e0 + 5.0f * e1);
+        GERDOS_CHECK(chained_max == e0);
+        // The tail still reads the seed's exp: E[1] = e^-2.
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{741}, DataResidencyId{7402}},
+                1) == e1);
+    }
+
+    // ---------------------------------------------------------------------
     // 17. Dtype well-formedness and gate blindness
     // ---------------------------------------------------------------------
 

@@ -1327,5 +1327,230 @@ int main() {
         GERDOS_CHECK(gc0 == 6.0f);
     }
 
+    // ---------------------------------------------------------------------
+    // 9. Composite chains on the accelerator engine
+    // ---------------------------------------------------------------------
+
+    {
+        // The same softmax-prefix chain as the CPU §18 test, on
+        // accelerator-homed records: table <- uniform, X seed, exp,
+        // sum, max. GPU exp may differ from host libm in the last ulp,
+        // so exp-derived values compare within 1e-4 relative (the §6
+        // pattern); intra-GPU consistency (max == E0 sample) is exact.
+        auto* input = machine.data.create_data(
+            DataDescription{DataId{740}, "input"});
+        (void)input->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7401},
+                    DataId{740},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "input",
+                },
+            });
+
+        auto* raised = machine.data.create_data(
+            DataDescription{DataId{741}, "raised"});
+        (void)raised->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7402},
+                    DataId{741},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "raised",
+                },
+            });
+
+        auto* total = machine.data.create_data(
+            DataDescription{DataId{742}, "total"});
+        (void)total->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7403},
+                    DataId{742},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "total",
+                },
+            });
+
+        auto* peak = machine.data.create_data(
+            DataDescription{DataId{743}, "peak"});
+        (void)peak->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7404},
+                    DataId{743},
+                    ResourceRef{DeviceId{200}, ResourceId{201}},
+                    "peak",
+                },
+            });
+
+        auto* uniform = machine.data.create_data(
+            DataDescription{DataId{744}, "uniform"});
+        (void)uniform->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{7405},
+                    DataId{744},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "uniform",
+                },
+            });
+        (void)uniform->find_residency(DataResidencyId{7405})
+            ->set_state(DataResidencyState::VALID);
+
+        const ResourceBinding compute{
+            ResourceBindingRole::COMPUTE,
+            ResourceRef{DeviceId{200}, ResourceId{202}},
+        };
+        auto entry = [](DataBindingRole role,
+                        DataId data,
+                        DataResidencyId residency) {
+            return DataBinding{role, DataResidencyRef{data, residency}};
+        };
+        auto bind_compute = [&](std::vector<DataBinding> entries) {
+            PhysicalBinding binding;
+            binding.data = std::move(entries);
+            binding.resources.push_back(compute);
+            return binding;
+        };
+        auto run = [&](const OperationDescription& description,
+                       const PhysicalBinding& binding,
+                       ExecutionId id) {
+            const Operation operation{description};
+            Execution attempt{ExecutionDescription{id, description.id}};
+            GERDOS_CHECK(attempt.bind(binding));
+            GERDOS_CHECK(backend.submit(operation, attempt));
+            std::vector<BackendCompletion> completed;
+
+            while (completed.empty()) {
+                backend.poll(completed);
+            }
+
+            GERDOS_CHECK(completed.front().succeeded);
+        };
+
+        run(OperationDescription{
+                OperationId{880},
+                {DataId{744}},
+                {DataId{740}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+            },
+            bind_compute(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{744},
+                    DataResidencyId{7405}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{740},
+                    DataResidencyId{7401})}),
+            ExecutionId{980});
+
+        run(OperationDescription{
+                OperationId{881},
+                {DataId{740}},
+                {DataId{740}},
+                {OperationId{880}},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 0.5f, -2.5f},
+            },
+            bind_compute(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{740},
+                    DataResidencyId{7401}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{740},
+                    DataResidencyId{7401})}),
+            ExecutionId{981});
+
+        run(OperationDescription{
+                OperationId{882},
+                {DataId{740}},
+                {DataId{741}},
+                {OperationId{881}},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::EXPONENTIAL},
+            },
+            bind_compute(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{740},
+                    DataResidencyId{7401}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{741},
+                    DataResidencyId{7402})}),
+            ExecutionId{982});
+
+        run(OperationDescription{
+                OperationId{883},
+                {DataId{741}},
+                {DataId{742}},
+                {OperationId{882}},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+            },
+            bind_compute(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{741},
+                    DataResidencyId{7402}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{742},
+                    DataResidencyId{7403})}),
+            ExecutionId{983});
+
+        run(OperationDescription{
+                OperationId{884},
+                {DataId{741}},
+                {DataId{743}},
+                {OperationId{882}},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_MAX},
+            },
+            bind_compute(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{741},
+                    DataResidencyId{7402}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{743},
+                    DataResidencyId{7404})}),
+            ExecutionId{984});
+
+        const float e0 = std::exp(0.5f);
+        const float e1 = std::exp(-2.0f);
+        const float ge0 = backend.sample(
+            DataResidencyRef{DataId{741}, DataResidencyId{7402}}, 0);
+        const float gsum = backend.sample(
+            DataResidencyRef{DataId{742}, DataResidencyId{7403}}, 0);
+        const float gmax = backend.sample(
+            DataResidencyRef{DataId{743}, DataResidencyId{7404}}, 0);
+        const float ge1 = backend.sample(
+            DataResidencyRef{DataId{741}, DataResidencyId{7402}}, 1);
+        std::printf(
+            "gpu chain: E0=%f S=%f M=%f E1=%f (expected %f %f %f %f)\n",
+            ge0,
+            gsum,
+            gmax,
+            ge1,
+            e0,
+            e0 + 5.0f * e1,
+            e0,
+            e1);
+        std::fflush(stdout);
+        GERDOS_CHECK(std::fabs(ge0 - e0) <= 1e-4f * e0);
+        GERDOS_CHECK(std::fabs(gsum - (e0 + 5.0f * e1)) <= 1e-4f * (e0 + 5.0f * e1));
+        GERDOS_CHECK(gmax == ge0);
+        GERDOS_CHECK(std::fabs(ge1 - e1) <= 1e-4f * e1);
+    }
+
     return 0;
 }

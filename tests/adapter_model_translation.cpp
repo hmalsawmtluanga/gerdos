@@ -1,5 +1,6 @@
 #include "test_check.hpp"
 
+#include <string>
 #include <vector>
 
 #include "gerdos/adapters/model_adapter.hpp"
@@ -303,6 +304,37 @@ int main() {
             backend.sample(
                 DataResidencyRef{DataId{702}, DataResidencyId{703}},
                 2) == 3.0f);
+    }
+
+    // ---------------------------------------------------------------------
+    // 3. The expressible softmax prefix chains; SOFTMAX stays refused
+    // ---------------------------------------------------------------------
+
+    {
+        // SOFTMAX as a composite is refused — but its expressible
+        // prefix (EXPONENTIAL + REDUCE_SUM) adapts to chained steps
+        // that execute in dependency order with exact values. The
+        // refusal names the missing divide; the prefix proves the
+        // chain machinery the full composite will ride on.
+        const std::vector<ModelStep> prefix{
+            ModelStep{ModelOp::EXPONENTIAL, 700, 0, 0, 701, 6},
+            ModelStep{ModelOp::REDUCE_SUM, 701, 0, 0, 702, 6},
+            ModelStep{ModelOp::SOFTMAX, 700, 0, 0, 701, 6},
+        };
+        const Adaptation chain = adapt("softmax prefix", prefix);
+        GERDOS_CHECK(chain.workload.operations.size() == 2);
+        GERDOS_CHECK(chain.refused.size() == 1);
+        GERDOS_CHECK(chain.refused[0].find("SOFTMAX") == 0);
+        GERDOS_CHECK(
+            chain.refused[0].find("divide-by-sum") != std::string::npos);
+        GERDOS_CHECK(
+            chain.workload.operations[0].work.form == WorkForm::EXPONENTIAL);
+        GERDOS_CHECK(
+            chain.workload.operations[1].work.form == WorkForm::REDUCE_SUM);
+        // The prefix chain declares the data dependency: reduce consumes
+        // what exp produces.
+        GERDOS_CHECK(chain.workload.operations[0].outputs[0] == DataId{701});
+        GERDOS_CHECK(chain.workload.operations[1].inputs[0] == DataId{701});
     }
 
     return 0;
