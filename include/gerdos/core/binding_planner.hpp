@@ -180,7 +180,6 @@ public:
             const auto chosen = choose_mechanisms(
                 requirement,
                 hops,
-                description.id,
                 binding);
 
             if (chosen < requirement.minimum) {
@@ -405,18 +404,19 @@ private:
         const TopologyLink* via{nullptr};
     };
 
-    // Measurement-informed preference: candidates with successful
-    // like-for-like evidence rank by mean observed duration — measured
-    // behavior outranks declared attributes. Candidates without such
-    // evidence, and evidence of failure, fall back to the declared rules.
+    // Measurement-informed preference: discovery before exploitation.
+    // Unmeasured mechanisms are sampled ahead of measured ones so that new
+    // or never-tried mechanisms are not starved; once measured, candidates
+    // rank by mean observed successful duration — measured behavior
+    // outranks declared attributes. Evidence of failure is not speed
+    // evidence and leaves a mechanism in the unmeasured class.
     [[nodiscard]] bool faster_mechanism(
         const Candidate& left,
-        const Candidate& right,
-        OperationId operation) const noexcept {
+        const Candidate& right) const noexcept {
         const auto left_summary = measurements_.summarize(
-            left.ref, MeasurementQuantity::DURATION_NS, operation);
+            left.ref, MeasurementQuantity::DURATION_NS);
         const auto right_summary = measurements_.summarize(
-            right.ref, MeasurementQuantity::DURATION_NS, operation);
+            right.ref, MeasurementQuantity::DURATION_NS);
 
         const bool left_measured =
             left_summary.succeeded_observations > 0;
@@ -424,7 +424,7 @@ private:
             right_summary.succeeded_observations > 0;
 
         if (left_measured != right_measured) {
-            return left_measured;
+            return !left_measured;
         }
 
         if (left_measured) {
@@ -474,7 +474,6 @@ private:
     [[nodiscard]] std::size_t choose_mechanisms(
         const ResourceRequirement& requirement,
         const std::vector<const TopologyLink*>& hops,
-        OperationId operation,
         PhysicalBinding& binding) const noexcept {
         std::vector<Candidate> chosen;
 
@@ -525,8 +524,7 @@ private:
                             if (!found ||
                                 faster_mechanism(
                                     candidate,
-                                    best_value,
-                                    operation)) {
+                                    best_value)) {
                                 best_value = candidate;
                                 found = true;
                             }

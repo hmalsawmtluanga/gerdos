@@ -357,7 +357,7 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
-    // 6. Measured behavior outranks declared attributes
+    // 6. Discovery before exploitation: measured behavior decides
     // ---------------------------------------------------------------------
 
     const ResourceRef dma{DeviceId{100}, ResourceId{102}};
@@ -374,27 +374,13 @@ int main() {
         const auto* operation =
             measured.operations.find_operation(OperationId{801});
 
-        // Premise: without evidence, identifier order picks the dma.
+        // Premise: without evidence, declared rules pick the dma.
         const auto baseline = planner.plan(*operation);
         GERDOS_CHECK(baseline.has_value());
         GERDOS_CHECK(baseline->resources[0].resource == dma);
 
-        // Evidence for other operations is not comparable and is ignored.
-        (void)measured.measurements.record(
-            MeasurementObservation{
-                MeasurementQuantity::DURATION_NS,
-                copy_engine,
-                OperationId{800},
-                ExecutionId{1},
-                true,
-                1,
-                {},
-            });
-
-        GERDOS_CHECK(planner.plan(*operation)->resources[0].resource == dma);
-
-        // Successful like-for-like evidence flips the choice: the
-        // copy-engine has proven faster for this exact Operation.
+        // One slow observation of the dma is enough to give the unmeasured
+        // copy-engine its discovery turn.
         (void)measured.measurements.record(
             MeasurementObservation{
                 MeasurementQuantity::DURATION_NS,
@@ -406,11 +392,17 @@ int main() {
                 {},
             });
 
+        GERDOS_CHECK(
+            planner.plan(*operation)->resources[0].resource ==
+            copy_engine);
+
+        // Evidence from any operation contributes to the mechanism's
+        // proven behavior; the now-measured copy-engine keeps winning.
         (void)measured.measurements.record(
             MeasurementObservation{
                 MeasurementQuantity::DURATION_NS,
                 copy_engine,
-                OperationId{801},
+                OperationId{800},
                 ExecutionId{3},
                 true,
                 1'000'000'000,
@@ -424,37 +416,94 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
-    // 7. Failure evidence is not speed evidence
+    // 7. Measured comparison works both ways; failure is not speed
     // ---------------------------------------------------------------------
 
     {
-        Machine fresh;
+        Machine first;
         BindingPlanner planner(
-            fresh.devices,
-            fresh.data,
-            fresh.topology,
-            fresh.measurements);
+            first.devices, first.data, first.topology, first.measurements);
 
-        // A failed ultra-fast attempt on the copy-engine must not make it
-        // look fast: both mechanisms remain unmeasured and identifier order
-        // decides.
-        (void)fresh.measurements.record(
+        // The dma has proven faster: declared order loses.
+        (void)first.measurements.record(
             MeasurementObservation{
                 MeasurementQuantity::DURATION_NS,
-                ResourceRef{DeviceId{200}, ResourceId{203}},
+                dma,
                 OperationId{801},
-                ExecutionId{9},
+                ExecutionId{4},
+                true,
+                1'000'000'000,
+                {},
+            });
+
+        (void)first.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                copy_engine,
+                OperationId{801},
+                ExecutionId{5},
+                true,
+                60'000'000'000,
+                {},
+            });
+
+        const auto* operation =
+            first.operations.find_operation(OperationId{801});
+
+        GERDOS_CHECK(
+            planner.plan(*operation)->resources[0].resource == dma);
+    }
+
+    {
+        Machine second;
+        BindingPlanner planner(
+            second.devices,
+            second.data,
+            second.topology,
+            second.measurements);
+
+        // The dma is slightly slower on success but has a fast failure;
+        // the failure is not speed evidence, so the faster copy-engine
+        // still wins.
+        (void)second.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                dma,
+                OperationId{801},
+                ExecutionId{6},
+                true,
+                60'000'000'000,
+                {},
+            });
+
+        (void)second.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                dma,
+                OperationId{801},
+                ExecutionId{7},
                 false,
                 1,
                 {},
             });
 
-        const auto* operation =
-            fresh.operations.find_operation(OperationId{801});
+        (void)second.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                copy_engine,
+                OperationId{801},
+                ExecutionId{8},
+                true,
+                50'000'000'000,
+                {},
+            });
 
-        const auto binding = planner.plan(*operation);
-        GERDOS_CHECK(binding.has_value());
-        GERDOS_CHECK(binding->resources[0].resource == dma);
+        const auto* operation =
+            second.operations.find_operation(OperationId{801});
+
+        GERDOS_CHECK(
+            planner.plan(*operation)->resources[0].resource ==
+            copy_engine);
     }
 
     return 0;

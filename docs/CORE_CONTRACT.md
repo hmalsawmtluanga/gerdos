@@ -1194,15 +1194,16 @@ Claimed producing records are never planned onto. Planning does not order
 work, resolve dependencies, produce multi-attempt plans, or reserve capacity;
 those are later planning concerns.
 
-Measurement-informed preference: where the evidence log holds successful
-observations of the same Operation on a candidate mechanism, planning ranks
-candidates by their mean observed duration — measured behavior outranks
-declared attributes, and faster outranks slower among measured candidates.
-Candidates without such evidence rank after measured ones by the declared
-rules. Failure evidence is not speed evidence, and evidence gathered for other
-operations is not comparable. Record and link selection remain
-declared-attribute based until measurement subjects generalize beyond
-mechanisms.
+Measurement-informed preference is discovery before exploitation. A
+mechanism with no successful evidence is sampled ahead of measured ones, so
+new and never-tried mechanisms are never starved by a first impression. Once
+measured, candidates rank by mean observed successful duration: measured
+behavior outranks declared attributes, and faster outranks slower. Failure
+evidence is not speed evidence and leaves a mechanism in the unmeasured
+class. The evidence scope is the mechanism's proven behavior across
+operations; work-shape-scoped comparison is a future refinement of the
+requirement model. Record and link selection remain declared-attribute based
+until measurement subjects generalize beyond mechanisms.
 
 ## Runtime Integration
 
@@ -1265,6 +1266,14 @@ and ordering work belongs to planning.
 # 16. Workload
 
 A Workload describes the computation submitted to GERDOS.
+
+At the core level a workload is a named stream of work units: operation
+declarations carrying generic data references and resource requirements.
+Model adapters produce workloads; the core consumes them without knowing
+their origin, and no model vocabulary appears in the workload shape. The
+ordering of the stream belongs to the submitting layer until the planning
+contract owns dependency ordering. Repetition, streaming, and staged
+workloads are expressed by more units, not by new core concepts.
 
 A workload may contain:
 
