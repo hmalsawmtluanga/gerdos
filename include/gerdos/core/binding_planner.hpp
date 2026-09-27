@@ -363,6 +363,49 @@ public:
         return ready;
     }
 
+    // One planned attempt: the operation plus its physical binding,
+    // computed against a single runtime state snapshot. Each pair is
+    // individually gate-passable; execution still advances attempt by
+    // attempt with per-attempt rejection atomicity.
+    struct PlannedAttempt {
+        OperationId id;
+        PhysicalBinding binding;
+    };
+
+    // Multi-attempt plans in dependency order: schedule() composed with
+    // plan() — one semantic home each, no new binding logic. The list is
+    // a plan, not a promise: later attempts may still be refused at
+    // execution (claims, contention), leaving earlier evidence intact.
+    [[nodiscard]] std::vector<PlannedAttempt> plan_attempts(
+        const OperationRegistry& operations) const {
+        const auto order = schedule(operations);
+        std::vector<PlannedAttempt> planned;
+
+        for (const auto id : order) {
+            const Operation* found = nullptr;
+            operations.for_each_operation(
+                [&](const Operation* operation) {
+                    if (operation->description().id == id) {
+                        found = operation;
+                    }
+                });
+
+            if (found == nullptr) {
+                continue;
+            }
+
+            const auto binding = plan(*found);
+
+            if (!binding.has_value()) {
+                continue;
+            }
+
+            planned.push_back(PlannedAttempt{id, *binding});
+        }
+
+        return planned;
+    }
+
 private:
     [[nodiscard]] static bool contains(
         const std::vector<DataId>& references,
