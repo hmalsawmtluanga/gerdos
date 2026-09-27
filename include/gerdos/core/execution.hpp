@@ -112,8 +112,15 @@ public:
         return &*result_;
     }
 
+    // Admission evidence: established only by the execution admission
+    // gate. The RUNNING transition is mechanically gated on it.
+    [[nodiscard]] bool admitted() const noexcept {
+        return admitted_;
+    }
+
     [[nodiscard]] bool set_state(ExecutionState state) noexcept {
-        if (state == ExecutionState::RUNNING && !binding_.has_value()) {
+        if (state == ExecutionState::RUNNING &&
+            (!binding_.has_value() || !admitted_)) {
             return false;
         }
 
@@ -126,10 +133,17 @@ public:
     }
 
 private:
+    friend class ExecutionAdmissionValidator;
+
+    void mark_admitted() noexcept {
+        admitted_ = true;
+    }
+
     ExecutionDescription description_;
     ExecutionState state_{ExecutionState::PENDING};
     std::optional<PhysicalBinding> binding_;
     std::optional<ExecutionResult> result_;
+    bool admitted_{false};
 };
 
 } // namespace gerdos

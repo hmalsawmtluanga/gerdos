@@ -80,8 +80,8 @@ public:
         // Pinned invariants (tests/core_executor.cpp): given admission and
         // free claims, start effects and the RUNNING transition cannot
         // reject — every producing residency resolves, is claimable, and can
-        // enter the update-in-progress state, and a PENDING attempt with a
-        // binding may enter RUNNING. If
+        // enter the update-in-progress state, and an admitted PENDING
+        // attempt with a binding may enter RUNNING. If
         // either ever rejects, the attempt is in flight but incoherent: the
         // rejection is remembered and reported with its completion instead of
         // being discarded.

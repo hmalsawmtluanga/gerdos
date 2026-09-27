@@ -1,5 +1,7 @@
 #include "test_check.hpp"
 
+#include <type_traits>
+
 #include "gerdos/core/execution_admission.hpp"
 
 int main() {
@@ -217,8 +219,8 @@ int main() {
     GERDOS_CHECK(valid.state() == ExecutionState::PENDING);
     GERDOS_CHECK(valid.has_binding());
 
-    // The intended call sequence is admission followed by the state
-    // transition.
+    // Admission is what makes the RUNNING transition possible.
+    GERDOS_CHECK(valid.admitted());
     GERDOS_CHECK(valid.set_state(ExecutionState::RUNNING));
 
     // ---------------------------------------------------------------------
@@ -475,6 +477,7 @@ int main() {
         });
 
     GERDOS_CHECK(running.bind(std::move(running_binding)));
+    GERDOS_CHECK(admission_validator.admit(running).has_value());
     GERDOS_CHECK(running.set_state(ExecutionState::RUNNING));
     GERDOS_CHECK(!admission_validator.admit(running).has_value());
 
@@ -503,6 +506,64 @@ int main() {
     GERDOS_CHECK(other_admission->execution() == ExecutionId{512});
     GERDOS_CHECK(
         admission->execution() != other_admission->execution());
+
+    // ---------------------------------------------------------------------
+    // 10. Admission is mechanism, not convention
+    // ---------------------------------------------------------------------
+
+    // Evidence tokens cannot be fabricated.
+    static_assert(
+        !std::is_constructible_v<ExecutionAdmission, ExecutionId>);
+    static_assert(
+        !std::is_default_constructible_v<ExecutionAdmission>);
+
+    // The RUNNING transition is rejected without admission evidence, even
+    // for a well-formed, fully resolvable binding.
+    Execution unadmitted(
+        ExecutionDescription{
+            ExecutionId{513},
+            OperationId{613},
+        });
+
+    PhysicalBinding unadmitted_binding;
+    unadmitted_binding.data.push_back(
+        DataBinding{
+            DataBindingRole::INPUT,
+            DataResidencyRef{
+                DataId{300},
+                DataResidencyId{400},
+            },
+        });
+
+    unadmitted_binding.resources.push_back(
+        ResourceBinding{
+            ResourceBindingRole::COMPUTE,
+            compute_ref,
+        });
+
+    GERDOS_CHECK(unadmitted.bind(std::move(unadmitted_binding)));
+    GERDOS_CHECK(!unadmitted.admitted());
+    GERDOS_CHECK(!unadmitted.set_state(ExecutionState::RUNNING));
+    GERDOS_CHECK(unadmitted.state() == ExecutionState::PENDING);
+
+    // Admission establishes the evidence and the transition succeeds.
+    GERDOS_CHECK(
+        admission_validator.admit(unadmitted).has_value());
+    GERDOS_CHECK(unadmitted.admitted());
+    GERDOS_CHECK(unadmitted.set_state(ExecutionState::RUNNING));
+    GERDOS_CHECK(unadmitted.state() == ExecutionState::RUNNING);
+
+    // Rejected admission never establishes evidence.
+    Execution never_admitted(
+        ExecutionDescription{
+            ExecutionId{514},
+            OperationId{614},
+        });
+
+    GERDOS_CHECK(!admission_validator.admit(never_admitted).has_value());
+    GERDOS_CHECK(!never_admitted.admitted());
+    GERDOS_CHECK(
+        !never_admitted.set_state(ExecutionState::RUNNING));
 
     return 0;
 }

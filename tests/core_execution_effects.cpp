@@ -1,5 +1,7 @@
 #include "test_check.hpp"
 
+#include "gerdos/core/device_registry.hpp"
+#include "gerdos/core/execution_admission.hpp"
 #include "gerdos/core/execution_effects.hpp"
 
 namespace {
@@ -7,13 +9,46 @@ namespace {
 using namespace gerdos;
 
 struct Fixture {
+    DeviceRegistry devices;
     DataRegistry data_registry;
     ExecutionRegistry executions;
+    ExecutionAdmissionValidator admission{devices, data_registry};
     Data* data = nullptr;
     DataResidency* input = nullptr;
     DataResidency* output = nullptr;
 
     Fixture() {
+        auto* device = devices.create_device(
+            DeviceDescription{
+                DeviceId{100},
+                "Fixture Device",
+            });
+
+        (void)device->add_resource(
+            Resource{
+                ResourceDescription{
+                    ResourceId{200},
+                    DeviceId{100},
+                    ResourceKind::MEMORY,
+                    "input-memory",
+                },
+            });
+
+        (void)device->add_resource(
+            Resource{
+                ResourceDescription{
+                    ResourceId{201},
+                    DeviceId{100},
+                    ResourceKind::MEMORY,
+                    "output-memory",
+                },
+            });
+
+        device->find_resource(ResourceId{200})
+            ->set_availability(ResourceAvailability::AVAILABLE);
+        device->find_resource(ResourceId{201})
+            ->set_availability(ResourceAvailability::AVAILABLE);
+
         data = data_registry.create_data(
             DataDescription{
                 DataId{300},
@@ -50,6 +85,12 @@ struct Fixture {
         output = data->find_residency(DataResidencyId{401});
 
         (void)input->set_state(DataResidencyState::VALID);
+    }
+
+    // Admission is mechanism: attempts reach RUNNING only through it.
+    bool start_attempt(Execution& execution) {
+        return admission.admit(execution).has_value() &&
+               execution.set_state(ExecutionState::RUNNING);
     }
 };
 
@@ -122,7 +163,7 @@ int main() {
         auto execution = bound_execution(ExecutionId{501});
 
         GERDOS_CHECK(effects.start(execution));
-        GERDOS_CHECK(execution.set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(fixture.start_attempt(execution));
         GERDOS_CHECK(execution.set_state(ExecutionState::COMPLETED));
         GERDOS_CHECK(effects.finish(execution));
 
@@ -144,7 +185,7 @@ int main() {
         auto execution = bound_execution(ExecutionId{502});
 
         GERDOS_CHECK(effects.start(execution));
-        GERDOS_CHECK(execution.set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(fixture.start_attempt(execution));
         GERDOS_CHECK(execution.set_state(ExecutionState::FAILED));
         GERDOS_CHECK(effects.finish(execution));
 
@@ -159,7 +200,7 @@ int main() {
         auto execution = bound_execution(ExecutionId{503});
 
         GERDOS_CHECK(effects.start(execution));
-        GERDOS_CHECK(execution.set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(fixture.start_attempt(execution));
         GERDOS_CHECK(execution.set_state(ExecutionState::CANCELLED));
         GERDOS_CHECK(effects.finish(execution));
 
@@ -181,7 +222,7 @@ int main() {
         GERDOS_CHECK(
             fixture.output->set_state(DataResidencyState::VALID));
 
-        GERDOS_CHECK(execution.set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(fixture.start_attempt(execution));
         GERDOS_CHECK(execution.set_state(ExecutionState::COMPLETED));
         GERDOS_CHECK(!effects.finish(execution));
 
@@ -198,7 +239,7 @@ int main() {
         ExecutionEffects effects(fixture.data_registry, fixture.executions);
         auto execution = bound_execution(ExecutionId{505});
 
-        GERDOS_CHECK(execution.set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(fixture.start_attempt(execution));
         GERDOS_CHECK(effects.start(execution));
 
         // Finishing effects require a terminal attempt.
@@ -311,7 +352,7 @@ int main() {
         (void)execution.bind(std::move(binding));
 
         GERDOS_CHECK(effects.start(execution));
-        GERDOS_CHECK(execution.set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(fixture.start_attempt(execution));
         GERDOS_CHECK(execution.set_state(ExecutionState::CANCELLED));
         GERDOS_CHECK(effects.finish(execution));
         GERDOS_CHECK(
@@ -388,14 +429,14 @@ int main() {
             fixture.output->update_owner() == ExecutionId{520});
 
         // The second attempt cannot finish the first attempt's claim.
-        GERDOS_CHECK(second->set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(fixture.start_attempt(*second));
         GERDOS_CHECK(second->set_state(ExecutionState::COMPLETED));
         GERDOS_CHECK(!effects.finish(*second));
         GERDOS_CHECK(
             fixture.output->state() == DataResidencyState::TRANSFERRING);
 
         // The owner finishes and releases the claim.
-        GERDOS_CHECK(first->set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(fixture.start_attempt(*first));
         GERDOS_CHECK(first->set_state(ExecutionState::COMPLETED));
         GERDOS_CHECK(effects.finish(*first));
         GERDOS_CHECK(!fixture.output->update_owner().valid());
@@ -409,7 +450,7 @@ int main() {
 
         // An attempt that terminates without applying its finishing
         // effects leaves a stale claim; a later attempt takes it over.
-        GERDOS_CHECK(third->set_state(ExecutionState::RUNNING));
+        GERDOS_CHECK(fixture.start_attempt(*third));
         GERDOS_CHECK(third->set_state(ExecutionState::CANCELLED));
         GERDOS_CHECK(
             fixture.output->update_owner() == ExecutionId{522});

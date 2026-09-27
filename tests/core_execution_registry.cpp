@@ -67,8 +67,7 @@ int main() {
     GERDOS_CHECK(execution->description().operation == OperationId{42});
 
     GERDOS_CHECK(execution->bind(PhysicalBinding{}));
-    GERDOS_CHECK(execution->set_state(ExecutionState::RUNNING));
-    GERDOS_CHECK(execution->state() == ExecutionState::RUNNING);
+    GERDOS_CHECK(execution->state() == ExecutionState::PENDING);
 
     // Const lookup.
     const auto& const_registry = registry;

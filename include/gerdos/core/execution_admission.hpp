@@ -39,8 +39,11 @@ public:
         : devices_(devices),
           resolver_(devices, data_registry) {}
 
+    // Establishes admission evidence on the attempt and returns the
+    // evidence token. The attempt's RUNNING transition is gated on this
+    // evidence.
     [[nodiscard]] std::optional<ExecutionAdmission> admit(
-        const Execution& execution) const {
+        Execution& execution) const {
         if (execution.state() != ExecutionState::PENDING) {
             return std::nullopt;
         }
@@ -68,6 +71,8 @@ public:
         if (!runtime_usable(resolution)) {
             return std::nullopt;
         }
+
+        execution.mark_admitted();
 
         return ExecutionAdmission{execution.description().id};
     }

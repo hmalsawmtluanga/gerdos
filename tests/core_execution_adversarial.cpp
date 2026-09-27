@@ -1,6 +1,7 @@
 #include "test_check.hpp"
 
 #include "gerdos/core/data_registry.hpp"
+#include "gerdos/core/execution_admission.hpp"
 #include "gerdos/core/device_registry.hpp"
 #include "gerdos/core/execution_registry.hpp"
 #include "gerdos/core/operation_registry.hpp"
@@ -83,6 +84,14 @@ int main() {
 
     GERDOS_CHECK(host->resource_count() == 2);
     GERDOS_CHECK(accelerator->resource_count() == 3);
+
+    // The resources become available for the attempts below.
+    host->find_resource(ResourceId{100})
+        ->set_availability(ResourceAvailability::AVAILABLE);
+    accelerator->find_resource(ResourceId{201})
+        ->set_availability(ResourceAvailability::AVAILABLE);
+    accelerator->find_resource(ResourceId{202})
+        ->set_availability(ResourceAvailability::AVAILABLE);
 
     // ---------------------------------------------------------------------
     // 2. Topology is separate from Resource identity
@@ -297,6 +306,8 @@ int main() {
         device_residency->state() ==
         DataResidencyState::TRANSFERRING);
 
+    device_memory->set_availability(ResourceAvailability::AVAILABLE);
+
     // ---------------------------------------------------------------------
     // 6. Declarative Operation
     // ---------------------------------------------------------------------
@@ -325,6 +336,7 @@ int main() {
     // ---------------------------------------------------------------------
 
     ExecutionRegistry executions;
+    ExecutionAdmissionValidator admission(devices, data_registry);
 
     Execution* unbound_cancelled = executions.create_execution(
         ExecutionDescription{
@@ -455,7 +467,8 @@ int main() {
         failed_attempt->binding()->resources[0].role ==
         ResourceBindingRole::COMPUTE);
 
-    // A bound PENDING execution may enter RUNNING.
+    // An admitted bound PENDING execution may enter RUNNING.
+    GERDOS_CHECK(admission.admit(*failed_attempt).has_value());
     GERDOS_CHECK(failed_attempt->set_state(ExecutionState::RUNNING));
 
     // Binding remains immutable while RUNNING.
@@ -541,6 +554,7 @@ int main() {
 
     GERDOS_CHECK(retry_attempt->bind(std::move(binding_b)));
     GERDOS_CHECK(retry_attempt->has_binding());
+    GERDOS_CHECK(admission.admit(*retry_attempt).has_value());
     GERDOS_CHECK(retry_attempt->set_state(ExecutionState::RUNNING));
 
     GERDOS_CHECK(
@@ -591,7 +605,36 @@ int main() {
 
     GERDOS_CHECK(completed_attempt != nullptr);
 
-    GERDOS_CHECK(completed_attempt->bind(PhysicalBinding{}));
+    PhysicalBinding completed_binding;
+    completed_binding.data.push_back(
+        DataBinding{
+            DataBindingRole::INPUT,
+            DataResidencyRef{
+                DataId{500},
+                DataResidencyId{5001},
+            },
+        });
+
+    completed_binding.data.push_back(
+        DataBinding{
+            DataBindingRole::OUTPUT,
+            DataResidencyRef{
+                DataId{500},
+                DataResidencyId{5002},
+            },
+        });
+
+    completed_binding.resources.push_back(
+        ResourceBinding{
+            ResourceBindingRole::COMPUTE,
+            ResourceRef{
+                DeviceId{200},
+                ResourceId{201},
+            },
+        });
+
+    GERDOS_CHECK(completed_attempt->bind(std::move(completed_binding)));
+    GERDOS_CHECK(admission.admit(*completed_attempt).has_value());
     GERDOS_CHECK(completed_attempt->set_state(ExecutionState::RUNNING));
     GERDOS_CHECK(completed_attempt->set_state(ExecutionState::COMPLETED));
 
