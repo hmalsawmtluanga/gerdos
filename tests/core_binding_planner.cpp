@@ -506,5 +506,283 @@ int main() {
             copy_engine);
     }
 
+    // ---------------------------------------------------------------------
+    // 8. Discovery is bounded by the exploration budget
+    // ---------------------------------------------------------------------
+
+    {
+        Machine budgeted;
+        BindingPlanner planner(
+            budgeted.devices,
+            budgeted.data,
+            budgeted.topology,
+            budgeted.measurements);
+
+        // Exhaust the exploration budget with unrelated evidence.
+        for (std::size_t i = 0; i < 32; ++i) {
+            (void)budgeted.measurements.record(
+                MeasurementObservation{
+                    MeasurementQuantity::DURATION_NS,
+                    Machine::host_ram(),
+                    OperationId{777},
+                    ExecutionId{100 + i},
+                    true,
+                    1,
+                    {},
+                });
+        }
+
+        (void)budgeted.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                dma,
+                OperationId{801},
+                ExecutionId{200},
+                true,
+                60'000'000'000,
+                {},
+            });
+
+        // With the budget exhausted, the unmeasured copy-engine no longer
+        // dislodges the measured dma: newcomers cannot starve proven
+        // engines forever.
+        const auto* operation =
+            budgeted.operations.find_operation(OperationId{801});
+
+        const auto binding = planner.plan(*operation);
+        GERDOS_CHECK(binding.has_value());
+        GERDOS_CHECK(binding->resources[0].resource == dma);
+    }
+
+    // ---------------------------------------------------------------------
+    // 9. Saturated totals are not evidence of speed
+    // ---------------------------------------------------------------------
+
+    {
+        Machine poisoned;
+        BindingPlanner planner(
+            poisoned.devices,
+            poisoned.data,
+            poisoned.topology,
+            poisoned.measurements);
+
+        const auto maximum = std::numeric_limits<std::uint64_t>::max();
+
+        (void)poisoned.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                dma,
+                OperationId{801},
+                ExecutionId{300},
+                true,
+                maximum,
+                {},
+            });
+
+        (void)poisoned.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                dma,
+                OperationId{801},
+                ExecutionId{301},
+                true,
+                maximum,
+                {},
+            });
+
+        (void)poisoned.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                copy_engine,
+                OperationId{801},
+                ExecutionId{302},
+                true,
+                50'000'000'000,
+                {},
+            });
+
+        // The saturated dma falls back to the unmeasured class and gets its
+        // discovery turn instead of ranking on a meaningless mean.
+        const auto* operation =
+            poisoned.operations.find_operation(OperationId{801});
+
+        const auto binding = planner.plan(*operation);
+        GERDOS_CHECK(binding.has_value());
+        GERDOS_CHECK(binding->resources[0].resource == dma);
+    }
+
+    // ---------------------------------------------------------------------
+    // 10. Means pool work shapes — the documented limitation
+    // ---------------------------------------------------------------------
+
+    {
+        Machine mixed;
+        BindingPlanner planner(
+            mixed.devices,
+            mixed.data,
+            mixed.topology,
+            mixed.measurements);
+
+        // The copy-engine is fast at the relevant shape but carries one
+        // huge outlier from unrelated work; its pooled mean looks slow.
+        (void)mixed.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                copy_engine,
+                OperationId{600},
+                ExecutionId{400},
+                true,
+                500'000'000'000,
+                {},
+            });
+
+        (void)mixed.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                copy_engine,
+                OperationId{601},
+                ExecutionId{401},
+                true,
+                1'000'000'000,
+                {},
+            });
+
+        (void)mixed.measurements.record(
+            MeasurementObservation{
+                MeasurementQuantity::DURATION_NS,
+                dma,
+                OperationId{801},
+                ExecutionId{402},
+                true,
+                60'000'000'000,
+                {},
+            });
+
+        const auto* operation =
+            mixed.operations.find_operation(OperationId{801});
+
+        const auto binding = planner.plan(*operation);
+        GERDOS_CHECK(binding.has_value());
+
+        // Pooled means rank the uniform dma first; work-shape-scoped
+        // comparison is the named future refinement.
+        GERDOS_CHECK(binding->resources[0].resource == dma);
+    }
+
+    // ---------------------------------------------------------------------
+    // 11. Adversarial planning edges
+    // ---------------------------------------------------------------------
+
+    {
+        Machine edges;
+        BindingPlanner planner(
+            edges.devices,
+            edges.data,
+            edges.topology,
+            edges.measurements);
+
+        // A garbage requirement is refused.
+        const Operation garbage{OperationDescription{
+            OperationId{901},
+            {},
+            {},
+            {},
+            {
+                ResourceRequirement{
+                    ResourceBindingRole::COMPUTE,
+                    0,
+                },
+            },
+        }};
+
+        GERDOS_CHECK(!planner.plan(garbage).has_value());
+
+        // A failed mechanism is not chosen.
+        edges.devices.find_device(DeviceId{100})
+            ->find_resource(ResourceId{102})
+            ->set_availability(ResourceAvailability::FAILED);
+
+        const auto* movement =
+            edges.operations.find_operation(OperationId{801});
+
+        const auto binding = planner.plan(*movement);
+        GERDOS_CHECK(binding.has_value());
+        GERDOS_CHECK(binding->resources[0].resource == copy_engine);
+
+        // With every movement mechanism failed, planning fails loudly.
+        edges.devices.find_device(DeviceId{200})
+            ->find_resource(ResourceId{203})
+            ->set_availability(ResourceAvailability::FAILED);
+
+        GERDOS_CHECK(!planner.plan(*movement).has_value());
+
+        // A claimed producing record is never planned onto.
+        edges.devices.find_device(DeviceId{100})
+            ->find_resource(ResourceId{102})
+            ->set_availability(ResourceAvailability::AVAILABLE);
+        edges.devices.find_device(DeviceId{200})
+            ->find_resource(ResourceId{203})
+            ->set_availability(ResourceAvailability::AVAILABLE);
+
+        auto* weights = edges.data.find_data(DataId{500});
+        auto* candidate = weights->find_residency(DataResidencyId{5002});
+        candidate->set_update_owner(ExecutionId{999});
+
+        const auto moved = planner.plan(*movement);
+        GERDOS_CHECK(moved.has_value());
+        GERDOS_CHECK(
+            moved->data[1].residency !=
+            (DataResidencyRef{DataId{500}, DataResidencyId{5002}}));
+    }
+
+    // ---------------------------------------------------------------------
+    // 12. Minimums count distinct mechanisms
+    // ---------------------------------------------------------------------
+
+    {
+        Machine twin;
+        BindingPlanner planner(
+            twin.devices,
+            twin.data,
+            twin.topology,
+            twin.measurements);
+
+        const Operation two_engines{OperationDescription{
+            OperationId{902},
+            {},
+            {},
+            {},
+            {
+                ResourceRequirement{
+                    ResourceBindingRole::TRANSFER,
+                    2,
+                },
+            },
+        }};
+
+        const auto binding = planner.plan(two_engines);
+        GERDOS_CHECK(binding.has_value());
+        GERDOS_CHECK(binding->resources.size() == 2);
+        GERDOS_CHECK(
+            binding->resources[0].resource !=
+            binding->resources[1].resource);
+
+        // One engine cannot satisfy a minimum of two.
+        const Operation three_engines{OperationDescription{
+            OperationId{903},
+            {},
+            {},
+            {},
+            {
+                ResourceRequirement{
+                    ResourceBindingRole::TRANSFER,
+                    3,
+                },
+            },
+        }};
+
+        GERDOS_CHECK(!planner.plan(three_engines).has_value());
+    }
+
     return 0;
 }
