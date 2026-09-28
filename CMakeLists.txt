@@ -17,6 +17,11 @@ function(gerdos_configure_target target)
             ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
 
+    target_compile_definitions(${target}
+        PRIVATE
+            GERDOS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4)
     else()

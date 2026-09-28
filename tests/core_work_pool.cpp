@@ -2,7 +2,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <future>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -68,7 +71,54 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
-    // 2. Revival bound: the whole runtime fits small hardware
+    // 2. Subset hygiene: headers stay file- and console-free
+    // ---------------------------------------------------------------------
+
+    {
+        // Headers speak in containers and views, never in files or
+        // console output: filesystem/fstream/iostream appear in test
+        // and demo programs only. Enforced by scanning every header.
+        // (This test is the enforcer — it includes filesystem itself
+        // to walk the tree, which is exactly the allowed use. Paths
+        // resolve against the GERDOS_SOURCE_DIR compile definition.)
+        const char* roots[] = {
+            GERDOS_SOURCE_DIR "/include/gerdos/core",
+            GERDOS_SOURCE_DIR "/include/gerdos/cpu",
+            GERDOS_SOURCE_DIR "/include/gerdos/adapters",
+        };
+
+        for (const char* root : roots) {
+            for (const auto& entry :
+                 std::filesystem::recursive_directory_iterator(root)) {
+                if (!entry.is_regular_file() ||
+                    entry.path().extension() != ".hpp") {
+                    continue;
+                }
+
+                std::ifstream input(entry.path());
+                GERDOS_CHECK(input.good());
+                std::string line;
+
+                while (std::getline(input, line)) {
+                    GERDOS_CHECK(
+                        line.find("filesystem") == std::string::npos);
+                    GERDOS_CHECK(
+                        line.find("fstream") == std::string::npos);
+                    GERDOS_CHECK(
+                        line.find("iostream") == std::string::npos);
+                    GERDOS_CHECK(
+                        line.find("std::cout") == std::string::npos);
+                    GERDOS_CHECK(
+                        line.find("std::cerr") == std::string::npos);
+                    GERDOS_CHECK(
+                        line.find("printf") == std::string::npos);
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // 3. Revival bound: the whole runtime fits small hardware
     // ---------------------------------------------------------------------
 
     {
