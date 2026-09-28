@@ -1,0 +1,4 @@
+include include/gerdos/version.hpp
+recursive-include python/gerdos/data *.gwd
+prune python/gerdos.egg-info
+global-exclude __pycache__
