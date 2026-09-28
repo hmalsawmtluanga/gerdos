@@ -247,4 +247,10 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/gerdos
 )
 
+# Consumer smoke test: install to staging, serve a find_package consumer.
+add_test(
+    NAME gerdos_consumer_smoke
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/smoke_consumer.sh ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 

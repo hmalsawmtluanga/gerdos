@@ -157,15 +157,15 @@ public:
             }
 
             if (is_output) {
-                // A producing entry for the same Data as the consuming
-                // entry writes the same record in place: skip the
-                // distinct-target search, which excludes the source
-                // record by construction. The source is usable (chosen
-                // through the claim filter), so in-place is claim-safe.
+                // Every producing record passes through claim_target:
+                // the single choke point where claims and host
+                // availability are consulted. Future placement paths
+                // must call it too — never assign target directly.
                 const bool same_data =
                     is_input && source != nullptr &&
                     sole_residency(id) == source;
-                target = same_data ? source : choose_target(id, source);
+                target = same_data ? claim_target(source)
+                                   : choose_target(id, source);
 
                 // In-place realization only when the consuming record is
                 // the sole representation: with sibling records that are
@@ -180,18 +180,9 @@ public:
                         return std::nullopt;
                     }
 
-                    if (source != nullptr &&
-                        (source->update_owner().valid() ||
-                         !host_available(
-                             source->description().resource))) {
-                        return std::nullopt;
-                    }
-
-                    target = source;
-
-                    if (target == nullptr) {
-                        target = free_sole_residency(id);
-                    }
+                    target = source != nullptr
+                        ? claim_target(source)
+                        : free_sole_residency(id);
                 }
 
                 if (target == nullptr) {
@@ -869,6 +860,20 @@ private:
             });
 
         return count == 1 ? sole : nullptr;
+    }
+
+    // The single choke point for producing records: returns the record
+    // only when it is unclaimed with an available host, else nullptr.
+    // Every placement path calls this — never assign a producing target
+    // without it.
+    [[nodiscard]] const DataResidency* claim_target(
+        const DataResidency* record) const noexcept {
+        if (record == nullptr || record->update_owner().valid() ||
+            !host_available(record->description().resource)) {
+            return nullptr;
+        }
+
+        return record;
     }
 
     // The sole unclaimed representation with an available host, or
