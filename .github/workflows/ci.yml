@@ -39,5 +39,5 @@ jobs:
         run: >
           PYTHONPATH=${{ github.workspace }}/python
           python3 -m gerdos
-          ${{ matrix.build_dir }}/libgerdos_c.so
+          ${{ matrix.build_dir }}
           workloads/signal_chain.gwd

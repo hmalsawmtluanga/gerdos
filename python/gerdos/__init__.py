@@ -12,6 +12,8 @@ def find_library(hint=None):
     # then the historic repo-build fallbacks (dev use).
     here = os.path.dirname(os.path.abspath(__file__))
     candidates = []
+    if hint and os.path.isfile(hint):
+        return hint
     if hint:
         candidates.append(hint)
     env_dir = os.environ.get("GERDOS_LIB_DIR")
