@@ -1992,7 +1992,15 @@ A record establishes:
   count successful evidence separately from time-to-failure evidence
 
 Queries accumulate values with saturating arithmetic; totals never wrap.
-Evidence is retained without limit; retention policy is future work.
+Evidence is retained without limit within a registry; there is no
+eviction, and long-running operators must rotate registries (a fresh
+`MeasurementRegistry` per workload round, as every test does
+per-test) rather than growing one log forever — unbounded growth
+would starve the small boards this runtime revives. Rotation is
+safe because planning reads only the registry it is handed:
+evidence never crosses a rotation boundary unless the operator
+carries summaries explicitly. Retention policy beyond rotation is
+future work.
 
 The observed Resource is the subject form of this contract. Observations of
 topology links or other entities require a future subject generalization and
