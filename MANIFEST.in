@@ -1,4 +1,13 @@
-include include/gerdos/version.hpp
+# setup.py compiles the native library at install time, so the sdist
+# ships full CMake sources (headers, shim, build files).
+include CMakeLists.txt
+include setup.py
+recursive-include cmake *.in
+recursive-include include *.hpp *.h
+recursive-include src *.cpp *.h
+recursive-include tests *.cpp *.hpp *.h *.sh *.c
+recursive-include demo *.cpp
+recursive-include shaders *.comp
 recursive-include python/gerdos/data *.gwd
 prune python/gerdos.egg-info
 global-exclude __pycache__
