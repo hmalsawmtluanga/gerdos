@@ -1224,6 +1224,16 @@ Headers compile toward bare metal, not just hosted Linux:
   kernels or placement loops (registries keep their maps at the
   boundary; the planner and backends iterate flatly).
 
+## C ABI: the stable consumer boundary
+
+One `gerdos.h` exposes opaque handles and some fifteen functions
+(create, load artifact text, plan, run, sample, destroy). C++ stays
+inside; C, Python, Zig, Rust, and microcontroller callers never see
+templates. The shim adds no semantics — every call forwards to the
+audited core — and the flagship backends are untouched behind it.
+A pure-C program (compiled with `cc`, not `c++`) runs the signal
+chain as the proof.
+
 ## Consumer smoke test
 
 The installable package is guarded by a consumer smoke test: configure
