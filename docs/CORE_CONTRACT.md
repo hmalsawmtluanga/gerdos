@@ -1207,6 +1207,31 @@ output writes its sole representation only under the same condition.
 A claimed sole record refuses loudly rather than planning work the
 executor must abandon.
 
+## Consumer smoke test
+
+The installable package is guarded by a consumer smoke test: configure
+against a staging install root with `find_package`, include one core
+header, build, and run. Packaging regressions (doubled trees, empty
+include paths) fail loudly here instead of reaching users.
+
+## Revival profile: small hardware first
+
+The runtime targets old, low-power, and small hardware — not flagship
+accelerators. Consequences, all pinned by test:
+
+- worker threads are fixed and few (four per backend pool, three
+  pools at most — bounded queues, never hardware-derived counts),
+  so a microcontroller-class host cannot be drowned by its own
+  runtime; sharing one pool across backends is future work;
+- work executes in capacity-fitting rounds with explicit eviction, so
+  a workload larger than device memory stages through instead of
+  refusing wholesale;
+- every backend reports availability, and every dependent skips with a
+  printed reason — weak hardware is addressed, never assumed;
+- measurement is structural (evidence changed the choices), never a
+  portable ratio: numbers from one revival board say nothing about
+  another.
+
 ## Runtime configuration
 
 Device identity and backend choice resolve file-first (key=value
