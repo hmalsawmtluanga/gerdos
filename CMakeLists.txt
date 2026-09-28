@@ -253,7 +253,8 @@ install(
 )
 
 # C ABI library (flagship backends untouched behind the shim).
-add_library(gerdos_c src/gerdos_c.cpp)
+# Shared: ctypes consumers load it directly (static archives cannot).
+add_library(gerdos_c SHARED src/gerdos_c.cpp)
 gerdos_configure_target(gerdos_c)
 
 # Pure-C consumer: compiled with cc, proves the ABI boundary.
