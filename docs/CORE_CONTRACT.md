@@ -1200,7 +1200,24 @@ Version-zero selection rules:
   same declared-attribute preference
 - movement between distinct records requires a covering topology link
 
-Claimed producing records are never planned onto.
+Claimed producing records are never planned onto — including through
+the in-place fallbacks: a same-Data output writes its source record
+only when that record is unclaimed with an available host, and a pure
+output writes its sole representation only under the same condition.
+A claimed sole record refuses loudly rather than planning work the
+executor must abandon.
+
+## Runtime configuration
+
+Device identity and backend choice resolve file-first (key=value
+text) with `GERDOS_` environment overrides winning over file values.
+Documented defaults match today's hardcoded behavior (accelerator
+device 200). Unknown keys are refused loudly with the line number;
+malformed values — file or environment — are refused, never
+defaulted. Exploration thresholds and pool sizing are not
+configuration: they are determinism-critical planner structure,
+hardcoded by contract, and a future knob there must preserve the
+deterministic suites to land.
 
 Dependency-graph scheduling orders work before binding it. The planner
 reads each operation's declared dependencies and returns ready
@@ -1678,7 +1695,9 @@ forms and dtypes are the declared algebra and dtype vocabularies
 (`AFFINE` is accepted as shorthand for `ELEMENTWISE_AFFINE`).
 Parsing is fail-closed and versioned: a missing or non-1 version, an
 unknown line kind, an unknown role/form/dtype, a duplicate id, a
-malformed float or integer (strict full-consumption parsing), or a
+malformed float or integer (strict decimal grammar — optional
+sign, digits with at most one point, optional decimal exponent;
+`nan`, `inf`, and hexadecimal forms refused), or a
 matrix form without its complete shape is refused loudly with the line
 number — never ignored, never defaulted.
 
