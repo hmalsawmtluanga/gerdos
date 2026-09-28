@@ -1269,6 +1269,17 @@ knowledge:
 Version wires to `version.hpp` (single source of truth). No compute
 in Python, ever — the driver loads, runs, and prints verdicts.
 
+## Platform wheels
+
+Borrowers without compilers install platform wheels: CPython 3.10+ on
+manylinux x86_64 and aarch64, built on hosted CI by cibuildwheel.
+Each wheel bundles the release-built native library compiled from
+the same audited sources — no separate binaries, no flagship-only
+paths. The wheel is Linux-glibc-only in v1; other platforms build
+from the sdist automatically. Wheels are inspected (selftest
+through the downloaded artifact) before any upload to PyPI; no
+auto-publish.
+
 ## Consumer smoke test
 
 The installable package is guarded by a consumer smoke test: configure
