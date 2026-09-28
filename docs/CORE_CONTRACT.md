@@ -1644,6 +1644,18 @@ bit-exact where integer shapes govern, tolerance-documented where
 float reductions accumulate. The comparison prints as evidence, never
 as a hidden fixture.
 
+## Second consumer: signal processing (Phase 6)
+
+A second workload family proves the runtime is infrastructure, not a
+demo: image/signal processing chains (normalize, threshold, select,
+histogram) through the same work algebra, with their own adapter
+vocabulary (`SIGNAL_NORMALIZE`, `SIGNAL_THRESHOLD`, `SIGNAL_SELECT`,
+`SIGNAL_HISTOGRAM`) in a second adapter header under the same adapter
+boundary. The terms are generic signal processing, never model
+semantics; the leakage guard covers them identically. The family
+reuses the runtime, planner, and backends untouched, ships its own
+artifact, and prints its own verdict with a full reproduction record.
+
 ## Workload artifact format (version 1)
 
 The on-disk form of a workload is a line-oriented text format — the
