@@ -90,15 +90,17 @@ public:
                 // Allocations keep their own dtype across attempts: a
                 // record touched by F32 work then I8 work keeps its
                 // storage and converts per operation in run(). Only a
-                // missing record or an element-count mismatch
-                // reallocates (fresh storage takes the work's dtype).
-                // Retargeting on dtype alone would wipe the operand.
-                const bool count_matches =
+                // missing record or a shortfall reallocates (fresh
+                // storage takes the work's dtype): a surplus keeps its
+                // data, so a smaller-footprint operation never wipes
+                // what a larger one produced. Retargeting on dtype
+                // alone would wipe the operand.
+                const bool count_sufficient =
                     it != allocations_.end() &&
-                    it->second.bytes / dtype_bytes(it->second.dtype) ==
+                    it->second.bytes / dtype_bytes(it->second.dtype) >=
                         work.storage_elements();
 
-                if (!count_matches) {
+                if (!count_sufficient) {
                     undo.emplace_back(
                         ref,
                         it == allocations_.end()

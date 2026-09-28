@@ -362,14 +362,14 @@ public:
                 const auto it = allocations_.find(ref);
 
                 // Allocations keep their own dtype across attempts (see
-                // the CPU backend): only a missing record or an
-                // element-count mismatch reallocates.
-                const bool count_matches =
+                // the CPU backend): only a missing record or a
+                // shortfall reallocates; a surplus keeps its data.
+                const bool count_sufficient =
                     it != allocations_.end() &&
-                    it->second.bytes / dtype_bytes(it->second.dtype) ==
+                    it->second.bytes / dtype_bytes(it->second.dtype) >=
                         work.storage_elements();
 
-                if (!count_matches) {
+                if (!count_sufficient) {
                     undo.emplace_back(
                         ref,
                         it == allocations_.end()
@@ -577,12 +577,12 @@ private:
         WorkDtype dtype) {
         auto it = allocations_.find(ref);
 
-        const bool count_matches =
+        const bool count_sufficient =
             it != allocations_.end() &&
-            it->second.bytes / dtype_bytes(it->second.dtype) ==
+            it->second.bytes / dtype_bytes(it->second.dtype) >=
                 bytes / dtype_bytes(dtype);
 
-        if (!count_matches) {
+        if (!count_sufficient) {
             const bool on_device =
                 available_ && home_on_accelerator(ref);
 

@@ -45,6 +45,8 @@ enum class ModelOp {
     // Refused: needs division the algebra cannot express exactly.
     DIVIDE,
     LAYER_NORM,
+    // Refused: selecting which index holds the extreme has no form.
+    ARGMAX,
 };
 
 struct ModelStep {
@@ -485,6 +487,12 @@ struct Adaptation {
             adaptation.refused.push_back(
                 "LAYER_NORM: needs variance and division, neither of"
                 " which the algebra expresses exactly");
+            break;
+
+        case ModelOp::ARGMAX:
+            adaptation.refused.push_back(
+                "ARGMAX: reductions report extreme values, never which"
+                " index holds them — the decision has no exact form");
             break;
         }
 

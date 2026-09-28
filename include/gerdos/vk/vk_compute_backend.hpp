@@ -127,12 +127,12 @@ public:
                 const auto& ref = entry.residency;
                 auto it = allocations_.find(ref);
 
-                const bool count_matches =
+                const bool count_sufficient =
                     it != allocations_.end() &&
-                    it->second.bytes / dtype_bytes(it->second.dtype) ==
+                    it->second.bytes / dtype_bytes(it->second.dtype) >=
                         work.storage_elements();
 
-                if (!count_matches) {
+                if (!count_sufficient) {
                     undo.emplace_back(
                         ref,
                         it == allocations_.end()
@@ -921,12 +921,12 @@ private:
                                 WorkDtype dtype) {
         auto it = allocations_.find(ref);
 
-        const bool count_matches =
+        const bool count_sufficient =
             it != allocations_.end() &&
-            it->second.bytes / dtype_bytes(it->second.dtype) ==
+            it->second.bytes / dtype_bytes(it->second.dtype) >=
                 bytes / dtype_bytes(dtype);
 
-        if (!count_matches) {
+        if (!count_sufficient) {
             const bool on_device = available_ && home_on_accelerator(ref);
 
             Allocation fresh{};
