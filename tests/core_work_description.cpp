@@ -2349,5 +2349,190 @@ int main() {
         GERDOS_CHECK(admissibility.admissible(f32_op, binding));
     }
 
+    // ---------------------------------------------------------------------
+    // Mixed footprints: surplus keeps data, shortfall reinitializes
+    // ---------------------------------------------------------------------
+
+    {
+        // One record shared by operations of different widths: a
+        // larger producer followed by a smaller consumer must keep
+        // every element (the tiny-model shape, pinned at unit scale);
+        // a smaller record read by a larger footprint reinitializes
+        // to fresh 1.0s deterministically — never corrupt, never kept
+        // stale. Both directions pinned with exact values.
+        Machine machine;
+
+        auto* wide = machine.data.create_data(
+            DataDescription{DataId{610}, "wide"});
+        (void)wide->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6101},
+                    DataId{610},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "wide",
+                },
+            });
+        (void)wide->find_residency(DataResidencyId{6101})
+            ->set_state(DataResidencyState::VALID);
+
+        auto* record = machine.data.create_data(
+            DataDescription{DataId{611}, "record"});
+        (void)record->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6111},
+                    DataId{611},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "record",
+                },
+            });
+        (void)record->find_residency(DataResidencyId{6111})
+            ->set_state(DataResidencyState::VALID);
+
+        auto* sink = machine.data.create_data(
+            DataDescription{DataId{612}, "sink"});
+        (void)sink->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{6121},
+                    DataId{612},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "sink",
+                },
+            });
+        (void)sink->find_residency(DataResidencyId{6121})
+            ->set_state(DataResidencyState::VALID);
+
+        // A: 8-wide affine maps fresh 1.0 (0*1 + 1*1 + 1) to 2.0.
+        const OperationDescription fill_desc{
+            OperationId{810},
+            {DataId{610}},
+            {DataId{611}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{8, 1, 0.0f, 1.0f, 1.0f},
+        };
+
+        // B: 4-wide affine reads the wide record, writes 12.0.
+        const OperationDescription read_desc{
+            OperationId{811},
+            {DataId{611}},
+            {DataId{612}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{4, 1, 0.0f, 1.0f, 10.0f},
+        };
+
+        // C: 8-wide in-place doubling over the wide record.
+        const OperationDescription double_desc{
+            OperationId{812},
+            {DataId{611}},
+            {DataId{611}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{8, 1, 1.0f, 1.0f, 0.0f},
+        };
+
+        // D: 8-wide in-place over the 4-wide sink (shortfall).
+        const OperationDescription over_desc{
+            OperationId{813},
+            {DataId{612}},
+            {DataId{612}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{8, 1, 1.0f, 1.0f, 0.0f},
+        };
+
+        CpuBackend backend;
+
+        auto submit_and_drain = [&](const OperationDescription& description,
+                                    std::uint64_t n,
+                                    std::vector<std::pair<DataBindingRole, DataResidencyRef>> entries) {
+            const Operation operation{description};
+            Execution attempt{
+                ExecutionDescription{ExecutionId{n}, description.id}};
+            PhysicalBinding binding;
+
+            for (const auto& [role, ref] : entries) {
+                binding.data.push_back(DataBinding{role, ref});
+            }
+
+            binding.resources.push_back(
+                ResourceBinding{
+                    ResourceBindingRole::COMPUTE,
+                    ResourceRef{DeviceId{100}, ResourceId{102}},
+                });
+            GERDOS_CHECK(attempt.bind(binding));
+            GERDOS_CHECK(backend.submit(operation, attempt));
+            std::vector<BackendCompletion> done;
+            backend.poll(done);
+
+            while (done.empty()) {
+                backend.poll(done);
+            }
+
+            GERDOS_CHECK(done.size() == 1);
+            GERDOS_CHECK(done.front().succeeded);
+        };
+
+        const DataResidencyRef wide_ref{DataId{610}, DataResidencyId{6101}};
+        const DataResidencyRef record_ref{DataId{611}, DataResidencyId{6111}};
+        const DataResidencyRef sink_ref{DataId{612}, DataResidencyId{6121}};
+
+        submit_and_drain(
+            fill_desc, 910,
+            {{DataBindingRole::INPUT, wide_ref},
+             {DataBindingRole::OUTPUT, record_ref}});
+
+        // The wide record holds 2.0 across all eight elements.
+        for (std::size_t i = 0; i < 8; ++i) {
+            GERDOS_CHECK(backend.sample(record_ref, i) == 2.0f);
+        }
+
+        GERDOS_CHECK(backend.allocation_bytes(record_ref) == 8);
+
+        submit_and_drain(
+            read_desc, 911,
+            {{DataBindingRole::INPUT, record_ref},
+             {DataBindingRole::OUTPUT, sink_ref}});
+
+        // The narrow read wrote 12.0 (2.0 + 10.0) into four slots...
+        for (std::size_t i = 0; i < 4; ++i) {
+            GERDOS_CHECK(backend.sample(sink_ref, i) == 12.0f);
+        }
+
+        // ...and left the wide record untouched, including its tail:
+        // the 4-wide consumer kept the 8-wide surplus.
+        for (std::size_t i = 0; i < 8; ++i) {
+            GERDOS_CHECK(backend.sample(record_ref, i) == 2.0f);
+        }
+
+        GERDOS_CHECK(backend.allocation_bytes(record_ref) == 8);
+
+        submit_and_drain(
+            double_desc, 912,
+            {{DataBindingRole::INPUT, record_ref},
+             {DataBindingRole::OUTPUT, record_ref}});
+
+        for (std::size_t i = 0; i < 8; ++i) {
+            GERDOS_CHECK(backend.sample(record_ref, i) == 4.0f);
+        }
+
+        // Shortfall: the 4-wide sink reread at width 8 reinitializes
+        // to fresh 1.0s, then doubles to 2.0 — deterministic, never
+        // stale, never out-of-bounds.
+        submit_and_drain(
+            over_desc, 913,
+            {{DataBindingRole::INPUT, sink_ref},
+             {DataBindingRole::OUTPUT, sink_ref}});
+
+        for (std::size_t i = 0; i < 8; ++i) {
+            GERDOS_CHECK(backend.sample(sink_ref, i) == 2.0f);
+        }
+
+        GERDOS_CHECK(backend.allocation_bytes(sink_ref) == 8);
+    }
+
     return 0;
 }
