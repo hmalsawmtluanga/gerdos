@@ -1219,7 +1219,11 @@ Headers compile toward bare metal, not just hosted Linux:
   files or console output;
 - `GERDOS_NO_THREADS`: a single-threaded build flag. The pool
   executes inline, backends stay correct, determinism is preserved —
-  microcontroller-class targets link without threading;
+  microcontroller-class targets link without threading. The
+  saturation suites are threading-shape tests: under the flag they
+  are replaced by inline-order proofs, never run as-is (a gated
+  submit executes before any gate opens — the saturation test would
+  deadlock by construction);
 - hot paths avoid node-based containers: no hash-map growth inside
   kernels or placement loops (registries keep their maps at the
   boundary; the planner and backends iterate flatly).
@@ -1992,15 +1996,16 @@ A record establishes:
   count successful evidence separately from time-to-failure evidence
 
 Queries accumulate values with saturating arithmetic; totals never wrap.
-Evidence is retained without limit within a registry; there is no
-eviction, and long-running operators must rotate registries (a fresh
-`MeasurementRegistry` per workload round, as every test does
-per-test) rather than growing one log forever — unbounded growth
-would starve the small boards this runtime revives. Rotation is
-safe because planning reads only the registry it is handed:
-evidence never crosses a rotation boundary unless the operator
-carries summaries explicitly. Retention policy beyond rotation is
-future work.
+Evidence is retained up to a hard cap within a registry
+(`kMaxRecords`): past the cap, `record()` refuses loudly with an
+invalid id rather than growing into an OOM — a 2 GB board survives
+a runaway producer. Long-running operators rotate registries per
+workload round (a fresh `MeasurementRegistry`, as every test does
+per-test) well before the cap: rotation is safe because planning
+reads only the registry it is handed, and evidence never crosses a
+rotation boundary unless the operator carries summaries explicitly.
+The cap is sized for revival boards, not flagships; raising it is a
+contract change, not a tuning knob.
 
 The observed Resource is the subject form of this contract. Observations of
 topology links or other entities require a future subject generalization and
