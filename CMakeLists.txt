@@ -4,7 +4,7 @@ project(
     GERDOS
     VERSION 0.1.0
     DESCRIPTION "Global Execution Runtime for Dynamic Open Systems"
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 set(CMAKE_CXX_STANDARD 20)
@@ -250,6 +250,21 @@ install(
         ${CMAKE_CURRENT_BINARY_DIR}/gerdos-config.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/gerdos-config-version.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/gerdos
+)
+
+# C ABI library (flagship backends untouched behind the shim).
+add_library(gerdos_c src/gerdos_c.cpp)
+gerdos_configure_target(gerdos_c)
+
+# Pure-C consumer: compiled with cc, proves the ABI boundary.
+add_executable(gerdos_c_consumer_test tests/c_consumer.c)
+target_include_directories(gerdos_c_consumer_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(gerdos_c_consumer_test PRIVATE gerdos_c)
+set_target_properties(gerdos_c_consumer_test PROPERTIES LINKER_LANGUAGE C)
+add_test(
+    NAME gerdos_c_consumer
+    COMMAND gerdos_c_consumer_test ${CMAKE_CURRENT_SOURCE_DIR}/workloads
 )
 
 # Consumer smoke test: install to staging, serve a find_package consumer.
