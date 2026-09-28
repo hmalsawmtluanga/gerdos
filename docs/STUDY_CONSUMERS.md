@@ -35,6 +35,24 @@ SOFTMAX, ATTENTION, DIVIDE, LAYER_NORM, RESIDUAL_ADD (decoder side);
 SIGNAL_THRESHOLD (signal side). Each names its missing form. No silent
 approximation anywhere in either consumer.
 
+## Constrained-profile bring-up (revival proving)
+
+The revival claim is proven by constraint, not by new hardware: the
+same suites run under `GERDOS_NO_THREADS` (inline pool, no threads)
+and through the pure-C consumer (`cc`, never `c++`) plus the Python
+driver (no compute in Python). Observed this machine:
+
+- `GERDOS_NO_THREADS` probe: inline execution `42`, `pending=0`,
+  config parse intact;
+- pure-C consumer: `0.75` exact across normalize/select/gather,
+  3 coherent, evidence 3, refusals loud (garbage, null runtime);
+- Python driver: `coherent=3 evidence=3` on the signal chain;
+- thread budget pinned: 3 pools x 4 workers, 192 bounded slots max.
+
+A physical small board (Pi-class / 2 GB x86) with this table filled in
+is the next proving step — the constraint modes above are the
+dress rehearsal, not the performance.
+
 ## Standing caveats
 
 CI (`.github/workflows/ci.yml`) has never executed on a hosted runner
