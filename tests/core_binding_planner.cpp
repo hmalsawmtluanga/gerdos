@@ -1919,5 +1919,127 @@ int main() {
         GERDOS_CHECK(held_again->resources[0].resource == dma);
     }
 
+    // ---------------------------------------------------------------------
+    // 24. Claimed sole records refuse through every fallback (audit F1)
+    // ---------------------------------------------------------------------
+
+    {
+        // The sole-record fallbacks (same-Data in-place, pure-output
+        // placement) consult claims through free_sole_residency, never
+        // around them: a claimed sole record refuses loudly rather than
+        // planning work the executor must abandon. Both pins use the
+        // sealed effects layer for claims — claims cannot be forged.
+        Machine guarded;
+        BindingPlanner planner(
+            guarded.devices, guarded.data, guarded.topology,
+            guarded.measurements);
+
+        auto* datum = guarded.data.create_data(
+            DataDescription{DataId{950}, "guarded"});
+        (void)datum->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{9501},
+                    DataId{950},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "guarded",
+                },
+            });
+        (void)datum->find_residency(DataResidencyId{9501})
+            ->set_state(DataResidencyState::VALID);
+
+        (void)guarded.operations.create_operation(OperationDescription{
+            OperationId{950},
+            {},
+            {DataId{950}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{4, 1, 0.0f, 1.0f, 0.0f},
+        });
+
+        // Unclaimed: the pure output writes its sole record in place.
+        const auto* pure =
+            guarded.operations.find_operation(OperationId{950});
+        const auto unclaimed = planner.plan(*pure);
+        GERDOS_CHECK(unclaimed.has_value());
+
+        // Claimed through the sealed effects layer: refuses.
+        ExecutionRegistry claim_executions;
+        ExecutionEffects claim_effects(guarded.data, claim_executions);
+        auto* claimant = claim_executions.create_execution(
+            ExecutionDescription{ExecutionId{995}, OperationId{950}});
+        PhysicalBinding claim_binding;
+        claim_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{950}, DataResidencyId{9501}},
+            });
+        GERDOS_CHECK(claimant->bind(claim_binding));
+        GERDOS_CHECK(claim_effects.start(*claimant));
+        GERDOS_CHECK(!planner.plan(*pure).has_value());
+
+        // Excluded from the ready set while unrelated fixture ops
+        // still schedule.
+        const auto guarded_ready = planner.schedule(guarded.operations);
+        bool guarded_has = false;
+
+        for (const auto got : guarded_ready) {
+            guarded_has = guarded_has || got == OperationId{950};
+        }
+
+        GERDOS_CHECK(!guarded_has);
+    }
+
+    {
+        // Same-Data in-place over a claimed sole record refuses too:
+        // the source is usable (it passed the claim filter before... no
+        // — a claimed source is unusable, so choose_source refuses
+        // first. This pin proves the composition, not just the guard.
+        Machine same;
+        BindingPlanner planner(
+            same.devices, same.data, same.topology, same.measurements);
+
+        auto* datum = same.data.create_data(
+            DataDescription{DataId{951}, "same"});
+        (void)datum->add_residency(
+            DataResidency{
+                DataResidencyDescription{
+                    DataResidencyId{9511},
+                    DataId{951},
+                    ResourceRef{DeviceId{100}, ResourceId{101}},
+                    "same",
+                },
+            });
+        (void)datum->find_residency(DataResidencyId{9511})
+            ->set_state(DataResidencyState::VALID);
+
+        (void)same.operations.create_operation(OperationDescription{
+            OperationId{951},
+            {DataId{951}},
+            {DataId{951}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{4, 1, 0.0f, 1.0f, 0.0f},
+        });
+
+        const auto* inplace =
+            same.operations.find_operation(OperationId{951});
+        GERDOS_CHECK(planner.plan(*inplace).has_value());
+
+        ExecutionRegistry claim_executions;
+        ExecutionEffects claim_effects(same.data, claim_executions);
+        auto* claimant = claim_executions.create_execution(
+            ExecutionDescription{ExecutionId{996}, OperationId{951}});
+        PhysicalBinding claim_binding;
+        claim_binding.data.push_back(
+            DataBinding{
+                DataBindingRole::OUTPUT,
+                DataResidencyRef{DataId{951}, DataResidencyId{9511}},
+            });
+        GERDOS_CHECK(claimant->bind(claim_binding));
+        GERDOS_CHECK(claim_effects.start(*claimant));
+        GERDOS_CHECK(!planner.plan(*inplace).has_value());
+    }
+
     return 0;
 }

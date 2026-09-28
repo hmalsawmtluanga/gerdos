@@ -34,3 +34,11 @@ belong to this machine and must be re-measured elsewhere.
 SOFTMAX, ATTENTION, DIVIDE, LAYER_NORM, RESIDUAL_ADD (decoder side);
 SIGNAL_THRESHOLD (signal side). Each names its missing form. No silent
 approximation anywhere in either consumer.
+
+## Standing caveats
+
+CI (`.github/workflows/ci.yml`) has never executed on a hosted runner
+— both configs are verified on this machine only. The second consumer
+is in-repo: it proves the runtime composes across workload families,
+not that an outside party has integrated. The outside-contribution
+line stays open until one merges through the documented path.

@@ -181,6 +181,9 @@ int main(int argc, char** argv) {
             "version 1\nworkload x\nop 1 inputs=- outputs=- deps=- req=COMPUTE:0 form=AFFINE dtype=F32 elements=1 passes=1 ds=0 ss=1 c=0\n",
             "version 1\nworkload x\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=0 passes=1 ds=0 ss=1 c=0\n",
             "version 1\nworkload x\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=1 passes=1 ds=zero ss=1 c=0\n",
+            "version 1\nworkload x\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=1 passes=1 ds=nan ss=1 c=0\n",
+            "version 1\nworkload x\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=1 passes=1 ds=inf ss=1 c=0\n",
+            "version 1\nworkload x\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=1 passes=1 ds=0x1p3 ss=1 c=0\n",
             "version 1\nworkload x\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=MATRIX_PRODUCT dtype=F32 elements=1 passes=1 ds=0 ss=1 c=0\n",
             "version 1\nworkload x\nop 1 inputs=- outputs=- deps=- form=AFFINE dtype=F32 elements=1 passes=1 ds=0 ss=1 c=0\n",
             "version 1\nworkload x\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=1 passes=1 ds=0 ss=1 c=0\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=1 passes=1 ds=0 ss=1 c=0\n",
@@ -193,6 +196,11 @@ int main(int argc, char** argv) {
             GERDOS_CHECK(parsed.error.line >= 1);
             GERDOS_CHECK(!parsed.error.reason.empty());
         }
+
+        // Decimal exponents stay accepted under the strict grammar.
+        const auto exponent =
+            parse_artifact("version 1\nworkload x\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=1 passes=1 ds=1e3 ss=1 c=0\n");
+        GERDOS_CHECK(exponent.ok);
     }
 
     // ---------------------------------------------------------------------
