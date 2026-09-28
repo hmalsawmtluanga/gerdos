@@ -1529,13 +1529,16 @@ a parameter beside form, never a form split: no gate inspects it, and
 extending the dtype set changes no gate. Storage sizing counts elements
 dtype-agnostically, but byte sizing multiplies by the dtype width with
 the same overflow guard as element counts — combinations whose byte
-product would overflow are seam-rejected before any allocation (width
-1 cannot overflow, so SIZE_MAX I8 elements are well-formed by the
-rule). Allocations keep their own dtype across attempts: a record
-touched by one dtype then another keeps its storage and converts per
-operation in F32 — retargeting never wipes an operand. Only a missing
-record or an element-count mismatch reinitializes (fresh storage takes
-the work's dtype). Mixed-dtype
+product would overflow are seam-rejected before any allocation, and
+counts are bounded by the F32 compute scratch (four bytes per
+element) for every dtype. Allocations keep their own dtype across
+attempts: a record touched by one dtype then another keeps its
+storage and converts per operation in F32 — retargeting never wipes
+an operand. Only a missing record or a shortfall reinitializes
+(fresh storage takes the work's dtype): an existing allocation that
+holds at least the needed elements is kept, never wiped — sizing is
+per record, and a later operation with a smaller footprint must not
+discard data a larger one produced. Mixed-dtype
 attempts convert explicitly at the seam with round-half-away-from-zero
 semantics, verified bit-exactly on values both dtypes represent
 exactly; there is no silent reinterpretation. Every (form, dtype) pair
