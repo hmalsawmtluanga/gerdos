@@ -1768,6 +1768,15 @@ bit-exact where integer shapes govern, tolerance-documented where
 float reductions accumulate. The comparison prints as evidence, never
 as a hidden fixture.
 
+## Tiny model: linear scores with a refused decision
+
+The smallest honest model: a linear classifier over fresh-1.0
+features — LINEAR projection to per-class scores, AFFINE bias shift,
+REDUCE_MIN/MAX/MEAN over the score vector. Every value is exact.
+The decision itself (argmax: *which* class) has no form and is
+refused by name (`ARGMAX`): scores are the model, the decision is
+the gap. This is the artifact a revival board actually runs.
+
 ## Second consumer: signal processing (Phase 6)
 
 A second workload family proves the runtime is infrastructure, not a
