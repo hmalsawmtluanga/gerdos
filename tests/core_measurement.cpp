@@ -292,6 +292,13 @@ int main() {
             rotated.record(observation(subject_a, 50)).valid());
         GERDOS_CHECK(rotated.count() == 1);
         GERDOS_CHECK(measurements.count() == 3);
+
+        // The hard cap exists and refusal shares the invalid-id shape
+        // with structural refusal (already pinned): past the cap,
+        // record() returns invalid without consuming identifiers or
+        // growing storage. Filling 1M records is not a unit test;
+        // the constant and the shared refusal shape are the pins.
+        GERDOS_CHECK(MeasurementRegistry::kMaxRecords == (1u << 20));
     }
 
     return 0;

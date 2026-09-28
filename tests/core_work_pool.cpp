@@ -12,7 +12,40 @@
 #include "gerdos/core/work_pool.hpp"
 #include "gerdos/cpu/cpu_backend.hpp"
 
+int threaded_main();
+
 int main() {
+    using namespace gerdos;
+
+#ifdef GERDOS_NO_THREADS
+    // Inline-order proof (replaces saturation under the flag): tasks
+    // execute before try_submit returns, in submission order. Running
+    // the gated saturation shape here would deadlock by construction
+    // (inline tasks block on a gate nobody opens), so it never runs
+    // under this flag — the contract says so explicitly.
+    {
+        WorkPool pool;
+        GERDOS_CHECK(pool.pending() == 0);
+        int order = 0;
+        int first = -1;
+        int second = -1;
+        auto a = pool.try_submit([&] { return order++; });
+        auto b = pool.try_submit([&] { return order++; });
+        GERDOS_CHECK(a.has_value() && b.has_value());
+        first = a->get();
+        second = b->get();
+        GERDOS_CHECK(first == 0);
+        GERDOS_CHECK(second == 1);
+        GERDOS_CHECK(pool.pending() == 0);
+    }
+
+    return 0;
+#else
+    return threaded_main();
+#endif
+}
+
+int threaded_main() {
     using namespace gerdos;
 
     // ---------------------------------------------------------------------
@@ -137,18 +170,41 @@ int main() {
 
         while (std::getline(input, line)) {
             ++line_number;
-            const bool assigns = line.find("target =") != std::string::npos;
+
+            // Normalize whitespace first: tabs and runs collapse, so
+            // `target\t=\t...` cannot evade the assignment match.
+            std::string flat;
+
+            for (const char c : line) {
+                if (c == ' ' || c == '\t') {
+                    if (!flat.empty() && flat.back() != ' ') {
+                        flat.push_back(' ');
+                    }
+                } else {
+                    flat.push_back(c);
+                }
+            }
+
+            const bool assigns =
+                flat.find("target =") != std::string::npos;
 
             if (!assigns) {
                 continue;
             }
 
             const bool allowed =
-                line.find("claim_target") != std::string::npos ||
-                line.find("choose_target") != std::string::npos ||
-                line.find("free_sole_residency") != std::string::npos ||
-                line.find("= nullptr") != std::string::npos;
+                flat.find("claim_target") != std::string::npos ||
+                flat.find("choose_target") != std::string::npos ||
+                flat.find("free_sole_residency") != std::string::npos ||
+                flat.find("= nullptr") != std::string::npos;
             GERDOS_CHECK(allowed);
+
+            // sole_residency is identity-only: placement reads through
+            // free_sole_residency. A producing assignment naming the
+            // raw helper fails even beside an allowed callee.
+            GERDOS_CHECK(
+                flat.find("sole_residency") == std::string::npos ||
+                flat.find("free_sole_residency") != std::string::npos);
         }
     }
 

@@ -28,4 +28,17 @@ EOF2
 cmake -S "$CONSUMER" -B "$BUILD" > /dev/null
 cmake --build "$BUILD" -j > /dev/null
 "$BUILD/smoke"
+# Tree-shape assertions: no doubled include tree, docs singly nested.
+if [ -d "$STAGE/include/gerdos/gerdos" ]; then
+  echo "FAIL: doubled include tree"
+  exit 1
+fi
+if [ ! -f "$STAGE/include/gerdos/core/operation.hpp" ]; then
+  echo "FAIL: headers missing from install tree"
+  exit 1
+fi
+if [ ! -f "$STAGE/share/doc/GERDOS/CORE_CONTRACT.md" ]; then
+  echo "FAIL: contract doc misplaced"
+  exit 1
+fi
 rm -rf "$STAGE" "$CONSUMER" "$BUILD"
