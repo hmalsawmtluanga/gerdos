@@ -55,8 +55,11 @@ dress rehearsal, not the performance.
 
 ## Standing caveats
 
-CI (`.github/workflows/ci.yml`) has never executed on a hosted runner
-— both configs are verified on this machine only. The second consumer
+CI (`.github/workflows/ci.yml`) is proven by clean-tree simulation
+on this machine: 30/30 green without toolchains (hardware suites
+absent-by-registration, reported visibly), both configs, plus the
+Python driver step. Hosted-runner execution stays open until the
+first push runs it. The second consumer
 is in-repo: it proves the runtime composes across workload families,
 not that an outside party has integrated. The outside-contribution
 line stays open until one merges through the documented path.
