@@ -229,7 +229,7 @@ install(
 
 install(
     FILES ${CMAKE_CURRENT_SOURCE_DIR}/docs/CORE_CONTRACT.md
-    DESTINATION ${CMAKE_INSTALL_DOCDIR}/gerdos
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
 
 configure_package_config_file(

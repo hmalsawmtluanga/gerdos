@@ -66,6 +66,12 @@ struct MeasurementSummary {
 // queried subject; retention of old evidence is future policy.
 class MeasurementRegistry {
 public:
+    // Hard record cap: past it, record() refuses loudly rather than
+    // growing into an OOM. Sized for revival boards; raising it is a
+    // contract change, not a tuning knob. Operators rotate registries
+    // per workload round well before the cap.
+    static constexpr std::size_t kMaxRecords = 1u << 20;
+
     MeasurementRegistry() = default;
 
     MeasurementRegistry(const MeasurementRegistry&) = delete;
@@ -79,6 +85,10 @@ public:
             !observation.operation.valid() ||
             !observation.attempt.valid() ||
             !valid_quantity(observation.quantity)) {
+            return MeasurementId{};
+        }
+
+        if (records_.size() >= kMaxRecords) {
             return MeasurementId{};
         }
 

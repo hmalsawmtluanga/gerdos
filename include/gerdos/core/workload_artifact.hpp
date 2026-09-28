@@ -488,15 +488,24 @@ struct ArtifactParse {
             std::size_t columns = 0;
 
             if (*form == WorkForm::MATRIX_PRODUCT) {
+                // Early refusal before any dereference: the analyzer
+                // sees no path where an empty optional is read.
                 const auto r = need("rows");
                 const auto i = need("inner");
                 const auto c = need("columns");
-                const auto rv = r.has_value() ? parse_uint(*r) : std::nullopt;
-                const auto iv = i.has_value() ? parse_uint(*i) : std::nullopt;
-                const auto cv = c.has_value() ? parse_uint(*c) : std::nullopt;
 
-                if (!rv.has_value() || !iv.has_value() || !cv.has_value() ||
-                    *rv == 0 || *iv == 0 || *cv == 0) {
+                if (!r.has_value() || !i.has_value() ||
+                    !c.has_value()) {
+                    return fail(line_number, "matrix form needs a complete shape");
+                }
+
+                const auto rv = parse_uint(*r);
+                const auto iv = parse_uint(*i);
+                const auto cv = parse_uint(*c);
+
+                if (!rv.has_value() || !iv.has_value() ||
+                    !cv.has_value() || *rv == 0 || *iv == 0 ||
+                    *cv == 0) {
                     return fail(line_number, "matrix form needs a complete shape");
                 }
 
