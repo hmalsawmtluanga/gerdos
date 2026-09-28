@@ -45,10 +45,18 @@ jobs:
   build-wheels:
     # Platform wheels: built, selftested, uploaded as artifacts.
     # Never published automatically — inspected first, uploaded by hand.
+    # Each runner builds its native arch only: asking the ARM runner
+    # for x86_64 pulls an unexecutable image (exec format error).
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        include:
+          - os: ubuntu-24.04
+            archs: x86_64
+          - os: ubuntu-24.04-arm
+            archs: aarch64
+    env:
+      CIBUILDWHEEL_ARCHS: ${{ matrix.archs }}
     steps:
       - uses: actions/checkout@v4
       - name: Build wheels
