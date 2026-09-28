@@ -218,7 +218,7 @@ include(CMakePackageConfigHelpers)
 
 install(
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/gerdos
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gerdos
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING PATTERN "*.hpp"
 )
 
@@ -231,6 +231,7 @@ configure_package_config_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/gerdos-config.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/gerdos-config.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/gerdos
+    PATH_VARS CMAKE_INSTALL_INCLUDEDIR
 )
 
 write_basic_package_version_file(

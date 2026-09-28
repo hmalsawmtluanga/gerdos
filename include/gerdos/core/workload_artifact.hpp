@@ -66,9 +66,63 @@ struct ArtifactError {
     return value;
 }
 
+// Strict decimal grammar: optional sign, digits with at most one point,
+// optional decimal exponent. Rejects strtof's nan/inf/hex forms — the
+// artifact format speaks decimals, not C literals.
 [[nodiscard]] inline std::optional<float> parse_float(
     std::string_view text) noexcept {
     if (text.empty()) {
+        return std::nullopt;
+    }
+
+    std::size_t i = 0;
+
+    if (text[i] == '+' || text[i] == '-') {
+        ++i;
+    }
+
+    bool digits = false;
+    bool point = false;
+
+    for (; i < text.size(); ++i) {
+        const char c = text[i];
+
+        if (c >= '0' && c <= '9') {
+            digits = true;
+        } else if (c == '.' && !point) {
+            point = true;
+        } else {
+            break;
+        }
+    }
+
+    if (!digits) {
+        return std::nullopt;
+    }
+
+    if (i < text.size() && (text[i] == 'e' || text[i] == 'E')) {
+        ++i;
+
+        if (i < text.size() && (text[i] == '+' || text[i] == '-')) {
+            ++i;
+        }
+
+        bool exp_digits = false;
+
+        for (; i < text.size(); ++i) {
+            if (text[i] >= '0' && text[i] <= '9') {
+                exp_digits = true;
+            } else {
+                break;
+            }
+        }
+
+        if (!exp_digits) {
+            return std::nullopt;
+        }
+    }
+
+    if (i != text.size()) {
         return std::nullopt;
     }
 

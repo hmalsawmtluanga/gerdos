@@ -160,7 +160,8 @@ public:
                 // A producing entry for the same Data as the consuming
                 // entry writes the same record in place: skip the
                 // distinct-target search, which excludes the source
-                // record by construction.
+                // record by construction. The source is usable (chosen
+                // through the claim filter), so in-place is claim-safe.
                 const bool same_data =
                     is_input && source != nullptr &&
                     sole_residency(id) == source;
@@ -170,17 +171,26 @@ public:
                 // the sole representation: with sibling records that are
                 // unreachable or busy, the update was movement and planning
                 // fails loudly. A pure output (no consuming source) with
-                // exactly one representation writes it in place.
+                // exactly one representation writes it in place — only
+                // when that record is unclaimed with an available host.
+                // Claimed records are never planned onto, by any path.
                 if (target == nullptr &&
                     (source != nullptr || record_count(id) == 1)) {
                     if (source != nullptr && record_count(id) != 1) {
                         return std::nullopt;
                     }
 
+                    if (source != nullptr &&
+                        (source->update_owner().valid() ||
+                         !host_available(
+                             source->description().resource))) {
+                        return std::nullopt;
+                    }
+
                     target = source;
 
                     if (target == nullptr) {
-                        target = sole_residency(id);
+                        target = free_sole_residency(id);
                     }
                 }
 
@@ -838,8 +848,8 @@ private:
     }
 
     // The sole representation of a Data, or nullptr unless exactly one
-    // exists. Pure outputs (no consuming source) with one representation
-    // write it in place.
+    // exists — regardless of claims. Identity checks only; never
+    // placement.
     [[nodiscard]] const DataResidency* sole_residency(DataId id) const
         noexcept {
         const DataResidency* sole = nullptr;
@@ -859,6 +869,38 @@ private:
             });
 
         return count == 1 ? sole : nullptr;
+    }
+
+    // The sole unclaimed representation with an available host, or
+    // nullptr. Placement consults claims through this, never around it.
+    [[nodiscard]] const DataResidency* free_sole_residency(DataId id) const
+        noexcept {
+        const DataResidency* sole = nullptr;
+        std::size_t count = 0;
+
+        data_.for_each_data(
+            [&](const Data* datum) {
+                if (datum->description().id != id) {
+                    return;
+                }
+
+                datum->for_each_residency(
+                    [&](const DataResidency* record) {
+                        sole = record;
+                        ++count;
+                    });
+            });
+
+        if (count != 1 || sole == nullptr) {
+            return nullptr;
+        }
+
+        if (sole->update_owner().valid() ||
+            !host_available(sole->description().resource)) {
+            return nullptr;
+        }
+
+        return sole;
     }
 
     [[nodiscard]] static bool better_record(
