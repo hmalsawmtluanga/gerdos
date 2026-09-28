@@ -67,6 +67,22 @@ int main() {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // 2. Revival bound: the whole runtime fits small hardware
+    // ---------------------------------------------------------------------
+
+    {
+        // Thread budget: three backend pools (CPU, OpenCL, Vulkan) of
+        // fixed workers each — bounded, never hardware-derived. The
+        // total is small and constant; sharing one pool across backends
+        // is declared future work, so this pins the current bound.
+        constexpr std::size_t kBackendPools = 3;
+        GERDOS_CHECK(WorkPool::kWorkers == 4);
+        GERDOS_CHECK(WorkPool::kQueueBound == 64);
+        GERDOS_CHECK(kBackendPools * WorkPool::kWorkers <= 12);
+        GERDOS_CHECK(kBackendPools * WorkPool::kQueueBound <= 192);
+    }
+
     return 0;
 }
 
