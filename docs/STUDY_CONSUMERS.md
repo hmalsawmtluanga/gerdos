@@ -53,6 +53,15 @@ A physical small board (Pi-class / 2 GB x86) with this table filled in
 is the next proving step — the constraint modes above are the
 dress rehearsal, not the performance.
 
+## Release 0.1.2: platform wheels (2026-09-29)
+
+Eight manylinux wheels (CPython 3.10–3.13 x86_64 + aarch64) on
+PyPI, each auditwheel-repaired and container-selftested before
+upload. `pip install gerdos` in a clean venv resolves the platform
+wheel and selftests PASS with no env vars, no repo, no compiler.
+Proven: x86_64 locally (docker) and on hosted CI; aarch64 on
+hosted CI (in-container selftest per wheel).
+
 ## Standing caveats
 
 CI (`.github/workflows/ci.yml`) runs green on hosted runners

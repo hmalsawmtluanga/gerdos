@@ -8,17 +8,17 @@ we don't own — yours qualifies if it's old, slow, or small.
 On your machine, run:
 
 ```bash
-apt install -y build-essential cmake python3-pip python3-venv  # once
 python3 -m venv ~/gerdos-test && source ~/gerdos-test/bin/activate
 pip install --no-cache-dir gerdos
 python -m gerdos selftest
 python -m gerdos report
 ```
 
-Linux x86_64 works out of the box (verified 2026-09-29, release
-0.1.2). ARM boards and macOS compile from source automatically —
-keep `build-essential`/`cmake` installed and allow a few extra
-minutes for the first `pip install`.
+Linux x86_64 and ARM (verified 2026-09-29, release 0.1.2, 8
+platform wheels) need no compiler — the wheel bundles the native
+library. Anything else builds from source automatically: install a
+compiler and CMake first (`apt install -y build-essential cmake`)
+and allow a few extra minutes.
 
 Then paste **all** output back to us. That's it — no repo, no build
 knowledge, nothing to configure.
