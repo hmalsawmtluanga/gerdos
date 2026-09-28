@@ -16,6 +16,7 @@
 #include "gerdos/core/executor.hpp"
 #include "gerdos/core/operation_registry.hpp"
 #include "gerdos/adapters/model_adapter.hpp"
+#include "gerdos/adapters/signal_adapter.hpp"
 #include "gerdos/core/workload_artifact.hpp"
 #include "gerdos/cpu/cpu_backend.hpp"
 
@@ -594,7 +595,112 @@ int main(int argc, char** argv) {
         GERDOS_CHECK(e1 == ref_exp[1]);
         GERDOS_CHECK(peak == ref_exp[0]);
         GERDOS_CHECK(std::fabs(mean - ref_sum / 6.0f) <= std::numeric_limits<float>::epsilon() * (ref_sum / 6.0f) * 4);
-        GERDOS_CHECK(norm_mean == 1.0f);
+       // ---------------------------------------------------------------------
+    // 6. The signal chain translates, executes, and verifies
+    // ---------------------------------------------------------------------
+
+    {
+        // The second consumer family end to end: normalize, masked
+        // select, and histogram translate exactly; thresholding is
+        // refused (no comparison form). Fresh 1.0 allocations double as
+        // the always-true predicate and the gather index — no seeding,
+        // every value closed-form exact.
+        using gerdos::adapters::adapt_signal;
+        using gerdos::adapters::SignalAdaptation;
+        using gerdos::adapters::SignalOp;
+        using gerdos::adapters::SignalStep;
+
+        const std::vector<SignalStep> chain{
+            SignalStep{SignalOp::SIGNAL_NORMALIZE, 900, 0, 0, 901, 6, 0.0f, 0.5f, 0.25f},
+            SignalStep{SignalOp::SIGNAL_THRESHOLD, 901, 0, 0, 910, 6},
+            SignalStep{SignalOp::SIGNAL_SELECT, 910, 901, 912, 913, 6},
+            SignalStep{SignalOp::SIGNAL_HISTOGRAM, 913, 920, 0, 921, 6},
+        };
+
+        const SignalAdaptation translated = adapt_signal("signal", chain);
+        GERDOS_CHECK(translated.workload.operations.size() == 3);
+        GERDOS_CHECK(translated.refused.size() == 1);
+        GERDOS_CHECK(translated.refused[0].find("SIGNAL_THRESHOLD") == 0);
+        GERDOS_CHECK(translated.workload.operations[0].work.form == WorkForm::ELEMENTWISE_AFFINE);
+        GERDOS_CHECK(translated.workload.operations[1].work.form == WorkForm::MASK_SELECT);
+        GERDOS_CHECK(translated.workload.operations[2].work.form == WorkForm::GATHER);
+
+        Machine signaled;
+        CpuBackend signaled_backend;
+        Executor signaled_executor(
+            signaled.executions,
+            signaled.operations,
+            signaled.devices,
+            signaled.data,
+            signaled_backend,
+            &signaled.measurements);
+        BindingPlanner signaled_planner(
+            signaled.devices,
+            signaled.data,
+            signaled.topology,
+            signaled.measurements);
+
+        const auto signaled_parsed = parse_artifact(
+            load_text((directory + "/signal_chain.gwd").c_str()));
+        GERDOS_CHECK(signaled_parsed.ok);
+        GERDOS_CHECK(signaled_parsed.artifact.workload.operations.size() == 3);
+
+        std::string signaled_reason;
+        GERDOS_CHECK(populate_registries(
+            signaled_parsed.artifact, signaled.devices, signaled.data,
+            signaled.operations, signaled_reason));
+
+        const auto signaled_plan = signaled_planner.plan_attempts(signaled.operations);
+        GERDOS_CHECK(signaled_plan.size() == 3);
+
+        std::size_t signaled_attempt = 0;
+
+        for (const auto& step : signaled_plan) {
+            const auto* operation = signaled.operations.find_operation(step.id);
+            GERDOS_CHECK(operation != nullptr);
+            PhysicalBindingValidator validator;
+            BindingResolver resolver(signaled.devices, signaled.data);
+            BindingAdmissibilityValidator admissibility;
+            ExecutionAdmissionValidator admission(signaled.devices, signaled.data);
+            GERDOS_CHECK(validator.validate(step.binding));
+            GERDOS_CHECK(resolver.resolve(step.binding).fully_resolved());
+            GERDOS_CHECK(admissibility.admissible(*operation, step.binding));
+            auto* execution = signaled.executions.create_execution(
+                ExecutionDescription{ExecutionId{7000 + signaled_attempt}, step.id});
+            ++signaled_attempt;
+            GERDOS_CHECK(execution->bind(step.binding));
+            GERDOS_CHECK(admission.admit(*execution).has_value());
+            GERDOS_CHECK(signaled_executor.start(execution->description().id));
+            std::vector<AttemptStatus> outcomes;
+            signaled_executor.advance(outcomes);
+
+            while (outcomes.empty()) {
+                signaled_executor.advance(outcomes);
+            }
+
+            GERDOS_CHECK(outcomes.size() == 1);
+            GERDOS_CHECK(outcomes.front().integrity == AttemptIntegrity::COHERENT);
+        }
+
+        // Closed forms: normalize maps 1.0 -> 0.75; select picks 0.75
+        // over dark 1.0 under the always-true predicate; gather reads
+        // position 1 (0.75) into every slot. All bit-exact.
+        for (std::size_t i = 0; i < 6; ++i) {
+            GERDOS_CHECK(signaled_backend.sample(DataResidencyRef{DataId{901}, DataResidencyId{9002}}, i) == 0.75f);
+            GERDOS_CHECK(signaled_backend.sample(DataResidencyRef{DataId{913}, DataResidencyId{9013}}, i) == 0.75f);
+            GERDOS_CHECK(signaled_backend.sample(DataResidencyRef{DataId{921}, DataResidencyId{9021}}, i) == 0.75f);
+        }
+
+        std::printf("signal: 0.75 exact across normalize/select/gather, 3 ops coherent\n");
+        std::fflush(stdout);
+
+        const auto signaled_evidence = signaled.measurements.summarize(
+            ResourceRef{DeviceId{100}, ResourceId{102}},
+            MeasurementQuantity::DURATION_NS);
+        GERDOS_CHECK(signaled_evidence.succeeded_observations == 3);
+    }
+
+     GERDOS_CHECK(norm_mean == 1.0f);
     }
 
 

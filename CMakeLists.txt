@@ -115,6 +115,9 @@ gerdos_add_test(gerdos_core_runtime_config
 gerdos_add_test(gerdos_adapter_model_translation
     tests/adapter_model_translation.cpp)
 
+gerdos_add_test(gerdos_adapter_signal_translation
+    tests/adapter_signal_translation.cpp)
+
 gerdos_add_test(gerdos_core_cpu_backend
     tests/core_cpu_backend.cpp)
 
