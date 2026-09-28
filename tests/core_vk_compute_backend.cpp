@@ -118,7 +118,10 @@ int main() {
     Machine machine;
 
     VkComputeBackend backend(machine.data, DeviceId{200});
-    GERDOS_CHECK(backend.vk_available());
+    if (!backend.vk_available()) {
+        std::printf("SKIP: no Vulkan GPU device\n");
+        return 0;
+    }
 
     BindingPlanner planner(
         machine.devices,

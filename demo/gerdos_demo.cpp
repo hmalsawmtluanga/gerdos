@@ -379,6 +379,18 @@ void print(const Run& run) {
 } // namespace
 
 int main() {
+    {
+        // Hardware gate: skip with reason where no device exists —
+        // never fake-green, never red on capable CI.
+        DataRegistry probe_data;
+        HeterogeneousBackend probe(probe_data, DeviceId{200});
+
+        if (!probe.gpu_available()) {
+            std::printf("SKIP: no OpenCL GPU device\n");
+            return 0;
+        }
+    }
+
     const Workload workload = staged_workload();
 
     std::printf("GERDOS - end-to-end demonstration\n");

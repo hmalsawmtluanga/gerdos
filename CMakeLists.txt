@@ -109,6 +109,9 @@ gerdos_add_test(gerdos_core_work_description
 gerdos_add_test(gerdos_core_work_pool
     tests/core_work_pool.cpp)
 
+gerdos_add_test(gerdos_core_runtime_config
+    tests/core_runtime_config.cpp)
+
 gerdos_add_test(gerdos_adapter_model_translation
     tests/adapter_model_translation.cpp)
 
@@ -202,6 +205,42 @@ gerdos_configure_target(gerdos_core_workload_artifact_test)
 add_test(
     NAME gerdos_core_workload_artifact
     COMMAND gerdos_core_workload_artifact_test ${CMAKE_CURRENT_SOURCE_DIR}/workloads
+)
+
+# Packaging: installable headers with a CMake package config. The runtime
+# is header-only: the ABI guarantee is source compatibility within a major
+# version (headers are the library; no compiled objects to version).
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+install(
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/gerdos
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gerdos
+    FILES_MATCHING PATTERN "*.hpp"
+)
+
+install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/docs/CORE_CONTRACT.md
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}/gerdos
+)
+
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/gerdos-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/gerdos-config.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/gerdos
+)
+
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/gerdos-config-version.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(
+    FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/gerdos-config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/gerdos-config-version.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/gerdos
 )
 
 
