@@ -20,3 +20,12 @@ where = ["python"]
 [tool.setuptools.package-data]
 gerdos = ["data/*.gwd", "native/*.so"]
 gerdos_native = ["*.so"]
+
+[tool.cibuildwheel]
+# Linux glibc only in v1; other platforms build from the sdist.
+build = ["cp310-manylinux_*", "cp311-manylinux_*", "cp312-manylinux_*", "cp313-manylinux_*"]
+archs = ["x86_64", "aarch64"]
+# manylinux images carry gcc; cmake arrives here.
+before-all = "yum install -y cmake"
+# The wheel bundles the release native lib; prove it on the spot.
+test-command = "python -m gerdos selftest"
