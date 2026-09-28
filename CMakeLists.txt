@@ -268,6 +268,12 @@ add_test(
     COMMAND gerdos_c_consumer_test ${CMAKE_CURRENT_SOURCE_DIR}/workloads
 )
 
+# Version parity: package version must equal version.hpp.
+add_test(
+    NAME gerdos_version_parity
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/version_parity.sh ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 # Consumer smoke test: install to staging, serve a find_package consumer.
 add_test(
     NAME gerdos_consumer_smoke

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gerdos"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Global Execution Runtime for Dynamic Open Systems — revive old hardware with measured execution"
 readme = "README.md"
 requires-python = ">=3.10"
