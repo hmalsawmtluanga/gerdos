@@ -277,5 +277,22 @@ int main() {
     GERDOS_CHECK(execution.has_binding());
     GERDOS_CHECK(execution.binding()->resources.size() == 3);
 
+    // ---------------------------------------------------------------------
+    // Rotation: a fresh registry starts empty and grows independently
+    // ---------------------------------------------------------------------
+
+    {
+        // Long-running operators rotate registries per workload round
+        // rather than growing one log forever: the old registry keeps
+        // its records (nothing is migrated silently), the new one
+        // starts empty, and planning reads only what it is handed.
+        MeasurementRegistry rotated;
+        GERDOS_CHECK(rotated.count() == 0);
+        GERDOS_CHECK(
+            rotated.record(observation(subject_a, 50)).valid());
+        GERDOS_CHECK(rotated.count() == 1);
+        GERDOS_CHECK(measurements.count() == 3);
+    }
+
     return 0;
 }
