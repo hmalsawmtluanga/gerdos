@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gerdos"
+version = "0.1.0"
+description = "Global Execution Runtime for Dynamic Open Systems — revive old hardware with measured execution"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["heterogeneous", "runtime", "opencl", "vulkan", "revival"]
+
+[project.scripts]
+gerdos = "gerdos:cli"
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.setuptools.package-data]
+gerdos = ["data/*.gwd"]
+gerdos_native = ["*.so"]

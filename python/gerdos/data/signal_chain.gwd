@@ -1,0 +1,38 @@
+# Signal chain: normalize, masked select, histogram-gather — all exactly
+# expressible. Fresh allocations decode to 1.0, which doubles as the
+# always-true predicate (nonzero) and the gather index (position 1).
+# normalize maps 1.0 -> 0*1 + 0.5*1 + 0.25 = 0.75; select picks the
+# normalized 0.75 over dark 1.0 everywhere; gather reads position 1
+# (0.75) into every slot. Thresholding stays refused: no comparison
+# form can produce predicates exactly.
+version 1
+workload signal-chain
+
+data 900 raw
+residency 900 9001 100 101 raw
+usable 900 9001
+data 901 normalized
+residency 901 9002 100 101 normalized
+usable 901 9002
+
+data 910 predicate
+residency 910 9010 100 101 predicate
+usable 910 9010
+data 911 bright
+residency 911 9011 100 101 bright
+usable 911 9011
+data 912 dark
+residency 912 9012 100 101 dark
+usable 912 9012
+data 913 selected
+residency 913 9013 100 101 selected
+usable 913 9013
+data 920 bins
+residency 920 9020 100 101 bins
+usable 920 9020
+data 921 histogram
+residency 921 9021 100 101 histogram
+
+op 900 inputs=900 outputs=901 deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=6 passes=1 ds=0 ss=0.5 c=0.25
+op 901 inputs=910,901,912 outputs=913 deps=900 req=COMPUTE:1 form=MASK_SELECT dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 902 inputs=913,920 outputs=921 deps=901 req=COMPUTE:1 form=GATHER dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
