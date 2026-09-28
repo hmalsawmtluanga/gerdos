@@ -118,7 +118,42 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
-    // 3. Revival bound: the whole runtime fits small hardware
+    // 3. Choke-point guard: no direct producing-target assignment
+    // ---------------------------------------------------------------------
+
+    {
+        // Every producing record passes through claim_target: scan the
+        // planner for direct assignments that bypass it. Allowed shapes
+        // are claim_target(...), choose_target(...) (which filters
+        // internally), free_sole_residency(...) (which filters
+        // internally), and nullptr initialization. Anything else fails
+        // loudly here instead of reaching review.
+        std::ifstream input(
+            std::string(GERDOS_SOURCE_DIR) +
+            "/include/gerdos/core/binding_planner.hpp");
+        GERDOS_CHECK(input.good());
+        std::string line;
+        std::size_t line_number = 0;
+
+        while (std::getline(input, line)) {
+            ++line_number;
+            const bool assigns = line.find("target =") != std::string::npos;
+
+            if (!assigns) {
+                continue;
+            }
+
+            const bool allowed =
+                line.find("claim_target") != std::string::npos ||
+                line.find("choose_target") != std::string::npos ||
+                line.find("free_sole_residency") != std::string::npos ||
+                line.find("= nullptr") != std::string::npos;
+            GERDOS_CHECK(allowed);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // 4. Revival bound: the whole runtime fits small hardware
     // ---------------------------------------------------------------------
 
     {
