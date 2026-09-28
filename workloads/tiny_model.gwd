@@ -1,0 +1,40 @@
+# Tiny linear classifier: the smallest honest model. Fresh allocations
+# decode to 1.0, so every value below is closed-form exact.
+# W = 1.0 scaled to 2.0; scores = ones(2x3) @ ones(3x1) = [6,6];
+# bias shifts to [6.5,6.5]; second layer maps to [14,14];
+# min = max = mean = 14. The decision (which class) has no form
+# and is refused at the adapter as ARGMAX.
+version 1
+workload tiny-model
+
+data 100 weights
+residency 100 1001 100 101 weights
+usable 100 1001
+data 101 features
+residency 101 1002 100 101 features
+usable 101 1002
+data 102 scores
+residency 102 1003 100 101 scores
+usable 102 1003
+
+data 103 biased
+residency 103 1004 100 101 biased
+usable 103 1004
+data 104 second
+residency 104 1005 100 101 second
+usable 104 1005
+
+data 105 best
+residency 105 1006 100 101 best
+data 106 peak
+residency 106 1007 100 101 peak
+data 107 average
+residency 107 1008 100 101 average
+
+op 900 inputs=100 outputs=100 deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=6 passes=1 ds=1 ss=1 c=0
+op 901 inputs=100,101 outputs=102 deps=900 req=COMPUTE:1 form=MATRIX_PRODUCT dtype=F32 elements=0 passes=1 ds=0 ss=1 c=0 rows=2 inner=3 columns=1
+op 902 inputs=102 outputs=103 deps=901 req=COMPUTE:1 form=AFFINE dtype=F32 elements=2 passes=1 ds=0 ss=1 c=0.5
+op 903 inputs=103 outputs=104 deps=902 req=COMPUTE:1 form=AFFINE dtype=F32 elements=2 passes=1 ds=0 ss=2 c=1
+op 904 inputs=104 outputs=105 deps=903 req=COMPUTE:1 form=REDUCE_MIN dtype=F32 elements=2 passes=1 ds=0 ss=1 c=0
+op 905 inputs=104 outputs=106 deps=903 req=COMPUTE:1 form=REDUCE_MAX dtype=F32 elements=2 passes=1 ds=0 ss=1 c=0
+op 906 inputs=104 outputs=107 deps=903 req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=2 passes=1 ds=0 ss=0.5 c=0

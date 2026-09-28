@@ -712,6 +712,120 @@ int main(int argc, char** argv) {
     }
 
 
+    // ---------------------------------------------------------------------
+    // 7. The tiny model translates, executes, and verifies
+    // ---------------------------------------------------------------------
+
+    {
+        // The smallest honest model: a linear classifier over fresh-1.0
+        // features. LINEAR projection to scores, AFFINE bias shift,
+        // second-layer map, min/max/mean over the score vector — every
+        // value closed-form exact. The decision (which class) is
+        // refused: ARGMAX names the gap. This section also pins the
+        // surplus rule: record 102 is sized 6 by its matmul producer
+        // and read by a 2-wide consumer, which must keep — never wipe.
+        using gerdos::adapters::adapt;
+        using gerdos::adapters::Adaptation;
+        using gerdos::adapters::ModelOp;
+        using gerdos::adapters::ModelStep;
+
+        const std::vector<ModelStep> tiny{
+            ModelStep{ModelOp::AFFINE, 100, 0, 0, 100, 6, 0, 0, 1.0f, 1.0f, 0.0f},
+            ModelStep{ModelOp::LINEAR, 100, 101, 0, 102, 2, 3, 1},
+            ModelStep{ModelOp::AFFINE, 102, 0, 0, 103, 2, 0, 0, 0.0f, 1.0f, 0.5f},
+            ModelStep{ModelOp::AFFINE, 103, 0, 0, 104, 2, 0, 0, 0.0f, 2.0f, 1.0f},
+            ModelStep{ModelOp::REDUCE_MIN, 104, 0, 0, 105, 2},
+            ModelStep{ModelOp::REDUCE_MAX, 104, 0, 0, 106, 2},
+            ModelStep{ModelOp::REDUCE_MEAN, 104, 0, 0, 107, 2},
+            ModelStep{ModelOp::ARGMAX, 104, 0, 0, 108, 2},
+        };
+
+        const Adaptation translated = adapt("tiny model", tiny);
+        GERDOS_CHECK(translated.workload.operations.size() == 7);
+        GERDOS_CHECK(translated.refused.size() == 1);
+        GERDOS_CHECK(translated.refused[0].find("ARGMAX") == 0);
+        GERDOS_CHECK(translated.workload.operations[1].work.form == WorkForm::MATRIX_PRODUCT);
+        GERDOS_CHECK(translated.workload.operations[1].work.rows == 2);
+        GERDOS_CHECK(translated.workload.operations[1].work.inner == 3);
+        GERDOS_CHECK(translated.workload.operations[1].work.columns == 1);
+
+        Machine modeled;
+        CpuBackend modeled_backend;
+        Executor modeled_executor(
+            modeled.executions,
+            modeled.operations,
+            modeled.devices,
+            modeled.data,
+            modeled_backend,
+            &modeled.measurements);
+        BindingPlanner modeled_planner(
+            modeled.devices,
+            modeled.data,
+            modeled.topology,
+            modeled.measurements);
+
+        const auto modeled_parsed = parse_artifact(
+            load_text((directory + "/tiny_model.gwd").c_str()));
+        GERDOS_CHECK(modeled_parsed.ok);
+        GERDOS_CHECK(modeled_parsed.artifact.workload.operations.size() == 7);
+
+        std::string modeled_reason;
+        GERDOS_CHECK(populate_registries(
+            modeled_parsed.artifact, modeled.devices, modeled.data,
+            modeled.operations, modeled_reason));
+
+        const auto modeled_plan = modeled_planner.plan_attempts(modeled.operations);
+        GERDOS_CHECK(modeled_plan.size() == 7);
+
+        std::size_t modeled_attempt = 0;
+
+        for (const auto& step : modeled_plan) {
+            const auto* operation = modeled.operations.find_operation(step.id);
+            GERDOS_CHECK(operation != nullptr);
+            PhysicalBindingValidator validator;
+            BindingResolver resolver(modeled.devices, modeled.data);
+            BindingAdmissibilityValidator admissibility;
+            ExecutionAdmissionValidator admission(modeled.devices, modeled.data);
+            GERDOS_CHECK(validator.validate(step.binding));
+            GERDOS_CHECK(resolver.resolve(step.binding).fully_resolved());
+            GERDOS_CHECK(admissibility.admissible(*operation, step.binding));
+            auto* execution = modeled.executions.create_execution(
+                ExecutionDescription{ExecutionId{8000 + modeled_attempt}, step.id});
+            ++modeled_attempt;
+            GERDOS_CHECK(execution->bind(step.binding));
+            GERDOS_CHECK(admission.admit(*execution).has_value());
+            GERDOS_CHECK(modeled_executor.start(execution->description().id));
+            std::vector<AttemptStatus> outcomes;
+            modeled_executor.advance(outcomes);
+
+            while (outcomes.empty()) {
+                modeled_executor.advance(outcomes);
+            }
+
+            GERDOS_CHECK(outcomes.size() == 1);
+            GERDOS_CHECK(outcomes.front().integrity == AttemptIntegrity::COHERENT);
+        }
+
+        // Closed forms: W = 2.0; scores = [6,6]; biased = [6.5,6.5];
+        // second = [14,14]; min = max = mean = 14. All bit-exact.
+        GERDOS_CHECK(modeled_backend.sample(DataResidencyRef{DataId{100}, DataResidencyId{1001}}, 0) == 2.0f);
+        GERDOS_CHECK(modeled_backend.sample(DataResidencyRef{DataId{102}, DataResidencyId{1003}}, 0) == 6.0f);
+        GERDOS_CHECK(modeled_backend.sample(DataResidencyRef{DataId{102}, DataResidencyId{1003}}, 1) == 6.0f);
+        GERDOS_CHECK(modeled_backend.sample(DataResidencyRef{DataId{103}, DataResidencyId{1004}}, 0) == 6.5f);
+        GERDOS_CHECK(modeled_backend.sample(DataResidencyRef{DataId{104}, DataResidencyId{1005}}, 0) == 14.0f);
+        GERDOS_CHECK(modeled_backend.sample(DataResidencyRef{DataId{105}, DataResidencyId{1006}}, 0) == 14.0f);
+        GERDOS_CHECK(modeled_backend.sample(DataResidencyRef{DataId{106}, DataResidencyId{1007}}, 0) == 14.0f);
+        GERDOS_CHECK(modeled_backend.sample(DataResidencyRef{DataId{107}, DataResidencyId{1008}}, 0) == 14.0f);
+
+        std::printf("tiny: W=2 scores=6 biased=6.5 layer2=14 stats=14, 7 ops coherent\n");
+        std::fflush(stdout);
+
+        const auto modeled_evidence = modeled.measurements.summarize(
+            ResourceRef{DeviceId{100}, ResourceId{102}},
+            MeasurementQuantity::DURATION_NS);
+        GERDOS_CHECK(modeled_evidence.succeeded_observations == 7);
+    }
+
     return 0;
 }
 

@@ -62,6 +62,15 @@ wheel and selftests PASS with no env vars, no repo, no compiler.
 Proven: x86_64 locally (docker) and on hosted CI; aarch64 on
 hosted CI (in-container selftest per wheel).
 
+## Tiny linear classifier (this machine, Release)
+
+7/7 translated ops coherent; closed forms exact (`W=2`, scores
+`6`, biased `6.5`, second layer `14`, min/max/mean `14`); evidence
+7 observations. The decision is refused (`ARGMAX`: reductions
+report extreme values, never which index holds them). The run also
+pins the surplus rule: record 102 is sized 6 by its matmul producer
+and read by a 2-wide consumer without data loss.
+
 ## Standing caveats
 
 CI (`.github/workflows/ci.yml`) runs green on hosted runners

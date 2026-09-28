@@ -45,6 +45,7 @@ int main() {
         ModelStep{ModelOp::RESIDUAL_ADD, 700, 701, 0, 702, 6},
         ModelStep{ModelOp::DIVIDE, 700, 701, 0, 702, 6},
         ModelStep{ModelOp::LAYER_NORM, 700, 0, 0, 701, 6},
+        ModelStep{ModelOp::ARGMAX, 700, 0, 0, 701, 6},
     };
 
     const Adaptation adaptation = adapt("decoder fragment", fragment);
@@ -54,12 +55,13 @@ int main() {
 
     // Fail-closed translation: what the algebra cannot express exactly is
     // refused by name, never approximated silently.
-    GERDOS_CHECK(adaptation.refused.size() == 5);
+    GERDOS_CHECK(adaptation.refused.size() == 6);
     GERDOS_CHECK(adaptation.refused[0].find("SOFTMAX") == 0);
     GERDOS_CHECK(adaptation.refused[1].find("ATTENTION") == 0);
     GERDOS_CHECK(adaptation.refused[2].find("RESIDUAL_ADD") == 0);
     GERDOS_CHECK(adaptation.refused[3].find("DIVIDE") == 0);
     GERDOS_CHECK(adaptation.refused[4].find("LAYER_NORM") == 0);
+    GERDOS_CHECK(adaptation.refused[5].find("ARGMAX") == 0);
 
     const auto& linear = adaptation.workload.operations[0];
     GERDOS_CHECK(

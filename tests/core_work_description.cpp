@@ -600,15 +600,21 @@ int main() {
             GERDOS_CHECK(completion.succeeded);
         }
 
-        // The mapping now holds the quick attempt's storage, with its own
-        // semantics: an exact copy of the input.
+        // The mapping keeps the slow attempt's larger storage: the quick
+        // attempt's smaller footprint never wipes it (surplus rule) —
+        // both records hold exactly the slow sizing, deterministically.
+        // Content equality is NOT asserted: the two writers race by
+        // design (the test pins safety, not values), and byte-equality
+        // held before only through the wipe this rule removes.
         GERDOS_CHECK(backend.allocation_count() == 2);
         GERDOS_CHECK(
             backend.allocation_bytes(
-                DataResidencyRef{DataId{501}, DataResidencyId{5101}}) == 4);
-        GERDOS_CHECK(backend.allocations_equal(
-            DataResidencyRef{DataId{500}, DataResidencyId{5001}},
-            DataResidencyRef{DataId{501}, DataResidencyId{5101}}));
+                DataResidencyRef{DataId{500}, DataResidencyId{5001}}) ==
+            (1 << 20));
+        GERDOS_CHECK(
+            backend.allocation_bytes(
+                DataResidencyRef{DataId{501}, DataResidencyId{5101}}) ==
+            (1 << 20));
     }
 
     // ---------------------------------------------------------------------
