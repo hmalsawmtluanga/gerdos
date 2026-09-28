@@ -1,0 +1,30 @@
+# GERDOS continuous integration: both build configs, the leakage guard,
+# the demo, and the gated-hardware policy (skip-with-reason where no
+# device exists, never fake-green).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        include:
+          - build_dir: build
+            build_type: ""
+          - build_dir: build-release
+            build_type: -DCMAKE_BUILD_TYPE=Release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >
+          cmake -S . -B ${{ matrix.build_dir }}
+          ${{ matrix.build_type }}
+      - name: Build (zero warnings)
+        run: cmake --build ${{ matrix.build_dir }} -j
+      - name: Test (hardware suites skip without devices)
+        run: ctest --test-dir ${{ matrix.build_dir }} --output-on-failure

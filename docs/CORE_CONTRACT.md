@@ -1565,6 +1565,21 @@ Cancellation of an attempt is performed by the executor: a `PENDING` attempt
 is cancelled without effects, and an in-flight attempt receives the
 failed-or-cancelled finishing effects before its result is recorded.
 
+## Error-recovery policy
+
+Failure routing is structural, not budgeted: a failed attempt applies
+failed finishing effects (outputs UNAVAILABLE, claims released by
+finishing, takeover, or explicit release), records its result with its
+integrity, and leaves retry to a later Execution — the executor never
+retries by itself. Structural failures (unplannable bindings, refused
+admission, poisoned records) fail closed at the same gates as any
+rejection; transient backend failures surface as failed completions
+through the normal measurement path. Retry budgets and
+poison-record quarantine do not exist yet: repeated failures surface
+repeatedly, deterministically, in simulation and on hardware — the
+adversarial suites pin this behavior, and any future budget must
+preserve determinism to keep them green.
+
 Runtime object removal is preconditioned on lifecycle state:
 
 - an Execution may be removed only in a terminal state; an in-flight attempt

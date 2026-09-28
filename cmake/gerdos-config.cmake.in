@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+# GERDOS: header-only heterogeneous execution runtime.
+# Consumers: target_include_directories(target PRIVATE ${gerdos_INCLUDE_DIRS})
+# Backends need their own toolchains (OpenCL/Vulkan) linked by the consumer.
+set(gerdos_INCLUDE_DIRS "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+
+check_required_components(gerdos)
