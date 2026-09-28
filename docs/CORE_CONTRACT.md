@@ -1207,6 +1207,23 @@ output writes its sole representation only under the same condition.
 A claimed sole record refuses loudly rather than planning work the
 executor must abandon.
 
+## Embeddable subset rules
+
+Headers compile toward bare metal, not just hosted Linux:
+
+- no exceptions cross the seam: worker throws are contained as failed
+  zero-duration completions today — the rule makes it structural, so a
+  `-fno-exceptions` build stays correct;
+- no `std::filesystem` and no iostream in headers: test and demo
+  programs only. Headers speak in containers and views, never in
+  files or console output;
+- `GERDOS_NO_THREADS`: a single-threaded build flag. The pool
+  executes inline, backends stay correct, determinism is preserved —
+  microcontroller-class targets link without threading;
+- hot paths avoid node-based containers: no hash-map growth inside
+  kernels or placement loops (registries keep their maps at the
+  boundary; the planner and backends iterate flatly).
+
 ## Consumer smoke test
 
 The installable package is guarded by a consumer smoke test: configure
@@ -1214,7 +1231,16 @@ against a staging install root with `find_package`, include one core
 header, build, and run. Packaging regressions (doubled trees, empty
 include paths) fail loudly here instead of reaching users.
 
-## Revival profile: small hardware first
+## Revival profile: small hardware first, flagship hardware never closed
+
+The runtime targets old, low-power, and small hardware — not flagship
+accelerators. This is a priority order, not a ceiling: nothing in the
+subset rules, the C ABI, or the constrained profiles removes, weakens,
+or forks the OpenCL/Vulkan backends, the measurement-informed planner,
+or the multi-engine paths. A future flagship GPU backend lands through
+the same seam contract and backend guide as today; the revival work
+only guarantees the core also compiles and runs where flagship
+toolchains cannot go. Consequences, all pinned by test:
 
 The runtime targets old, low-power, and small hardware — not flagship
 accelerators. Consequences, all pinned by test:
