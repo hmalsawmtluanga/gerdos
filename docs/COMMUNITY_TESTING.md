@@ -1,15 +1,15 @@
-# Lend Us Your Old Machine (5 Minutes, Nothing to Install but pip)
+# Try GERDOS on Your Hardware (5 Minutes, Nothing to Install but pip)
 
 GERDOS revives old and small hardware. We need numbers from machines
 we don't own — yours qualifies if it's old, slow, or small.
 
 ## What we need from you
 
-On the borrowed machine, run:
+On your machine, run:
 
 ```bash
 apt install -y build-essential cmake python3-pip python3-venv  # once
-python3 -m venv ~/gerdos-borrow && source ~/gerdos-borrow/bin/activate
+python3 -m venv ~/gerdos-test && source ~/gerdos-test/bin/activate
 pip install --no-cache-dir gerdos
 python -m gerdos selftest
 python -m gerdos report

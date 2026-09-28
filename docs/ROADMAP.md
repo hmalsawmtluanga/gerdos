@@ -30,9 +30,9 @@ gates, runtime config.
 
 ## Next (open)
 
-- Platform wheels (remove the compiler requirement for borrowers).
-- Physical small-board record (or borrower replies via
-  `docs/BORROWER_ASK.md`).
+- Platform wheels (remove the compiler requirement for testers).
+- Physical small-board record (or community replies via
+  `docs/COMMUNITY_TESTING.md`).
 - First outside contribution through the documented path.
 - `gerdos-micro` profile once board data dictates the cut list.
 
