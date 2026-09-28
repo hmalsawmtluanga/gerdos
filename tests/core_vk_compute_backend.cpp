@@ -740,6 +740,184 @@ int main() {
         GERDOS_CHECK(backend.allocation_count() == before);
     }
 
+    // ---------------------------------------------------------------------
+    // Tiny classifier on the Vulkan engine: exact values, surplus kept
+    // ---------------------------------------------------------------------
+
+    {
+        // The tiny-model shapes through the ENGINE backend: mixed
+        // footprints (matmul-sized-6 record read 2-wide) must keep
+        // data here exactly as on the CPU engine. Hand-bound to the
+        // device compute mechanism; skipped cleanly without a device.
+        const ResourceRef home{DeviceId{200}, ResourceId{201}};
+
+        auto* weights = machine.data.create_data(
+            DataDescription{DataId{780}, "weights"});
+        Machine::record(*weights, DataResidencyId{7801}, home, "weights");
+        Machine::usable(weights, DataResidencyId{7801});
+
+        auto* features = machine.data.create_data(
+            DataDescription{DataId{781}, "features"});
+        Machine::record(*features, DataResidencyId{7802}, home, "features");
+        Machine::usable(features, DataResidencyId{7802});
+
+        auto* scores = machine.data.create_data(
+            DataDescription{DataId{782}, "scores"});
+        Machine::record(*scores, DataResidencyId{7803}, home, "scores");
+        Machine::usable(scores, DataResidencyId{7803});
+
+        auto* biased = machine.data.create_data(
+            DataDescription{DataId{783}, "biased"});
+        Machine::record(*biased, DataResidencyId{7804}, home, "biased");
+        Machine::usable(biased, DataResidencyId{7804});
+
+        auto* second = machine.data.create_data(
+            DataDescription{DataId{784}, "second"});
+        Machine::record(*second, DataResidencyId{7805}, home, "second");
+        Machine::usable(second, DataResidencyId{7805});
+
+        auto* best = machine.data.create_data(
+            DataDescription{DataId{785}, "best"});
+        Machine::record(*best, DataResidencyId{7806}, home, "best");
+        Machine::usable(best, DataResidencyId{7806});
+
+        auto* peak = machine.data.create_data(
+            DataDescription{DataId{786}, "peak"});
+        Machine::record(*peak, DataResidencyId{7807}, home, "peak");
+        Machine::usable(peak, DataResidencyId{7807});
+
+        auto* average = machine.data.create_data(
+            DataDescription{DataId{787}, "average"});
+        Machine::record(*average, DataResidencyId{7808}, home, "average");
+        Machine::usable(average, DataResidencyId{7808});
+
+        auto binding = compute_on(gpu_compute);
+        binding.data.push_back(
+            entry(DataBindingRole::INPUT, DataId{780}, DataResidencyId{7801}));
+        binding.data.push_back(
+            entry(DataBindingRole::OUTPUT, DataId{780}, DataResidencyId{7801}));
+        run(OperationDescription{
+                OperationId{920},
+                {DataId{780}},
+                {DataId{780}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 1.0f, 1.0f, 0.0f, WorkForm::ELEMENTWISE_AFFINE},
+            },
+            binding, ExecutionId{990});
+
+        binding = compute_on(gpu_compute);
+        binding.data.push_back(
+            entry(DataBindingRole::INPUT, DataId{780}, DataResidencyId{7801}));
+        binding.data.push_back(
+            entry(DataBindingRole::INPUT, DataId{781}, DataResidencyId{7802}));
+        binding.data.push_back(
+            entry(DataBindingRole::OUTPUT, DataId{782}, DataResidencyId{7803}));
+        run(OperationDescription{
+                OperationId{921},
+                {DataId{780}, DataId{781}},
+                {DataId{782}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{0, 1, 0.0f, 1.0f, 0.0f, WorkForm::MATRIX_PRODUCT, 2, 3, 1},
+            },
+            binding, ExecutionId{991});
+
+        binding = compute_on(gpu_compute);
+        binding.data.push_back(
+            entry(DataBindingRole::INPUT, DataId{782}, DataResidencyId{7803}));
+        binding.data.push_back(
+            entry(DataBindingRole::OUTPUT, DataId{783}, DataResidencyId{7804}));
+        run(OperationDescription{
+                OperationId{922},
+                {DataId{782}},
+                {DataId{783}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{2, 1, 0.0f, 1.0f, 0.5f},
+            },
+            binding, ExecutionId{992});
+
+        binding = compute_on(gpu_compute);
+        binding.data.push_back(
+            entry(DataBindingRole::INPUT, DataId{783}, DataResidencyId{7804}));
+        binding.data.push_back(
+            entry(DataBindingRole::OUTPUT, DataId{784}, DataResidencyId{7805}));
+        run(OperationDescription{
+                OperationId{923},
+                {DataId{783}},
+                {DataId{784}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{2, 1, 0.0f, 2.0f, 1.0f},
+            },
+            binding, ExecutionId{993});
+
+        binding = compute_on(gpu_compute);
+        binding.data.push_back(
+            entry(DataBindingRole::INPUT, DataId{784}, DataResidencyId{7805}));
+        binding.data.push_back(
+            entry(DataBindingRole::OUTPUT, DataId{785}, DataResidencyId{7806}));
+        run(OperationDescription{
+                OperationId{924},
+                {DataId{784}},
+                {DataId{785}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{2, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_MIN},
+            },
+            binding, ExecutionId{994});
+
+        binding = compute_on(gpu_compute);
+        binding.data.push_back(
+            entry(DataBindingRole::INPUT, DataId{784}, DataResidencyId{7805}));
+        binding.data.push_back(
+            entry(DataBindingRole::OUTPUT, DataId{786}, DataResidencyId{7807}));
+        run(OperationDescription{
+                OperationId{925},
+                {DataId{784}},
+                {DataId{786}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{2, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_MAX},
+            },
+            binding, ExecutionId{995});
+
+        binding = compute_on(gpu_compute);
+        binding.data.push_back(
+            entry(DataBindingRole::INPUT, DataId{784}, DataResidencyId{7805}));
+        binding.data.push_back(
+            entry(DataBindingRole::OUTPUT, DataId{787}, DataResidencyId{7808}));
+        run(OperationDescription{
+                OperationId{926},
+                {DataId{784}},
+                {DataId{787}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{2, 1, 0.0f, 0.5f, 0.0f, WorkForm::REDUCE_SUM},
+            },
+            binding, ExecutionId{996});
+
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{780}, DataResidencyId{7801}}, 0) == 2.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{782}, DataResidencyId{7803}}, 0) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{782}, DataResidencyId{7803}}, 1) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{783}, DataResidencyId{7804}}, 0) == 6.5f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{784}, DataResidencyId{7805}}, 0) == 14.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{785}, DataResidencyId{7806}}, 0) == 14.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{786}, DataResidencyId{7807}}, 0) == 14.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{787}, DataResidencyId{7808}}, 0) == 14.0f);
+        std::printf("tiny Vulkan: W=2 scores=6 biased=6.5 layer2=14 stats=14\n");
+        std::fflush(stdout);
+    }
+
     return 0;
 }
 
