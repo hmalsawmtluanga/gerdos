@@ -1,11 +1,40 @@
-# GERDOS Roadmap — Detailed Remaining Phases
+# GERDOS Roadmap — Phases 1–6 Complete, Next Steps Open
 
-Status: Phase 1 partially complete. Algebra comparison/selection forms
-landed (`3a04f80`); dtype breadth and composite work remain. Phases run
-in order; each phase's contract-first `docs:` commit precedes its `feat:`
-commit, every change stays green in `build/` and `build-release/` with
-zero warnings under `-Wall -Wextra -Wpedantic`, and every checkpoint
-leaves `git status --porcelain` empty on main.
+Status: all six phases landed on main (see per-phase commits below).
+Phases ran in order; each phase's contract-first `docs:` commit
+preceded its `feat:` commit, every change stayed green in `build/`
+and `build-release/` with zero warnings under `-Wall -Wextra
+-Wpedantic`, and every checkpoint left `git status --porcelain`
+empty on main. The phase sections below are the executed record —
+read them as history, not as plan.
+
+## Landed summary
+
+- **Phase 1 (algebra):** dtype breadth (F32/F16/I8, F32-compute
+  structure), comparison/selection forms, exponentials, reductions,
+  composite refusal with named gaps.
+- **Phase 2 (planning):** dependency scheduling, multi-attempt plans,
+  derived capacity, locality, per-comparison discovery with the
+  proven-incumbent bound.
+- **Phase 3 (backends):** Vulkan second family, tiled/vectorized
+  kernels, bounded worker pools on all engines.
+- **Phase 4 (workloads):** artifact format v1, staged weight rounds,
+  decoder-prefix translation with reference verification, thesis
+  verdict (proven where the algebra reaches).
+- **Phase 5 (hardening):** CI on hosted runners, packaging with
+  consumer smoke test, guides, recovery policy, skip-with-reason
+gates, runtime config.
+- **Phase 6 (ecosystem):** second consumer (signal chains), published
+  study with reproduction records, `pip install gerdos` 0.1.2 with
+  bundled native library.
+
+## Next (open)
+
+- Platform wheels (remove the compiler requirement for borrowers).
+- Physical small-board record (or borrower replies via
+  `docs/BORROWER_ASK.md`).
+- First outside contribution through the documented path.
+- `gerdos-micro` profile once board data dictates the cut list.
 
 Standing laws (not repeated per phase): no `OperationKind` — work stays
 parameters, never kinds; no gate inspects the work (pinned by test); no

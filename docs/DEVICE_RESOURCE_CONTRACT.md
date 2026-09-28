@@ -45,6 +45,12 @@ Resource kinds currently include:
 - `TRANSFER`
 - `SYNCHRONIZATION`
 
+`COMPUTE`, `MEMORY`, and `TRANSFER` are exercised by backends and
+pinned by tests. `STORAGE` and `SYNCHRONIZATION` are declared in the
+enum but unexercised: no backend homes them and no test pins their
+behavior beyond the spelling. Treat them as reserved names, not as
+working tiers, until a backend proves them.
+
 Physical connectivity such as PCIe or NVLink belongs to Topology, not
 automatically to Resource.
 

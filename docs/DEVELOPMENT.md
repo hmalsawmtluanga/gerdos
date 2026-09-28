@@ -35,20 +35,11 @@ documentation, experiments, or hardware measurements.
 
 ## Build and test discipline
 
-Configure and build:
-
-    cmake -S . -B build
-    cmake --build build
-
-Run the full suite in the default configuration and again in Release; the test
-harness is always-on, so both configurations must pass:
-
-    ctest --test-dir build
-    cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
-    cmake --build build-release
-    ctest --test-dir build-release
-
-Every change must leave both configurations green and warning-clean before it
-is committed. Tests are registered through `gerdos_add_test` in
-`CMakeLists.txt`; the runtime-integration policy is external synchronization,
-so tests are single-threaded by design.
+The canonical build-and-run path lives in `GETTING_STARTED.md` —
+follow it, not this section. In short: binaries run directly (hosted
+`ctest` hits an environmental `LastTest.log.tmp` read-only error
+unrelated to results, so `ctest` is CI-only); both configurations
+must pass with zero warnings before any commit. Tests are registered
+through `gerdos_add_test` in `CMakeLists.txt`; the
+runtime-integration policy is external synchronization, so tests are
+single-threaded by design.

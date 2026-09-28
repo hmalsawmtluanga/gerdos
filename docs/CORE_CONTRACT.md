@@ -21,6 +21,20 @@ The central architectural model is:
 
 GERDOS is an execution runtime, not a model implementation.
 
+## Contents
+
+- [1. Fundamental Rule](#1-fundamental-rule)
+- [2. Resource Graph](#2-resource-graph) · [3. Device](#3-device) · [4. Resource Types](#4-resource-types)
+- [5. Compute](#5-compute-resource) · [6. Memory](#6-memory-resource) · [7. Storage](#7-storage-resource)
+- [8. Topology](#8-topology) · [9. Transfer](#9-transfer-resource) · [10. Topology Graph](#10-topology-graph)
+- [11. Data](#11-data) · [12. Data Residency](#12-data-residency) · [13. Identity and Residency Contract](#13-data-identity-and-residency-contract)
+- [14. Operations](#14-operation-identity-and-contract)
+- [15. Execution](#15-execution) (admission, effects, backends, planning, worker pools, config, revival profile)
+- [16. Workload](#16-workload) (artifacts, decoder scope, second consumer)
+- [17. Model Boundary](#17-model-boundary) · [18. Backend Boundary](#18-backend-boundary)
+- [19–22. Planning, Computation, Capacity, Measurement](#19-execution-planning)
+- [23–30. Invariants, Leakage, Non-Goals, Objective](#23-resource-graph-vs-topology-graph)
+
 ---
 
 # 1. Fundamental Rule
