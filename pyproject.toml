@@ -18,7 +18,7 @@ gerdos = "gerdos:cli"
 where = ["python"]
 
 [tool.setuptools.package-data]
-gerdos = ["data/*.gwd", "native/*.so"]
+gerdos = ["data/*.gwd"]
 gerdos_native = ["*.so"]
 
 [tool.cibuildwheel]

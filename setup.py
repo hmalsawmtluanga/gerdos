@@ -11,8 +11,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from setuptools import setup
-from setuptools.command.build_py import build_py as _build_py
+from setuptools import Extension, setup
+from setuptools.command.build_ext import build_ext as _build_ext
 
 ROOT = Path(__file__).parent
 
@@ -57,13 +57,28 @@ def build_native_lib(destination):
     shutil.rmtree(build_dir, ignore_errors=True)
 
 
-class build_py(_build_py):
+# The native library ships as a real Extension artifact:
+# declaring ext_modules makes the wheel non-pure from the start with a
+# top-level platlib layout, which is what auditwheel accepts. The build
+# itself is CMake (no compiler is invoked by setuptools); the exact
+# ctypes filename is preserved by get_ext_filename.
+class cmake_ext(_build_ext):
     def run(self):
-        super().run()
         if os.environ.get("GERDOS_SKIP_NATIVE") == "1":
             return
-        native_dir = Path(self.build_lib) / "gerdos" / "native"
-        build_native_lib(native_dir)
+        build_native_lib(Path(self.build_lib) / "gerdos" / "native")
+        super().run()
+
+    def build_extension(self, ext):
+        # Already placed by run(); nothing to compile.
+        pass
+
+    def get_ext_filename(self, ext_name):
+        return os.path.join("gerdos", "native", "libgerdos_c.so")
 
 
-setup(version=read_version(), cmdclass={"build_py": build_py})
+setup(
+    version=read_version(),
+    ext_modules=[Extension("gerdos.native.libgerdos_c", sources=[])],
+    cmdclass={"build_ext": cmake_ext},
+)
