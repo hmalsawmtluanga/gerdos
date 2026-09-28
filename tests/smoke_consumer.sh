@@ -1,14 +1,14 @@
 #!/bin/sh
 # Consumer smoke test: the installable package must serve a find_package
 # consumer (headers + include path). Fails loudly on doubled trees or
-# empty include variables. Runs under ctest with the source dir as $1.
+# empty include variables. Runs under ctest with the build dir as $1.
 set -e
 SRC="$1"
 STAGE="${TMPDIR:-/tmp}/gerdos-smoke-stage"
 CONSUMER="${TMPDIR:-/tmp}/gerdos-smoke-consumer"
 BUILD="${TMPDIR:-/tmp}/gerdos-smoke-build"
 rm -rf "$STAGE" "$CONSUMER" "$BUILD"
-cmake --install "$SRC/build" --prefix "$STAGE" > /dev/null
+cmake --install "$SRC" --prefix "$STAGE" > /dev/null
 mkdir -p "$CONSUMER"
 cat > "$CONSUMER/CMakeLists.txt" <<EOF2
 cmake_minimum_required(VERSION 3.20)

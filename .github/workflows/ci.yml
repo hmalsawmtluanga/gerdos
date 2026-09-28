@@ -26,5 +26,18 @@ jobs:
           ${{ matrix.build_type }}
       - name: Build (zero warnings)
         run: cmake --build ${{ matrix.build_dir }} -j
+      - name: Report suite registration
+        run: >
+          ctest --test-dir ${{ matrix.build_dir }} -N |
+          tee /tmp/gerdos-suites.txt;
+          grep -c ": " /tmp/gerdos-suites.txt;
+          grep "hetero\|real_benchmark\|vk_compute\|demo" /tmp/gerdos-suites.txt ||
+          echo "NOTE: hardware suites unregistered (no toolchain) — not skipped, absent"
       - name: Test (hardware suites skip without devices)
         run: ctest --test-dir ${{ matrix.build_dir }} --output-on-failure
+      - name: Python driver (signal chain)
+        run: >
+          PYTHONPATH=${{ github.workspace }}/python
+          python3 -m gerdos
+          ${{ matrix.build_dir }}/libgerdos_c.so
+          workloads/signal_chain.gwd
