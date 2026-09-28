@@ -1234,6 +1234,23 @@ audited core — and the flagship backends are untouched behind it.
 A pure-C program (compiled with `cc`, not `c++`) runs the signal
 chain as the proof.
 
+## Python packaging and distributed bring-up
+
+`pip install gerdos` (Linux-only v1, source build) ships the shared
+`gerdos_c` library with the ctypes driver. Two commands turn any
+borrowed machine into a bring-up record without repo access or build
+knowledge:
+
+- `python -m gerdos selftest`: runs the hardware-free verification
+  through the installed package (artifact exact values, evidence
+  counts, NO_THREADS probe, refusal checks) and prints PASS/SKIP
+  per board with a reproduction header (CPU, RAM, OS, Python);
+- `python -m gerdos report`: dumps one markdown block — the
+  reproduction-table row for the study doc, pasted verbatim.
+
+Version wires to `version.hpp` (single source of truth). No compute
+in Python, ever — the driver loads, runs, and prints verdicts.
+
 ## Consumer smoke test
 
 The installable package is guarded by a consumer smoke test: configure
