@@ -175,6 +175,7 @@ struct ArtifactError {
     if (text == "ELEMENTWISE_MAX") return WorkForm::ELEMENTWISE_MAX;
     if (text == "MASK_SELECT") return WorkForm::MASK_SELECT;
     if (text == "GATHER") return WorkForm::GATHER;
+    if (text == "ELEMENTWISE_DIVIDE" || text == "DIVIDE") return WorkForm::ELEMENTWISE_DIVIDE;
     return std::nullopt;
 }
 

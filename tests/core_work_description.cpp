@@ -1753,10 +1753,160 @@ int main() {
             backend.sample(
                 DataResidencyRef{DataId{700}, DataResidencyId{7001}},
                 1) == 1.0f);
+
+        // -----------------------------------------------------------------
+        // 16. Division reads the scalar divisor at B[0]
+        // -----------------------------------------------------------------
+
+        // Seed the divisor record to a uniform 2: affine with no source
+        // term writes dst * 0 + 2 everywhere.
+        run(OperationDescription{
+                OperationId{838},
+                {},
+                {DataId{703}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 2.0f},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{703},
+                    DataResidencyId{7004})}),
+            ExecutionId{938});
+
+        // [6,1,1,1,1,1] / 2 = [3,0.5,...]: exact in binary, pinning the
+        // head element and the tail.
+        run(OperationDescription{
+                OperationId{839},
+                {DataId{700}, DataId{703}},
+                {DataId{705}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::ELEMENTWISE_DIVIDE},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                  data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{703},
+                    DataResidencyId{7004}),
+                  data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{705},
+                    DataResidencyId{7006})}),
+            ExecutionId{939});
+
+        std::printf(
+            "divide: %f %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 1),
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 5));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                0) == 3.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                1) == 0.5f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                5) == 0.5f);
+
+        // A zero divisor is IEEE arithmetic, not hostile content: 6/0 is
+        // positive infinity on every engine, pinned exactly.
+        run(OperationDescription{
+                OperationId{840},
+                {},
+                {DataId{703}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{703},
+                    DataResidencyId{7004})}),
+            ExecutionId{940});
+        run(OperationDescription{
+                OperationId{841},
+                {DataId{700}, DataId{703}},
+                {DataId{705}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::ELEMENTWISE_DIVIDE},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                  data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{703},
+                    DataResidencyId{7004}),
+                  data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{705},
+                    DataResidencyId{7006})}),
+            ExecutionId{941});
+
+        std::printf(
+            "divide by zero: %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}}, 0));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                0) == std::numeric_limits<float>::infinity());
+
+        // An aliased divisor writes nothing: dividing onto the divisor
+        // record itself leaves the infinity intact instead of computing
+        // 6 / inf = 0 over it.
+        run(OperationDescription{
+                OperationId{842},
+                {DataId{700}, DataId{705}},
+                {DataId{705}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::ELEMENTWISE_DIVIDE},
+            },
+            compute_binding(
+                {data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{700},
+                    DataResidencyId{7001}),
+                  data_binding(
+                    DataBindingRole::INPUT,
+                    DataId{705},
+                    DataResidencyId{7006}),
+                  data_binding(
+                    DataBindingRole::OUTPUT,
+                    DataId{705},
+                    DataResidencyId{7006})}),
+            ExecutionId{942});
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{705}, DataResidencyId{7006}},
+                0) == std::numeric_limits<float>::infinity());
     }
 
     // ---------------------------------------------------------------------
-    // 16. Dtypes: I8 exact, F16 within tolerance, mixed converts
+    // 17. Dtypes: I8 exact, F16 within tolerance, mixed converts
     // ---------------------------------------------------------------------
 
     {

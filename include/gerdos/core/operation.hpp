@@ -68,6 +68,11 @@ enum class WorkForm : std::uint8_t {
     // table, index table). Indices truncate toward zero and clamp into
     // the table range.
     GATHER,
+    // dst[i] = dst[i] * destination_scale + source_scale * (A[i] / B[0])
+    // + constant, elementwise over the first two consuming entries
+    // (dividend vector, scalar divisor at the first element). IEEE-754
+    // single-precision division with no special-casing.
+    ELEMENTWISE_DIVIDE,
 };
 
 // The element type of a declared computation: generic dtype vocabulary.
@@ -105,7 +110,8 @@ enum class WorkDtype : std::uint8_t {
 // mirrors it; the two-operand min/max forms read the first two consuming
 // entries; the predicate selection reads the first three (predicate, A,
 // B); the gather form reads the value table and the index table from the
-// first two. Gates never inspect the work; backends interpret it at the
+// first two; the division form divides A elementwise by the scalar at
+// B[0]. Gates never inspect the work; backends interpret it at the
 // seam.
 struct WorkDescription {
     std::size_t elements{0};
@@ -144,6 +150,7 @@ struct WorkDescription {
         case WorkForm::ELEMENTWISE_MAX:
         case WorkForm::MASK_SELECT:
         case WorkForm::GATHER:
+        case WorkForm::ELEMENTWISE_DIVIDE:
             return elements > 0 && passes > 0 && elements <= limit;
         case WorkForm::MATRIX_PRODUCT:
             return rows > 0 && inner > 0 && columns > 0 && passes > 0 &&
