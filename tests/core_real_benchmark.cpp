@@ -248,10 +248,12 @@ int main() {
     }
 
     std::printf(
-        "device: %s (%s)\n",
+        "device: %s (%s; max work-group %llu; tiling %s)\n",
         naive_backend.device_name().c_str(),
         naive_backend.on_cpu_device() ? "OpenCL CPU fallback"
-                                      : "OpenCL GPU");
+                                      : "OpenCL GPU",
+        (unsigned long long)naive_backend.max_work_group_size(),
+        naive_backend.tiled_matmul() ? "tiled" : "naive");
     staged.populate(naive_machine);
 
     // The baseline's evidence log records what happened; its planner never
@@ -295,10 +297,12 @@ int main() {
     }
 
     std::printf(
-        "device: %s (%s)\n",
+        "device: %s (%s; max work-group %llu; tiling %s)\n",
         informed_backend.device_name().c_str(),
         informed_backend.on_cpu_device() ? "OpenCL CPU fallback"
-                                         : "OpenCL GPU");
+                                         : "OpenCL GPU",
+        (unsigned long long)informed_backend.max_work_group_size(),
+        informed_backend.tiled_matmul() ? "tiled" : "naive");
     staged.populate(informed_machine);
 
     BindingPlanner informed_planner(

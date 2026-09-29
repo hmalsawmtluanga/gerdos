@@ -318,9 +318,9 @@ public:
         // Tiled matmul needs 16x16 work-groups: query capability once
         // and fall back to the naive kernel fail-closed where the
         // device cannot serve it.
-        std::size_t max_group = 0;
-        device_.getInfo(CL_DEVICE_MAX_WORK_GROUP_SIZE, &max_group);
-        tiled_ok_ = max_group >= 256;
+        max_group_ = 0;
+        device_.getInfo(CL_DEVICE_MAX_WORK_GROUP_SIZE, &max_group_);
+        tiled_ok_ = max_group_ >= 256;
 
         available_ = true;
     }
@@ -335,6 +335,17 @@ public:
 
     [[nodiscard]] bool on_cpu_device() const noexcept {
         return cpu_fallback_;
+    }
+
+    // Tiling inputs and verdict (see BACKEND_GUIDE section 6): the
+    // queried max work-group and whether tiled matmul serves this
+    // device. Zero max group means the engine never initialized.
+    [[nodiscard]] std::size_t max_work_group_size() const noexcept {
+        return max_group_;
+    }
+
+    [[nodiscard]] bool tiled_matmul() const noexcept {
+        return tiled_ok_;
     }
 
     // Scenario configuration: the attempt completes unsuccessfully.
@@ -2223,6 +2234,7 @@ private:
     bool cpu_fallback_{false};
     std::string device_name_{"(unknown)"};
     bool tiled_ok_{false};
+    std::size_t max_group_{0};
     cl::Device device_;
     cl::Context context_;
     cl::Program program_;

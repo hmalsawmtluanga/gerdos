@@ -159,9 +159,11 @@ int main() {
     }
 
     std::printf(
-        "device: %s (%s)\n",
+        "device: %s (%s; max work-group %llu; tiling %s)\n",
         backend.device_name().c_str(),
-        backend.on_cpu_device() ? "OpenCL CPU fallback" : "OpenCL GPU");
+        backend.on_cpu_device() ? "OpenCL CPU fallback" : "OpenCL GPU",
+        (unsigned long long)backend.max_work_group_size(),
+        backend.tiled_matmul() ? "tiled" : "naive");
 
     BindingPlanner planner(
         machine.devices,
@@ -1919,9 +1921,10 @@ int main() {
                 DataResidencyRef{DataId{765}, DataResidencyId{7606}},
                 127 * 128 + 127) == 128.0f);
         std::printf(
-            "tiled 128x128x128: %llu ns (%s; values 128 exact)\n",
+            "tiled 128x128x128: %llu ns (%s; tiling %s; values 128 exact)\n",
             (unsigned long long)big_done.front().duration_ns,
-            backend.device_name().c_str());
+            backend.device_name().c_str(),
+            backend.tiled_matmul() ? "tiled" : "naive");
         std::fflush(stdout);
     }
 
