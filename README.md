@@ -41,3 +41,57 @@ Early architectural development.
 
 The project is intentionally being built from a minimal foundation rather than
 starting with model-specific or hardware-specific assumptions.
+
+---
+
+## Quickstart
+
+Requires CMake 3.20+, a C++20 compiler, and Ninja (or your generator of
+choice). Python 3.10+ only for the `gerdos` driver/wheels.
+
+### Linux
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+Both configs must be green with zero warnings under
+`-Wall -Wextra -Wpedantic`. Hardware suites print `SKIP: ...` and exit
+green when no device is present — that is the hardware gate working,
+not a failure. Full walkthrough: `docs/GETTING_STARTED.md`.
+
+### Windows (MSVC developer prompt)
+
+`cmake`/`ctest` are not on a plain PowerShell `PATH`; run everything
+inside one `VsDevCmd` session:
+
+```bat
+VsDevCmd.bat -arch=amd64
+cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -S . -B build-win
+cmake --build build-win
+ctest --test-dir build-win --output-on-failure
+```
+
+With the Vulkan SDK installed (`VULKAN_SDK` set), the Vulkan compute
+backend test registers and runs; without it, it is absent-by-design.
+OpenCL needs a vendor ICD or it stays unregistered. Same green-tree
+rule, `/W4`, zero warnings.
+
+### Python wheels
+
+```bash
+pip install gerdos
+python -m gerdos selftest
+```
+
+Manylinux x86_64/aarch64 wheels (CPython 3.10–3.13) self-test on the
+spot with no repo, no compiler, no env vars.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE). Version is single-sourced from
+`include/gerdos/version.hpp` (currently 0.1.2).
