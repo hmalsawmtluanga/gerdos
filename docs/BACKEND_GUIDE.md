@@ -57,7 +57,18 @@ verifies the engine (submission, staging, kernels, dispatch) — it
 never substantiates silicon claims: every runner prints the device
 name and kind, and hardware-matrix rows record which kind ran.
 
-## 7. Checklist
+## 7. Hardware census
+
+`hw/census.hpp` describes the machine without claiming it: CPU thread
+count and RAM bytes are always collected; OpenCL platforms and devices
+(name, vendor, version, global bytes, max work-group, GPU/CPU kind) are
+enumerated only when the toolchain exists (`GERDOS_HAS_OPENCL`). The
+census never fails and never substitutes invented devices — without a
+toolchain the device list is empty. Runners print the census before
+asserting, and hardware-matrix rows cite it instead of hand-typed
+machine lore.
+
+## 8. Checklist
 
 - [ ] rejection-atomic submit with undo
 - [ ] shared storage ownership, teardown order
