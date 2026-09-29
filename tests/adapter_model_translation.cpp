@@ -354,5 +354,93 @@ int main() {
         GERDOS_CHECK(chain.workload.operations[1].inputs[0] == DataId{701});
     }
 
+    // ---------------------------------------------------------------------
+    // 4. The second tiny model: gated selection over fresh-1.0 storage
+    // ---------------------------------------------------------------------
+
+    {
+        // Fold a table in place, bound it against a uniform partner,
+        // gate by predicate, gather by computed index, reduce the
+        // pick. The pick-decision (ARGMAX) is refused by name — the
+        // same thesis symmetry as the first tiny model.
+        const std::vector<ModelStep> gated{
+            ModelStep{ModelOp::AFFINE, 201, 0, 0, 201, 6, 0, 0, 0.0f, 0.0f, 2.0f},
+            ModelStep{ModelOp::REDUCE_SUM, 200, 0, 0, 200, 6},
+            ModelStep{ModelOp::REDUCE_MIN, 200, 0, 0, 208, 6},
+            ModelStep{ModelOp::ELEMENTWISE_MAX, 200, 201, 0, 202, 6},
+            ModelStep{ModelOp::ELEMENTWISE_MIN, 200, 201, 0, 203, 6},
+            ModelStep{ModelOp::AFFINE, 200, 0, 0, 205, 6, 0, 0, 0.0f, 1.0f, -1.0f},
+            ModelStep{ModelOp::MASK_SELECT, 205, 200, 201, 204, 6},
+            ModelStep{ModelOp::AFFINE, 200, 0, 0, 206, 6, 0, 0, 0.0f, 1.0f, -1.0f},
+            ModelStep{ModelOp::GATHER, 200, 206, 0, 207, 6},
+            ModelStep{ModelOp::REDUCE_MAX, 207, 0, 0, 209, 6},
+            ModelStep{ModelOp::REDUCE_MIN, 207, 0, 0, 210, 6},
+            ModelStep{ModelOp::REDUCE_SUM, 207, 0, 0, 211, 6},
+            ModelStep{ModelOp::ARGMAX, 207, 0, 0, 212, 6},
+        };
+
+        const Adaptation gated_adaptation = adapt("gated selector", gated);
+        GERDOS_CHECK(gated_adaptation.workload.name == "gated selector");
+        GERDOS_CHECK(gated_adaptation.workload.operations.size() == 12);
+        GERDOS_CHECK(gated_adaptation.refused.size() == 1);
+        GERDOS_CHECK(gated_adaptation.refused[0].find("ARGMAX") == 0);
+
+        const auto& fill = gated_adaptation.workload.operations[0];
+        GERDOS_CHECK(fill.work.form == WorkForm::ELEMENTWISE_AFFINE);
+        GERDOS_CHECK(fill.work.elements == 6);
+        GERDOS_CHECK(fill.work.destination_scale == 0.0f);
+        GERDOS_CHECK(fill.work.source_scale == 0.0f);
+        GERDOS_CHECK(fill.work.constant == 2.0f);
+
+        const auto& fold = gated_adaptation.workload.operations[1];
+        GERDOS_CHECK(fold.work.form == WorkForm::REDUCE_SUM);
+        GERDOS_CHECK(fold.inputs[0] == DataId{200});
+        GERDOS_CHECK(fold.outputs[0] == DataId{200});
+
+        const auto& table_floor = gated_adaptation.workload.operations[2];
+        GERDOS_CHECK(table_floor.work.form == WorkForm::REDUCE_MIN);
+        GERDOS_CHECK(table_floor.outputs[0] == DataId{208});
+
+        const auto& hi = gated_adaptation.workload.operations[3];
+        GERDOS_CHECK(hi.work.form == WorkForm::ELEMENTWISE_MAX);
+        GERDOS_CHECK(hi.inputs.size() == 2);
+        GERDOS_CHECK(hi.inputs[0] == DataId{200});
+        GERDOS_CHECK(hi.inputs[1] == DataId{201});
+
+        const auto& lo = gated_adaptation.workload.operations[4];
+        GERDOS_CHECK(lo.work.form == WorkForm::ELEMENTWISE_MIN);
+        GERDOS_CHECK(lo.inputs.size() == 2);
+
+        const auto& pred = gated_adaptation.workload.operations[5];
+        GERDOS_CHECK(pred.work.form == WorkForm::ELEMENTWISE_AFFINE);
+        GERDOS_CHECK(pred.work.constant == -1.0f);
+
+        const auto& gate = gated_adaptation.workload.operations[6];
+        GERDOS_CHECK(gate.work.form == WorkForm::MASK_SELECT);
+        GERDOS_CHECK(gate.inputs.size() == 3);
+        GERDOS_CHECK(gate.inputs[0] == DataId{205});
+        GERDOS_CHECK(gate.outputs[0] == DataId{204});
+
+        const auto& picked = gated_adaptation.workload.operations[8];
+        GERDOS_CHECK(picked.work.form == WorkForm::GATHER);
+        GERDOS_CHECK(picked.inputs.size() == 2);
+        GERDOS_CHECK(picked.inputs[0] == DataId{200});
+        GERDOS_CHECK(picked.inputs[1] == DataId{206});
+        GERDOS_CHECK(picked.outputs[0] == DataId{207});
+
+        const auto& pick_peak = gated_adaptation.workload.operations[9];
+        GERDOS_CHECK(pick_peak.work.form == WorkForm::REDUCE_MAX);
+        GERDOS_CHECK(pick_peak.outputs[0] == DataId{209});
+
+        const auto& total = gated_adaptation.workload.operations[11];
+        GERDOS_CHECK(total.work.form == WorkForm::REDUCE_SUM);
+        GERDOS_CHECK(total.inputs[0] == DataId{207});
+        GERDOS_CHECK(total.outputs[0] == DataId{211});
+
+        // Untyped steps default to F32.
+        GERDOS_CHECK(
+            gated_adaptation.workload.operations[11].work.dtype == WorkDtype::F32);
+    }
+
     return 0;
 }
