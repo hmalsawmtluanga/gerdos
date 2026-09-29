@@ -1252,6 +1252,13 @@ audited core — and the flagship backends are untouched behind it.
 A pure-C program (compiled with `cc`, not `c++`) runs the signal
 chain as the proof.
 
+Symbol export is part of the boundary: every C ABI function is
+declared with `GERDOS_API`, an explicit-export annotation for
+toolchains that hide symbols by default. The shared `gerdos_c`
+library therefore always produces a linkable import library on
+Windows; consumers link the library, never the objects. The header
+stays the whole contract — no separate export list.
+
 ## Python packaging and distributed bring-up
 
 `pip install gerdos` (Linux-only v1, source build) ships the shared
