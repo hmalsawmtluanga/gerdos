@@ -235,7 +235,15 @@ struct ArtifactParse {
         }
 
         ++line_number;
-        const auto words = split_words(document.substr(pos, end - pos));
+        std::string_view line = document.substr(pos, end - pos);
+
+        // Text-format law: one trailing CR per line is a CRLF twin,
+        // stripped before any other rule runs.
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+
+        const auto words = split_words(line);
         pos = end + 1;
 
         if (words.empty()) {

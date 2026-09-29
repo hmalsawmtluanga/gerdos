@@ -55,6 +55,12 @@ struct ConfigParse {
         std::string_view line = document.substr(pos, end - pos);
         pos = end + 1;
 
+        // Text-format law: one trailing CR per line is a CRLF twin,
+        // stripped before any other rule runs (a lone CR line is blank).
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+
         std::size_t start = 0;
 
         while (start < line.size() && (line[start] == ' ' || line[start] == '\t')) {
