@@ -111,7 +111,7 @@ public:
                     fresh.bytes = bytes;
                     fresh.storage =
                         std::make_shared<std::vector<unsigned char>>(
-                            bytes, 0);
+                            bytes, static_cast<unsigned char>(0));
                     // Fresh storage decodes to F32 1.0 per element — the
                     // same initial value the F32 path always had.
                     std::vector<float> ones(work.storage_elements(), 1.0f);

@@ -241,7 +241,7 @@ public:
         if (it->second.on_device) {
             std::vector<float> working(it->second.bytes / width, 0.0f);
             download(it->second.device, working.data(), working.size());
-            std::vector<unsigned char> raw(it->second.bytes, 0);
+            std::vector<unsigned char> raw(it->second.bytes, static_cast<unsigned char>(0));
             encode_all(it->second.dtype, working.data(), raw.data(), working.size());
             return decode_element(it->second.dtype, raw.data(), index);
         }
@@ -262,8 +262,8 @@ public:
             return false;
         }
 
-        std::vector<unsigned char> left_raw(left_it->second.bytes, 0);
-        std::vector<unsigned char> right_raw(right_it->second.bytes, 0);
+        std::vector<unsigned char> left_raw(left_it->second.bytes, static_cast<unsigned char>(0));
+        std::vector<unsigned char> right_raw(right_it->second.bytes, static_cast<unsigned char>(0));
         read(left, left_raw.data());
         read(right, right_raw.data());
 
@@ -934,7 +934,7 @@ private:
             fresh.dtype = dtype;
             fresh.bytes = bytes;
             fresh.host = std::make_shared<std::vector<unsigned char>>(
-                bytes, 0);
+                bytes, static_cast<unsigned char>(0));
             std::vector<float> ones(bytes / dtype_bytes(dtype), 1.0f);
             encode_all(dtype, ones.data(), fresh.host->data(), ones.size());
 

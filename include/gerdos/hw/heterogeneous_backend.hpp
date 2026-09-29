@@ -505,7 +505,7 @@ public:
         if (it->second.on_device) {
             std::vector<float> working(bytes / width, 0.0f);
             read_device(ref, reinterpret_cast<unsigned char*>(working.data()));
-            std::vector<unsigned char> raw(bytes, 0);
+            std::vector<unsigned char> raw(bytes, static_cast<unsigned char>(0));
             encode_all(it->second.dtype, working.data(), raw.data(), working.size());
             return decode_element(it->second.dtype, raw.data(), index);
         }
@@ -592,7 +592,7 @@ private:
             fresh.bytes = bytes;
 
             fresh.host =
-                std::make_shared<std::vector<unsigned char>>(bytes, 0);
+                std::make_shared<std::vector<unsigned char>>(bytes, static_cast<unsigned char>(0));
             std::vector<float> ones(bytes / dtype_bytes(dtype), 1.0f);
             encode_all(dtype, ones.data(), fresh.host->data(), ones.size());
 
