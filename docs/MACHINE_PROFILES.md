@@ -106,3 +106,27 @@ Floor-vs-ceiling note: the Mint i3-8100 comparison is deferred —
 that machine is not available. When it is: pull `db54a8a`,
 rebuild, and record the same three numbers for a two-column
 table here.
+
+### Constraint rehearsal (this machine, 2026-09-29)
+
+The study's dress rehearsal, reproduced on the ceiling at
+`2f15031` — the revival claim proven by constraint, not hardware:
+
+- 2 CPUs (affinity mask `0x3`): 29/29 in 1.07 s total,
+  `vk_compute` 0.57 s. No slowdown vs unconstrained.
+- 1 CPU (mask `0x1`): 29/29 in 2.45 s total,
+  `vk_compute` 0.55 s — the CPU-side tests serialize, the GPU
+  part does not move. Device work is invariant under host
+  starvation.
+- `GERDOS_NO_THREADS` (inline pool, zero threads, separate
+  `build-win-nothreads/`, Release, `/W4` zero warnings):
+  29/29 in 1.86 s wall; every vk value byte-identical to the
+  threaded build (`404.428680`, tiled `102`s, tiny chain
+  `W=2 scores=6 biased=6.5 layer2=14 stats=14`).
+
+The 2 excluded tests in each row are the known environmental
+Not-Runs (no `sh.exe`, no Python), unrelated to constraint.
+Method note: `-DCMAKE_CXX_FLAGS=` on the cmake line overwrites
+CMake's MSVC defaults, so `/DWIN32 /D_WINDOWS /EHsc` had to be
+restated alongside `/DGERDOS_NO_THREADS` — without it the build
+emits 14 unrelated C4530s.
