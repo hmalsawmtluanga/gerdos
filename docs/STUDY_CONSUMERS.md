@@ -69,7 +69,12 @@ hosted CI (in-container selftest per wheel).
 7 observations. The decision is refused (`ARGMAX`: reductions
 report extreme values, never which index holds them). The run also
 pins the surplus rule: record 102 is sized 6 by its matmul producer
-and read by a 2-wide consumer without data loss.
+and read by a 2-wide consumer without data loss. The same shapes run
+hand-bound on the OpenCL (UHD 630) and Vulkan engines with identical
+exact values — the surplus rule holds on all three engines. (Cold
+planner runs pick host compute by identifier tie-break; GPU routing
+arrives via measured means, as the demo proves — execution proof
+here is hand-bound by design.)
 
 ## Standing caveats
 
