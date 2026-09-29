@@ -1,0 +1,63 @@
+# Tiny gated selector: the second honest model. Fresh allocations
+# decode to 1.0, so every value below is closed-form exact.
+# P = 0*P + 2.0; T folds in place to [6,1,1,1,1,1];
+# hi = max(T,P) = [6,2,2,2,2,2]; lo = min(T,P) = [2,1,1,1,1,1];
+# pred = T-1 = [5,0,0,0,0,0]; gate = select(pred,T,P) = [6,2,2,2,2,2];
+# idx = T-1 = [5,0,0,0,0,0]; picked = gather(T,idx) = [1,6,6,6,6,6];
+# peak = 6; floor = 1; total = 1+6*5 = 31. The pick-decision
+# (which entry) has no form and is refused at the adapter as ARGMAX.
+version 1
+workload tiny-gated-selector
+
+data 200 table
+residency 200 2001 100 101 table
+usable 200 2001
+data 201 partner
+residency 201 2002 100 101 partner
+usable 201 2002
+data 202 hi
+residency 202 2003 100 101 hi
+usable 202 2003
+
+data 203 lo
+residency 203 2004 100 101 lo
+usable 203 2004
+data 204 gate
+residency 204 2005 100 101 gate
+usable 204 2005
+data 205 pred
+residency 205 2006 100 101 pred
+usable 205 2006
+
+data 206 idx
+residency 206 2007 100 101 idx
+usable 206 2007
+data 207 picked
+residency 207 2008 100 101 picked
+usable 207 2008
+data 208 floor
+residency 208 2009 100 101 floor
+usable 208 2009
+
+data 209 peak
+residency 209 2010 100 101 peak
+usable 209 2010
+data 210 floor2
+residency 210 2011 100 101 floor2
+usable 210 2011
+data 211 total
+residency 211 2012 100 101 total
+usable 211 2012
+
+op 910 inputs=201 outputs=201 deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=6 passes=1 ds=0 ss=0 c=2
+op 911 inputs=200 outputs=200 deps=910 req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 912 inputs=200 outputs=208 deps=911 req=COMPUTE:1 form=REDUCE_MIN dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 913 inputs=200,201 outputs=202 deps=912 req=COMPUTE:1 form=ELEMENTWISE_MAX dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 914 inputs=200,201 outputs=203 deps=913 req=COMPUTE:1 form=ELEMENTWISE_MIN dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 915 inputs=200 outputs=205 deps=914 req=COMPUTE:1 form=AFFINE dtype=F32 elements=6 passes=1 ds=0 ss=1 c=-1
+op 916 inputs=205,200,201 outputs=204 deps=915 req=COMPUTE:1 form=MASK_SELECT dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 917 inputs=200 outputs=206 deps=916 req=COMPUTE:1 form=AFFINE dtype=F32 elements=6 passes=1 ds=0 ss=1 c=-1
+op 918 inputs=200,206 outputs=207 deps=917 req=COMPUTE:1 form=GATHER dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 919 inputs=207 outputs=209 deps=918 req=COMPUTE:1 form=REDUCE_MAX dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 920 inputs=207 outputs=210 deps=919 req=COMPUTE:1 form=REDUCE_MIN dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
+op 921 inputs=207 outputs=211 deps=920 req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
