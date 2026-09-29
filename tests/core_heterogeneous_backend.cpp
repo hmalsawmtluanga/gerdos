@@ -158,6 +158,11 @@ int main() {
         return 0;
     }
 
+    std::printf(
+        "device: %s (%s)\n",
+        backend.device_name().c_str(),
+        backend.on_cpu_device() ? "OpenCL CPU fallback" : "OpenCL GPU");
+
     BindingPlanner planner(
         machine.devices,
         machine.data,
@@ -1914,8 +1919,9 @@ int main() {
                 DataResidencyRef{DataId{765}, DataResidencyId{7606}},
                 127 * 128 + 127) == 128.0f);
         std::printf(
-            "tiled 128x128x128: %llu ns (UHD 630 OpenCL; values 128 exact)\n",
-            (unsigned long long)big_done.front().duration_ns);
+            "tiled 128x128x128: %llu ns (%s; values 128 exact)\n",
+            (unsigned long long)big_done.front().duration_ns,
+            backend.device_name().c_str());
         std::fflush(stdout);
     }
 

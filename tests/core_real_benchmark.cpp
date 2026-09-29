@@ -246,6 +246,12 @@ int main() {
         std::printf("SKIP: no OpenCL GPU device\n");
         return 0;
     }
+
+    std::printf(
+        "device: %s (%s)\n",
+        naive_backend.device_name().c_str(),
+        naive_backend.on_cpu_device() ? "OpenCL CPU fallback"
+                                      : "OpenCL GPU");
     staged.populate(naive_machine);
 
     // The baseline's evidence log records what happened; its planner never
@@ -287,6 +293,12 @@ int main() {
         std::printf("SKIP: no OpenCL GPU device\n");
         return 0;
     }
+
+    std::printf(
+        "device: %s (%s)\n",
+        informed_backend.device_name().c_str(),
+        informed_backend.on_cpu_device() ? "OpenCL CPU fallback"
+                                         : "OpenCL GPU");
     staged.populate(informed_machine);
 
     BindingPlanner informed_planner(

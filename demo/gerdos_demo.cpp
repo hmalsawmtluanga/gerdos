@@ -389,13 +389,19 @@ int main() {
             std::printf("SKIP: no OpenCL GPU device\n");
             return 0;
         }
+
+        std::printf(
+            "device: %s (%s)\n",
+            probe.device_name().c_str(),
+            probe.on_cpu_device() ? "OpenCL CPU fallback" : "OpenCL GPU");
     }
 
     const Workload workload = staged_workload();
 
     std::printf("GERDOS - end-to-end demonstration\n");
     std::printf(
-        "machine: host CPU engine + accelerator GPU engine (OpenCL)\n");
+        "machine: host CPU engine + OpenCL device engine "
+        "(GPU preferred, CPU fallback)\n");
     std::printf(
         "workload '%s': %zu units, each stages 1 MB then computes "
         "1 MB x 64 passes\n",

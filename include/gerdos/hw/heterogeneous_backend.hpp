@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <future>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -66,13 +67,27 @@ public:
 
         std::vector<cl::Device> devices;
 
+        // Prefer a GPU device; fall back to a CPU device on the same
+        // platform so the engine still verifies end-to-end where no
+        // GPU exists (see BACKEND_GUIDE.md section 6). The fallback
+        // never substantiates silicon claims: runners print which
+        // kind served.
         if (platforms.front().getDevices(
                 CL_DEVICE_TYPE_GPU, &devices) != CL_SUCCESS ||
             devices.empty()) {
-            return;
+            devices.clear();
+
+            if (platforms.front().getDevices(
+                    CL_DEVICE_TYPE_CPU, &devices) != CL_SUCCESS ||
+                devices.empty()) {
+                return;
+            }
+
+            cpu_fallback_ = true;
         }
 
         device_ = devices.front();
+        device_.getInfo(CL_DEVICE_NAME, &device_name_);
         context_ = cl::Context(device_);
         program_ = cl::Program(
             context_,
@@ -312,6 +327,14 @@ public:
 
     [[nodiscard]] bool gpu_available() const noexcept {
         return available_;
+    }
+
+    [[nodiscard]] const std::string& device_name() const noexcept {
+        return device_name_;
+    }
+
+    [[nodiscard]] bool on_cpu_device() const noexcept {
+        return cpu_fallback_;
     }
 
     // Scenario configuration: the attempt completes unsuccessfully.
@@ -2197,6 +2220,8 @@ private:
     const DataRegistry& data_;
     DeviceId accelerator_;
     bool available_{false};
+    bool cpu_fallback_{false};
+    std::string device_name_{"(unknown)"};
     bool tiled_ok_{false};
     cl::Device device_;
     cl::Context context_;
