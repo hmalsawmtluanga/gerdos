@@ -551,6 +551,35 @@ private:
                 continue;
             }
 
+            if (work.form == WorkForm::ELEMENTWISE_DIVIDE) {
+                if (consuming.size() < 2 ||
+                    binding.data[consuming[0]].residency.data ==
+                        binding.data[out].residency.data ||
+                    binding.data[consuming[1]].residency.data ==
+                        binding.data[out].residency.data) {
+                    continue;
+                }
+
+                const float* dividend = f32[consuming[0]];
+                // The divisor is a scalar carried at the first element of
+                // the second operand: neither record aliases the
+                // destination, so it is stable across passes. IEEE-754
+                // single-precision division, no special-casing — a zero
+                // divisor yields infinity exactly like the contract says.
+                const float divisor = f32[consuming[1]][0];
+
+                for (std::size_t pass = 0; pass < work.passes; ++pass) {
+                    for (std::size_t i = 0; i < work.elements; ++i) {
+                        destination[i] =
+                            destination[i] * work.destination_scale +
+                            (dividend[i] / divisor) * work.source_scale +
+                            work.constant;
+                    }
+                }
+
+                continue;
+            }
+
             if (work.form == WorkForm::EXPONENTIAL) {
                 if (!has_source) {
                     continue;
