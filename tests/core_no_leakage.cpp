@@ -52,7 +52,9 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        const auto path = entry.path().string();
+        // generic_string: forward slashes on every platform, so the
+        // "/core/" and "/adapters/" guards match on Windows too.
+        const auto path = entry.path().generic_string();
         const bool in_core = path.find("/core/") != std::string::npos;
         const bool in_adapters =
             path.find("/adapters/") != std::string::npos;
