@@ -91,3 +91,18 @@ lives in its documented lane — the test computes the expectation with
 host `std::exp` and allows 1e-4 relative for GPU `exp`
 implementation differences. Observed: `404.428680` vs `404.428802`
 (3e-7 relative, ~330x inside the allowance).
+
+### Ceiling benchmark (this machine, 2026-09-29, wall time)
+
+`gerdos_core_cpu_backend`: ~10 ms Release (12.0 / 9.2 / 9.5),
+40.3 ms Debug. `gerdos_core_vk_compute`: ~530-560 ms in both
+configs (558.6 / 531.8 / 529.3 Release, 551.7 Debug) — dominated
+by Vulkan instance/device/pipeline setup, which is why the host
+build type barely moves it. Full `ctest`: 29/31 in ~1.1 s in
+both configs; the 2 gaps are the known environmental Not-Runs
+(no `sh.exe`, no Python), identical in Release and Debug.
+
+Floor-vs-ceiling note: the Mint i3-8100 comparison is deferred —
+that machine is not available. When it is: pull `db54a8a`,
+rebuild, and record the same three numbers for a two-column
+table here.
