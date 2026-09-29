@@ -58,14 +58,36 @@ real-benchmark binary, and `gerdos_demo` (all inside the
 `OpenCL_FOUND` block in `CMakeLists.txt`) stay unregistered here.
 **Vulkan is this machine's GPU story; OpenCL is documented absence.**
 
-### Vulkan path (this machine, pending SDK)
+### Vulkan path (this machine, SDK installed, first silicon run green)
 
-Driver and loader present; only the toolchain (headers +
-`vulkan-1.lib`) is missing, so `gerdos_core_vk_compute` does not
-register yet. No shader rebuild is needed: all 13 compute shaders
-(including `matmul` and `matmul_tile`) are pre-embedded as SPIR-V in
-`include/gerdos/vk/vk_shaders.hpp` with a documented regenerate path.
-Next step: install the Vulkan SDK, reconfigure, and run the
-hardware-backed suites (plan Phase 3). Census reports:
-`build-win/scratch/vulkaninfo-{summary,full}.txt` (ignored scratch,
-not committed).
+Vulkan SDK 1.4.363.0 installed 2026-09-29; `gerdos_core_vk_compute`
+registers and passes in Release and Debug with zero warnings under
+`/W4`: suite 29/31, vk test 0.54 s, values byte-identical across
+configs. No shader rebuild was needed — all 13 compute shaders are
+pre-embedded as SPIR-V in `include/gerdos/vk/vk_shaders.hpp`. Census
+reports: `build-win/scratch/vulkaninfo-{summary,full}.txt`,
+`vk-first-run.log`, `vk-debug-run.log` (ignored scratch, not committed).
+
+### Silicon dispatch record (RX 6700 XT, 2026-09-29)
+
+Dispatched and verified on silicon: `FillVec` (fill seeds), affine via
+`TransformVec` (exact 2.0), `ReduceSum` (f32 and I8, exact 6.0),
+`ReduceMinmax` (max and min, exact), `ExponentialVec`,
+`MatmulTile` for all three tested shapes (2x3x2, 2x3x1, tiled
+17x17x17 — all exact), `ElementwiseMinmax`, `MaskSelect`, `Gather`,
+and the composed tiny-classifier chain (`W=2 scores=6 biased=6.5
+layer2=14 stats=14`).
+
+NOT dispatched on this run (pipelines created at init, never
+selected): the scalar `Transform` / `Exponential` / `Fill` shaders —
+dispatch always takes the `_vec` variants — and the plain `Matmul`
+shader, because the tiled branch is always taken while
+`maxWorkGroup (1024) >= 256`. They are compiled, not executed: a
+regression that breaks them would surface only on hardware taking
+those branches.
+
+Parity note: every exact-equality check bit-matches. The exponential
+lives in its documented lane — the test computes the expectation with
+host `std::exp` and allows 1e-4 relative for GPU `exp`
+implementation differences. Observed: `404.428680` vs `404.428802`
+(3e-7 relative, ~330x inside the allowance).
