@@ -56,6 +56,11 @@ CPU device on the same platform when no GPU exists. The fallback
 verifies the engine (submission, staging, kernels, dispatch) — it
 never substantiates silicon claims: every runner prints the device
 name and kind, and hardware-matrix rows record which kind ran.
+Tiled matmul needs 16x16 work-groups: the engine serves it only when
+the device reports max work-group >= 256 and takes the naive kernel
+fail-closed otherwise. The decision table stays in the
+implementation; the inputs and the verdict are observable via
+`max_work_group_size()` / `tiled_matmul()`, which runners print.
 
 ## 7. Hardware census
 
