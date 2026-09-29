@@ -438,9 +438,9 @@ int main() {
     // ---------------------------------------------------------------------
 
     {
-        Machine machine;
+        Machine alias_machine;
 
-        (void)machine.data.find_data(DataId{501})->add_residency(
+        (void)alias_machine.data.find_data(DataId{501})->add_residency(
             DataResidency{
                 DataResidencyDescription{
                     DataResidencyId{5102},
@@ -451,7 +451,7 @@ int main() {
             });
 
         // An in-place update consumes a usable record.
-        (void)machine.data.find_data(DataId{501})
+        (void)alias_machine.data.find_data(DataId{501})
             ->find_residency(DataResidencyId{5102})
             ->set_state(DataResidencyState::VALID);
 
@@ -469,15 +469,15 @@ int main() {
             WorkDescription{4, 2, 1.0f, 2.0f, 0.0f},
         };
 
-        (void)machine.operations.create_operation(in_place);
+        (void)alias_machine.operations.create_operation(in_place);
 
         CpuBackend backend;
 
         Executor executor(
-            machine.executions,
-            machine.operations,
-            machine.devices,
-            machine.data,
+            alias_machine.executions,
+            alias_machine.operations,
+            alias_machine.devices,
+            alias_machine.data,
             backend);
 
         PhysicalBinding binding;
@@ -499,7 +499,7 @@ int main() {
                 ResourceRef{DeviceId{100}, ResourceId{102}},
             });
 
-        auto* execution = machine.executions.create_execution(
+        auto* execution = alias_machine.executions.create_execution(
             ExecutionDescription{ExecutionId{906}, OperationId{806}});
 
         GERDOS_CHECK(execution->bind(binding));
@@ -523,7 +523,7 @@ int main() {
     // ---------------------------------------------------------------------
 
     {
-        Machine machine;
+        Machine inflight_machine;
 
         OperationDescription slow{
             OperationId{807},
@@ -547,8 +547,8 @@ int main() {
             WorkDescription{4, 1, 0.0f, 1.0f, 0.0f},
         };
 
-        (void)machine.operations.create_operation(slow);
-        (void)machine.operations.create_operation(quick);
+        (void)inflight_machine.operations.create_operation(slow);
+        (void)inflight_machine.operations.create_operation(quick);
 
         CpuBackend backend;
 
@@ -622,9 +622,9 @@ int main() {
     // ---------------------------------------------------------------------
 
     {
-        Machine machine;
+        Machine reduction_machine;
 
-        auto* source = machine.data.create_data(
+        auto* source = reduction_machine.data.create_data(
             DataDescription{DataId{700}, "source"});
         (void)source->add_residency(
             DataResidency{
@@ -636,7 +636,7 @@ int main() {
                 },
             });
 
-        auto* partial = machine.data.create_data(
+        auto* partial = reduction_machine.data.create_data(
             DataDescription{DataId{701}, "partial"});
         (void)partial->add_residency(
             DataResidency{
@@ -648,7 +648,7 @@ int main() {
                 },
             });
 
-        auto* product = machine.data.create_data(
+        auto* product = reduction_machine.data.create_data(
             DataDescription{DataId{702}, "product"});
         (void)product->add_residency(
             DataResidency{
@@ -786,9 +786,9 @@ int main() {
     // ---------------------------------------------------------------------
 
     {
-        Machine machine;
+        Machine exponential_machine;
 
-        auto* source = machine.data.create_data(
+        auto* source = exponential_machine.data.create_data(
             DataDescription{DataId{700}, "source"});
         (void)source->add_residency(
             DataResidency{
@@ -800,7 +800,7 @@ int main() {
                 },
             });
 
-        auto* peak = machine.data.create_data(
+        auto* peak = exponential_machine.data.create_data(
             DataDescription{DataId{701}, "peak"});
         (void)peak->add_residency(
             DataResidency{
@@ -812,7 +812,7 @@ int main() {
                 },
             });
 
-        auto* raised = machine.data.create_data(
+        auto* raised = exponential_machine.data.create_data(
             DataDescription{DataId{702}, "raised"});
         (void)raised->add_residency(
             DataResidency{
@@ -1046,7 +1046,7 @@ int main() {
     // ---------------------------------------------------------------------
 
     {
-        Machine machine;
+        Machine comparison_machine;
 
         // Seven six-element records, all host-homed. Seeds are chosen so
         // every check below discriminates the form it exercises from its
@@ -1058,7 +1058,7 @@ int main() {
         // clamping. Every record stays six elements wide: allocations
         // are sized by the work that touches them, so a narrower work
         // would reallocate a chained record and wipe its operand.
-        auto* table = machine.data.create_data(
+        auto* table = comparison_machine.data.create_data(
             DataDescription{DataId{700}, "table"});
         (void)table->add_residency(
             DataResidency{
@@ -1070,7 +1070,7 @@ int main() {
                 },
             });
 
-        auto* partner = machine.data.create_data(
+        auto* partner = comparison_machine.data.create_data(
             DataDescription{DataId{701}, "partner"});
         (void)partner->add_residency(
             DataResidency{
@@ -1082,7 +1082,7 @@ int main() {
                 },
             });
 
-        auto* predicate = machine.data.create_data(
+        auto* predicate = comparison_machine.data.create_data(
             DataDescription{DataId{703}, "predicate"});
         (void)predicate->add_residency(
             DataResidency{
@@ -1094,7 +1094,7 @@ int main() {
                 },
             });
 
-        auto* indices = machine.data.create_data(
+        auto* indices = comparison_machine.data.create_data(
             DataDescription{DataId{704}, "indices"});
         (void)indices->add_residency(
             DataResidency{
@@ -1106,7 +1106,7 @@ int main() {
                 },
             });
 
-        auto* picked = machine.data.create_data(
+        auto* picked = comparison_machine.data.create_data(
             DataDescription{DataId{705}, "picked"});
         (void)picked->add_residency(
             DataResidency{
@@ -1118,7 +1118,7 @@ int main() {
                 },
             });
 
-        auto* source = machine.data.create_data(
+        auto* source = comparison_machine.data.create_data(
             DataDescription{DataId{706}, "uniform"});
         (void)source->add_residency(
             DataResidency{
@@ -1760,9 +1760,9 @@ int main() {
     // ---------------------------------------------------------------------
 
     {
-        Machine machine;
+        Machine dtypes_machine;
 
-        auto* table = machine.data.create_data(
+        auto* table = dtypes_machine.data.create_data(
             DataDescription{DataId{730}, "table"});
         (void)table->add_residency(
             DataResidency{
@@ -1774,7 +1774,7 @@ int main() {
                 },
             });
 
-        auto* picked = machine.data.create_data(
+        auto* picked = dtypes_machine.data.create_data(
             DataDescription{DataId{731}, "picked"});
         (void)picked->add_residency(
             DataResidency{
@@ -1786,7 +1786,7 @@ int main() {
                 },
             });
 
-        auto* half = machine.data.create_data(
+        auto* half = dtypes_machine.data.create_data(
             DataDescription{DataId{732}, "half"});
         (void)half->add_residency(
             DataResidency{
@@ -1986,9 +1986,9 @@ int main() {
         // executes in dependency order through the executor; values
         // equal the isolated single-op runs bit-exactly (same F32
         // kernels, same order — determinism, not tolerance).
-        Machine machine;
+        Machine composite_machine;
 
-        auto* input = machine.data.create_data(
+        auto* input = composite_machine.data.create_data(
             DataDescription{DataId{740}, "input"});
         (void)input->add_residency(
             DataResidency{
@@ -2002,7 +2002,7 @@ int main() {
         (void)input->find_residency(DataResidencyId{7401})
             ->set_state(DataResidencyState::VALID);
 
-        auto* raised = machine.data.create_data(
+        auto* raised = composite_machine.data.create_data(
             DataDescription{DataId{741}, "raised"});
         (void)raised->add_residency(
             DataResidency{
@@ -2014,7 +2014,7 @@ int main() {
                 },
             });
 
-        auto* total = machine.data.create_data(
+        auto* total = composite_machine.data.create_data(
             DataDescription{DataId{742}, "total"});
         (void)total->add_residency(
             DataResidency{
@@ -2026,7 +2026,7 @@ int main() {
                 },
             });
 
-        auto* peak = machine.data.create_data(
+        auto* peak = composite_machine.data.create_data(
             DataDescription{DataId{743}, "peak"});
         (void)peak->add_residency(
             DataResidency{
@@ -2052,7 +2052,7 @@ int main() {
         // them by e^2.5 ≈ 12x. Sum = e^0.5 + 5*e^-2 discriminates
         // against max = e^0.5 exactly. Two-valued is enough: sum folds
         // all six, max picks one.
-        auto* uniform = machine.data.create_data(
+        auto* uniform = composite_machine.data.create_data(
             DataDescription{DataId{744}, "uniform"});
         (void)uniform->add_residency(
             DataResidency{
@@ -2068,10 +2068,10 @@ int main() {
 
         CpuBackend backend;
         Executor executor(
-            machine.executions,
-            machine.operations,
-            machine.devices,
-            machine.data,
+            composite_machine.executions,
+            composite_machine.operations,
+            composite_machine.devices,
+            composite_machine.data,
             backend);
         const ResourceBinding compute{
             ResourceBindingRole::COMPUTE,
@@ -2093,18 +2093,18 @@ int main() {
         auto run_chained = [&](const OperationDescription& description,
                                const PhysicalBinding& binding,
                                ExecutionId id) {
-            (void)machine.operations.create_operation(description);
+            (void)composite_machine.operations.create_operation(description);
             PhysicalBindingValidator validator;
-            BindingResolver resolver(machine.devices, machine.data);
+            BindingResolver resolver(composite_machine.devices, composite_machine.data);
             BindingAdmissibilityValidator admissibility;
             ExecutionAdmissionValidator admission(
-                machine.devices, machine.data);
+                composite_machine.devices, composite_machine.data);
             GERDOS_CHECK(validator.validate(binding));
             GERDOS_CHECK(resolver.resolve(binding).fully_resolved());
             const auto* op =
-                machine.operations.find_operation(description.id);
+                composite_machine.operations.find_operation(description.id);
             GERDOS_CHECK(admissibility.admissible(*op, binding));
-            auto* execution = machine.executions.create_execution(
+            auto* execution = composite_machine.executions.create_execution(
                 ExecutionDescription{id, description.id});
             GERDOS_CHECK(execution->bind(binding));
             GERDOS_CHECK(admission.admit(*execution).has_value());
@@ -2312,7 +2312,7 @@ int main() {
 
         // Gates are blind to dtype exactly as to form: the same
         // realization with F32 vs I8 work judges identically.
-        Machine machine;
+        Machine wellformed_machine;
         OperationDescription f32_work{
             OperationId{870},
             {DataId{500}},
@@ -2360,9 +2360,9 @@ int main() {
         // a smaller record read by a larger footprint reinitializes
         // to fresh 1.0s deterministically — never corrupt, never kept
         // stale. Both directions pinned with exact values.
-        Machine machine;
+        Machine footprints_machine;
 
-        auto* wide = machine.data.create_data(
+        auto* wide = footprints_machine.data.create_data(
             DataDescription{DataId{610}, "wide"});
         (void)wide->add_residency(
             DataResidency{
@@ -2376,7 +2376,7 @@ int main() {
         (void)wide->find_residency(DataResidencyId{6101})
             ->set_state(DataResidencyState::VALID);
 
-        auto* record = machine.data.create_data(
+        auto* record = footprints_machine.data.create_data(
             DataDescription{DataId{611}, "record"});
         (void)record->add_residency(
             DataResidency{
@@ -2390,7 +2390,7 @@ int main() {
         (void)record->find_residency(DataResidencyId{6111})
             ->set_state(DataResidencyState::VALID);
 
-        auto* sink = machine.data.create_data(
+        auto* sink = footprints_machine.data.create_data(
             DataDescription{DataId{612}, "sink"});
         (void)sink->add_residency(
             DataResidency{

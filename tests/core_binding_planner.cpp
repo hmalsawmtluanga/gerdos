@@ -370,7 +370,7 @@ int main() {
 
     {
         Machine measured;
-        BindingPlanner planner(
+        BindingPlanner measured_planner(
             measured.devices,
             measured.data,
             measured.topology,
@@ -380,7 +380,7 @@ int main() {
             measured.operations.find_operation(OperationId{801});
 
         // Premise: without evidence, declared rules pick the dma.
-        const auto baseline = planner.plan(*operation);
+        const auto baseline = measured_planner.plan(*operation);
         GERDOS_CHECK(baseline.has_value());
         GERDOS_CHECK(baseline->resources[0].resource == dma);
 
@@ -398,7 +398,7 @@ int main() {
             });
 
         GERDOS_CHECK(
-            planner.plan(*operation)->resources[0].resource ==
+            measured_planner.plan(*operation)->resources[0].resource ==
             copy_engine);
 
         // Evidence from any operation contributes to the mechanism's
@@ -414,7 +414,7 @@ int main() {
                 {},
             });
 
-        const auto informed = planner.plan(*operation);
+        const auto informed = measured_planner.plan(*operation);
         GERDOS_CHECK(informed.has_value());
         GERDOS_CHECK(informed->resources[0].resource == copy_engine);
         GERDOS_CHECK(informed->data.size() == 2);
@@ -426,7 +426,7 @@ int main() {
 
     {
         Machine first;
-        BindingPlanner planner(
+        BindingPlanner first_planner(
             first.devices, first.data, first.topology, first.measurements);
 
         // The dma has proven faster: declared order loses.
@@ -456,12 +456,12 @@ int main() {
             first.operations.find_operation(OperationId{801});
 
         GERDOS_CHECK(
-            planner.plan(*operation)->resources[0].resource == dma);
+            first_planner.plan(*operation)->resources[0].resource == dma);
     }
 
     {
         Machine second;
-        BindingPlanner planner(
+        BindingPlanner second_planner(
             second.devices,
             second.data,
             second.topology,
@@ -507,7 +507,7 @@ int main() {
             second.operations.find_operation(OperationId{801});
 
         GERDOS_CHECK(
-            planner.plan(*operation)->resources[0].resource ==
+            second_planner.plan(*operation)->resources[0].resource ==
             copy_engine);
     }
 
@@ -517,7 +517,7 @@ int main() {
 
     {
         Machine budgeted;
-        BindingPlanner planner(
+        BindingPlanner budgeted_planner(
             budgeted.devices,
             budgeted.data,
             budgeted.topology,
@@ -556,7 +556,7 @@ int main() {
         const auto* operation =
             budgeted.operations.find_operation(OperationId{801});
 
-        const auto binding = planner.plan(*operation);
+        const auto binding = budgeted_planner.plan(*operation);
         GERDOS_CHECK(binding.has_value());
         GERDOS_CHECK(binding->resources[0].resource == copy_engine);
 
@@ -575,7 +575,7 @@ int main() {
                 {},
             });
 
-        const auto replan = planner.plan(*operation);
+        const auto replan = budgeted_planner.plan(*operation);
         GERDOS_CHECK(replan.has_value());
         GERDOS_CHECK(replan->resources[0].resource == dma);
     }
@@ -586,7 +586,7 @@ int main() {
 
     {
         Machine poisoned;
-        BindingPlanner planner(
+        BindingPlanner poisoned_planner(
             poisoned.devices,
             poisoned.data,
             poisoned.topology,
@@ -632,7 +632,7 @@ int main() {
         const auto* operation =
             poisoned.operations.find_operation(OperationId{801});
 
-        const auto binding = planner.plan(*operation);
+        const auto binding = poisoned_planner.plan(*operation);
         GERDOS_CHECK(binding.has_value());
         GERDOS_CHECK(binding->resources[0].resource == dma);
     }
@@ -643,7 +643,7 @@ int main() {
 
     {
         Machine mixed;
-        BindingPlanner planner(
+        BindingPlanner mixed_planner(
             mixed.devices,
             mixed.data,
             mixed.topology,
@@ -687,7 +687,7 @@ int main() {
         const auto* operation =
             mixed.operations.find_operation(OperationId{801});
 
-        const auto binding = planner.plan(*operation);
+        const auto binding = mixed_planner.plan(*operation);
         GERDOS_CHECK(binding.has_value());
 
         // Pooled means rank the uniform dma first; work-shape-scoped
@@ -701,7 +701,7 @@ int main() {
 
     {
         Machine edges;
-        BindingPlanner planner(
+        BindingPlanner edges_planner(
             edges.devices,
             edges.data,
             edges.topology,
@@ -721,7 +721,7 @@ int main() {
             },
         }};
 
-        GERDOS_CHECK(!planner.plan(garbage).has_value());
+        GERDOS_CHECK(!edges_planner.plan(garbage).has_value());
 
         // A failed mechanism is not chosen.
         edges.devices.find_device(DeviceId{100})
@@ -731,7 +731,7 @@ int main() {
         const auto* movement =
             edges.operations.find_operation(OperationId{801});
 
-        const auto binding = planner.plan(*movement);
+        const auto binding = edges_planner.plan(*movement);
         GERDOS_CHECK(binding.has_value());
         GERDOS_CHECK(binding->resources[0].resource == copy_engine);
 
@@ -740,7 +740,7 @@ int main() {
             ->find_resource(ResourceId{203})
             ->set_availability(ResourceAvailability::FAILED);
 
-        GERDOS_CHECK(!planner.plan(*movement).has_value());
+        GERDOS_CHECK(!edges_planner.plan(*movement).has_value());
 
         // A claimed producing record is never planned onto.
         edges.devices.find_device(DeviceId{100})
@@ -772,7 +772,7 @@ int main() {
         GERDOS_CHECK(claim_effects.start(*claimant));
         GERDOS_CHECK(candidate->update_owner() == ExecutionId{999});
 
-        const auto moved = planner.plan(*movement);
+        const auto moved = edges_planner.plan(*movement);
         GERDOS_CHECK(moved.has_value());
         GERDOS_CHECK(
             moved->data[1].residency !=
@@ -785,7 +785,7 @@ int main() {
 
     {
         Machine twin;
-        BindingPlanner planner(
+        BindingPlanner twin_planner(
             twin.devices,
             twin.data,
             twin.topology,
@@ -804,7 +804,7 @@ int main() {
             },
         }};
 
-        const auto binding = planner.plan(two_engines);
+        const auto binding = twin_planner.plan(two_engines);
         GERDOS_CHECK(binding.has_value());
         GERDOS_CHECK(binding->resources.size() == 2);
         GERDOS_CHECK(
@@ -825,7 +825,7 @@ int main() {
             },
         }};
 
-        GERDOS_CHECK(!planner.plan(three_engines).has_value());
+        GERDOS_CHECK(!twin_planner.plan(three_engines).has_value());
     }
 
     // ---------------------------------------------------------------------
@@ -834,7 +834,7 @@ int main() {
 
     {
         Machine chain;
-        BindingPlanner planner(
+        BindingPlanner chain_planner(
             chain.devices,
             chain.data,
             chain.topology,
@@ -866,7 +866,7 @@ int main() {
         // The fixture's own operations (800/801/802, no dependencies)
         // schedule too — the chain asserts relative order, not absolute
         // membership: 810 before 811 before 812, all present.
-        const auto order = planner.schedule(chain.operations);
+        const auto order = chain_planner.schedule(chain.operations);
         auto position = [&](OperationId id) -> std::size_t {
             for (std::size_t i = 0; i < order.size(); ++i) {
                 if (order[i] == id) {
@@ -921,7 +921,7 @@ int main() {
 
     {
         Machine blocked;
-        BindingPlanner planner(
+        BindingPlanner blocked_planner(
             blocked.devices,
             blocked.data,
             blocked.topology,
@@ -952,7 +952,7 @@ int main() {
 
         // Fixture ops stay ready; the blocked pair (830, 831) must be
         // absent while independent 832 is present.
-        const auto order = planner.schedule(blocked.operations);
+        const auto order = blocked_planner.schedule(blocked.operations);
         auto blocked_position = [&](OperationId id) -> bool {
             for (const auto got : order) {
                 if (got == id) {
@@ -1007,7 +1007,7 @@ int main() {
 
     {
         Machine cyclic;
-        BindingPlanner planner(
+        BindingPlanner cyclic_planner(
             cyclic.devices,
             cyclic.data,
             cyclic.topology,
@@ -1036,7 +1036,7 @@ int main() {
         // Fixture ops stay schedulable; the cyclic pair is excluded
         // and — critically — the acyclic fixture ops still schedule.
         // A PURE cycle (fixture removed) yields the empty set.
-        const auto order = planner.schedule(cyclic.operations);
+        const auto order = cyclic_planner.schedule(cyclic.operations);
         auto cyclic_has = [&](OperationId id) -> bool {
             for (const auto got : order) {
                 if (got == id) {
@@ -1072,7 +1072,7 @@ int main() {
         // fresh operation schedules normally.
         GERDOS_CHECK(cyclic.operations.remove_operation(OperationId{851}));
         (void)cyclic.operations.create_operation(transferable(OperationId{853}, {}));
-        const auto repaired = planner.schedule(cyclic.operations);
+        const auto repaired = cyclic_planner.schedule(cyclic.operations);
         auto repaired_has = [&](OperationId id) -> bool {
             for (const auto got : repaired) {
                 if (got == id) {
@@ -1092,7 +1092,7 @@ int main() {
 
     {
         Machine hostile;
-        BindingPlanner planner(
+        BindingPlanner hostile_planner(
             hostile.devices,
             hostile.data,
             hostile.topology,
@@ -1132,7 +1132,7 @@ int main() {
             ->find_residency(DataResidencyId{5201})
             ->set_state(DataResidencyState::VALID);
         auto hostile_has = [&](OperationId id) -> bool {
-            const auto scheduled = planner.schedule(hostile.operations);
+            const auto scheduled = hostile_planner.schedule(hostile.operations);
             for (const auto got : scheduled) {
                 if (got == id) {
                     return true;
@@ -1146,7 +1146,7 @@ int main() {
         // The producer is withdrawn (its attempt failed; nothing
         // produces its output): the consumer cascades unready.
         GERDOS_CHECK(hostile.operations.remove_operation(OperationId{860}));
-        const auto after = planner.schedule(hostile.operations);
+        const auto after = hostile_planner.schedule(hostile.operations);
         auto after_has = [&](OperationId id) -> bool {
             for (const auto got : after) {
                 if (got == id) {
@@ -1227,7 +1227,7 @@ int main() {
         // resource. Op order decides: first fits, second refused, its
         // dependent cascades.
         Machine budgeted;
-        BindingPlanner planner(
+        BindingPlanner capacity_planner(
             budgeted.devices,
             budgeted.data,
             budgeted.topology,
@@ -1299,7 +1299,7 @@ int main() {
         (void)budgeted.operations.create_operation(
             megabyte(OperationId{922}, DataId{612}, {OperationId{921}}));
 
-        const auto ready = planner.schedule(budgeted.operations);
+        const auto ready = capacity_planner.schedule(budgeted.operations);
         auto ready_has = [&](OperationId id) -> bool {
             for (const auto got : ready) {
                 if (got == id) {
@@ -1317,7 +1317,7 @@ int main() {
         GERDOS_CHECK(!ready_has(OperationId{922}));
 
         // plan_attempts inherits the exclusion: no pair for refused ops.
-        const auto planned = planner.plan_attempts(budgeted.operations);
+        const auto planned = capacity_planner.plan_attempts(budgeted.operations);
         auto planned_has = [&](OperationId id) -> bool {
             for (const auto& attempt : planned) {
                 if (attempt.id == id) {
@@ -1337,7 +1337,7 @@ int main() {
 
     {
         Machine open;
-        BindingPlanner planner(
+        BindingPlanner open_planner(
             open.devices, open.data, open.topology, open.measurements);
 
         // scratch (103) declares zero: unbounded. Two megabyte outputs
@@ -1385,7 +1385,7 @@ int main() {
         (void)open.operations.create_operation(megabyte(OperationId{930}, DataId{620}));
         (void)open.operations.create_operation(megabyte(OperationId{931}, DataId{621}));
 
-        const auto ready = planner.schedule(open.operations);
+        const auto ready = open_planner.schedule(open.operations);
         auto ready_has = [&](OperationId id) -> bool {
             for (const auto got : ready) {
                 if (got == id) {
@@ -1444,7 +1444,7 @@ int main() {
 
     {
         Machine ordered;
-        BindingPlanner planner(
+        BindingPlanner ordered_planner(
             ordered.devices,
             ordered.data,
             ordered.topology,
@@ -1470,7 +1470,7 @@ int main() {
         (void)ordered.operations.create_operation(transferable(OperationId{890}, {}));
         (void)ordered.operations.create_operation(transferable(OperationId{891}, {OperationId{890}}));
 
-        const auto planned = planner.plan_attempts(ordered.operations);
+        const auto planned = ordered_planner.plan_attempts(ordered.operations);
 
         // The chain's pairs appear in dependency order...
         auto planned_position = [&](OperationId id) -> std::size_t {
@@ -1493,10 +1493,10 @@ int main() {
 
         // ...and every pair is individually gate-passable through the
         // same chain a single plan faces.
-        PhysicalBindingValidator validator;
-        BindingResolver resolver(
+        PhysicalBindingValidator chain_validator;
+        BindingResolver chain_resolver(
             ordered.devices, ordered.data);
-        BindingAdmissibilityValidator admissibility;
+        BindingAdmissibilityValidator chain_admissibility;
         ExecutionAdmissionValidator admission(
             ordered.devices, ordered.data);
         ExecutionRegistry probe_executions;
@@ -1504,11 +1504,11 @@ int main() {
         for (const auto& attempt : planned) {
             const auto* operation = ordered.operations.find_operation(attempt.id);
             GERDOS_CHECK(operation != nullptr);
-            GERDOS_CHECK(validator.validate(attempt.binding));
+            GERDOS_CHECK(chain_validator.validate(attempt.binding));
             GERDOS_CHECK(
-                resolver.resolve(attempt.binding).fully_resolved());
+                chain_resolver.resolve(attempt.binding).fully_resolved());
             GERDOS_CHECK(
-                admissibility.admissible(*operation, attempt.binding));
+                chain_admissibility.admissible(*operation, attempt.binding));
             Execution probe{
                 ExecutionDescription{ExecutionId{1900 + attempt.id.value()}, attempt.id}};
             GERDOS_CHECK(probe.bind(attempt.binding));
@@ -1527,7 +1527,7 @@ int main() {
         // The planner — not hand-pairing — produces stage, compute,
         // stage, compute with the right mechanism roles.
         Machine staged;
-        BindingPlanner planner(
+        BindingPlanner staged_planner(
             staged.devices,
             staged.data,
             staged.topology,
@@ -1614,7 +1614,7 @@ int main() {
             {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
         });
 
-        const auto planned = planner.plan_attempts(staged.operations);
+        const auto planned = staged_planner.plan_attempts(staged.operations);
 
         // The two units' pairs in dependency order...
         auto staged_position = [&](OperationId id) -> std::size_t {
@@ -1676,8 +1676,8 @@ int main() {
             const auto& first = planned[staged_position(OperationId{910})];
             const auto* operation =
                 staged.operations.find_operation(first.id);
-            PhysicalBindingValidator validator;
-            GERDOS_CHECK(validator.validate(first.binding));
+            PhysicalBindingValidator probe_validator;
+            GERDOS_CHECK(probe_validator.validate(first.binding));
             auto* execution = executions.create_execution(
                 ExecutionDescription{ExecutionId{2000}, first.id});
             GERDOS_CHECK(execution->bind(first.binding));
@@ -1721,7 +1721,7 @@ int main() {
         // so the device-homed copy must win despite its higher id —
         // identifier order would pick the host copy.
         Machine local;
-        BindingPlanner planner(
+        BindingPlanner local_planner(
             local.devices, local.data, local.topology, local.measurements);
 
         auto* both = local.data.create_data(
@@ -1772,7 +1772,7 @@ int main() {
 
         const auto* compute =
             local.operations.find_operation(OperationId{940});
-        const auto binding = planner.plan(*compute);
+        const auto binding = local_planner.plan(*compute);
         GERDOS_CHECK(binding.has_value());
         GERDOS_CHECK(binding->data.size() == 2);
         GERDOS_CHECK(
@@ -1791,7 +1791,7 @@ int main() {
 
         const auto* movement =
             local.operations.find_operation(OperationId{941});
-        const auto moved = planner.plan(*movement);
+        const auto moved = local_planner.plan(*movement);
         GERDOS_CHECK(moved.has_value());
         GERDOS_CHECK(
             moved->data[0].residency ==
@@ -1809,7 +1809,7 @@ int main() {
         // it is sampled once ahead of the measured incumbent — then
         // means decide.
         Machine arrival;
-        BindingPlanner planner(
+        BindingPlanner arrival_planner(
             arrival.devices,
             arrival.data,
             arrival.topology,
@@ -1822,7 +1822,7 @@ int main() {
         const auto* operation =
             arrival.operations.find_operation(OperationId{801});
 
-        const auto first = planner.plan(*operation);
+        const auto first = arrival_planner.plan(*operation);
         GERDOS_CHECK(first.has_value());
         GERDOS_CHECK(first->resources[0].resource == copy_engine);
 
@@ -1844,7 +1844,7 @@ int main() {
             ->find_resource(ResourceId{102})
             ->set_availability(ResourceAvailability::AVAILABLE);
 
-        const auto sampled = planner.plan(*operation);
+        const auto sampled = arrival_planner.plan(*operation);
         GERDOS_CHECK(sampled.has_value());
         GERDOS_CHECK(sampled->resources[0].resource == dma);
 
@@ -1861,7 +1861,7 @@ int main() {
                 {},
             });
 
-        const auto settled = planner.plan(*operation);
+        const auto settled = arrival_planner.plan(*operation);
         GERDOS_CHECK(settled.has_value());
         GERDOS_CHECK(settled->resources[0].resource == copy_engine);
     }
@@ -1876,7 +1876,7 @@ int main() {
         // churn residual, closed per-comparison). With one success the
         // incumbent is unproven and the newcomer still samples once.
         Machine churn;
-        BindingPlanner planner(
+        BindingPlanner churn_planner(
             churn.devices, churn.data, churn.topology, churn.measurements);
 
         const auto* operation =
@@ -1898,7 +1898,7 @@ int main() {
 
         // One success: incumbent unproven — newcomer samples once.
         record_success(dma, ExecutionId{400}, 50'000'000);
-        const auto sampled = planner.plan(*operation);
+        const auto sampled = churn_planner.plan(*operation);
         GERDOS_CHECK(sampled.has_value());
         GERDOS_CHECK(sampled->resources[0].resource == copy_engine);
 
@@ -1906,7 +1906,7 @@ int main() {
         // (The first newcomer was sampled but recorded nothing, so it
         // is still the unmeasured challenger.)
         record_success(dma, ExecutionId{401}, 50'000'000);
-        const auto held = planner.plan(*operation);
+        const auto held = churn_planner.plan(*operation);
         GERDOS_CHECK(held.has_value());
         GERDOS_CHECK(held->resources[0].resource == dma);
 
@@ -1914,7 +1914,7 @@ int main() {
         // merely delayed one round. (No new mechanism exists in this
         // fixture beyond the pair; the same challenger re-planned
         // stands in for the stream — still unmeasured, still refused.)
-        const auto held_again = planner.plan(*operation);
+        const auto held_again = churn_planner.plan(*operation);
         GERDOS_CHECK(held_again.has_value());
         GERDOS_CHECK(held_again->resources[0].resource == dma);
     }
@@ -1930,7 +1930,7 @@ int main() {
         // planning work the executor must abandon. Both pins use the
         // sealed effects layer for claims — claims cannot be forged.
         Machine guarded;
-        BindingPlanner planner(
+        BindingPlanner guarded_planner(
             guarded.devices, guarded.data, guarded.topology,
             guarded.measurements);
 
@@ -1960,7 +1960,7 @@ int main() {
         // Unclaimed: the pure output writes its sole record in place.
         const auto* pure =
             guarded.operations.find_operation(OperationId{950});
-        const auto unclaimed = planner.plan(*pure);
+        const auto unclaimed = guarded_planner.plan(*pure);
         GERDOS_CHECK(unclaimed.has_value());
 
         // Claimed through the sealed effects layer: refuses.
@@ -1976,11 +1976,11 @@ int main() {
             });
         GERDOS_CHECK(claimant->bind(claim_binding));
         GERDOS_CHECK(claim_effects.start(*claimant));
-        GERDOS_CHECK(!planner.plan(*pure).has_value());
+        GERDOS_CHECK(!guarded_planner.plan(*pure).has_value());
 
         // Excluded from the ready set while unrelated fixture ops
         // still schedule.
-        const auto guarded_ready = planner.schedule(guarded.operations);
+        const auto guarded_ready = guarded_planner.schedule(guarded.operations);
         bool guarded_has = false;
 
         for (const auto got : guarded_ready) {
@@ -1996,7 +1996,7 @@ int main() {
         // — a claimed source is unusable, so choose_source refuses
         // first. This pin proves the composition, not just the guard.
         Machine same;
-        BindingPlanner planner(
+        BindingPlanner same_planner(
             same.devices, same.data, same.topology, same.measurements);
 
         auto* datum = same.data.create_data(
@@ -2024,7 +2024,7 @@ int main() {
 
         const auto* inplace =
             same.operations.find_operation(OperationId{951});
-        GERDOS_CHECK(planner.plan(*inplace).has_value());
+        GERDOS_CHECK(same_planner.plan(*inplace).has_value());
 
         ExecutionRegistry claim_executions;
         ExecutionEffects claim_effects(same.data, claim_executions);
@@ -2038,7 +2038,7 @@ int main() {
             });
         GERDOS_CHECK(claimant->bind(claim_binding));
         GERDOS_CHECK(claim_effects.start(*claimant));
-        GERDOS_CHECK(!planner.plan(*inplace).has_value());
+        GERDOS_CHECK(!same_planner.plan(*inplace).has_value());
     }
 
     return 0;

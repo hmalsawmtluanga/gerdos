@@ -636,13 +636,13 @@ int main(int argc, char** argv) {
             SignalStep{SignalOp::SIGNAL_HISTOGRAM, 913, 920, 0, 921, 6},
         };
 
-        const SignalAdaptation translated = adapt_signal("signal", chain);
-        GERDOS_CHECK(translated.workload.operations.size() == 3);
-        GERDOS_CHECK(translated.refused.size() == 1);
-        GERDOS_CHECK(translated.refused[0].find("SIGNAL_THRESHOLD") == 0);
-        GERDOS_CHECK(translated.workload.operations[0].work.form == WorkForm::ELEMENTWISE_AFFINE);
-        GERDOS_CHECK(translated.workload.operations[1].work.form == WorkForm::MASK_SELECT);
-        GERDOS_CHECK(translated.workload.operations[2].work.form == WorkForm::GATHER);
+        const SignalAdaptation signal_translated = adapt_signal("signal", chain);
+        GERDOS_CHECK(signal_translated.workload.operations.size() == 3);
+        GERDOS_CHECK(signal_translated.refused.size() == 1);
+        GERDOS_CHECK(signal_translated.refused[0].find("SIGNAL_THRESHOLD") == 0);
+        GERDOS_CHECK(signal_translated.workload.operations[0].work.form == WorkForm::ELEMENTWISE_AFFINE);
+        GERDOS_CHECK(signal_translated.workload.operations[1].work.form == WorkForm::MASK_SELECT);
+        GERDOS_CHECK(signal_translated.workload.operations[2].work.form == WorkForm::GATHER);
 
         Machine signaled;
         CpuBackend signaled_backend;
