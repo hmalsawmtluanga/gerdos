@@ -2125,5 +2125,256 @@ int main() {
         std::fflush(stdout);
     }
 
+    // ---------------------------------------------------------------------
+    // Gated selector on the GPU engine: the same chain as the CPU proof
+    // ---------------------------------------------------------------------
+
+    {
+        // The second tiny model through the ENGINE backend: fill a
+        // uniform partner, fold the table in place, bound it both ways,
+        // gate by predicate, gather by computed index, reduce the pick.
+        // Same closed forms as the CPU proof; skipped cleanly with it
+        // when no device is present (whole binary).
+        const ResourceRef home{DeviceId{200}, ResourceId{201}};
+        const ResourceRef gpu_compute{DeviceId{200}, ResourceId{202}};
+
+        auto* table = machine.data.create_data(
+            DataDescription{DataId{810}, "table"});
+        Machine::record(*table, DataResidencyId{8101}, home, "table");
+        Machine::usable(table, DataResidencyId{8101});
+
+        auto* partner = machine.data.create_data(
+            DataDescription{DataId{811}, "partner"});
+        Machine::record(*partner, DataResidencyId{8102}, home, "partner");
+        Machine::usable(partner, DataResidencyId{8102});
+
+        auto* hi = machine.data.create_data(
+            DataDescription{DataId{812}, "hi"});
+        Machine::record(*hi, DataResidencyId{8103}, home, "hi");
+        Machine::usable(hi, DataResidencyId{8103});
+
+        auto* lo = machine.data.create_data(
+            DataDescription{DataId{813}, "lo"});
+        Machine::record(*lo, DataResidencyId{8104}, home, "lo");
+        Machine::usable(lo, DataResidencyId{8104});
+
+        auto* gate = machine.data.create_data(
+            DataDescription{DataId{814}, "gate"});
+        Machine::record(*gate, DataResidencyId{8105}, home, "gate");
+        Machine::usable(gate, DataResidencyId{8105});
+
+        auto* pred = machine.data.create_data(
+            DataDescription{DataId{815}, "pred"});
+        Machine::record(*pred, DataResidencyId{8106}, home, "pred");
+        Machine::usable(pred, DataResidencyId{8106});
+
+        auto* idx = machine.data.create_data(
+            DataDescription{DataId{816}, "idx"});
+        Machine::record(*idx, DataResidencyId{8107}, home, "idx");
+        Machine::usable(idx, DataResidencyId{8107});
+
+        auto* picked = machine.data.create_data(
+            DataDescription{DataId{817}, "picked"});
+        Machine::record(*picked, DataResidencyId{8108}, home, "picked");
+        Machine::usable(picked, DataResidencyId{8108});
+
+        auto* floor = machine.data.create_data(
+            DataDescription{DataId{818}, "floor"});
+        Machine::record(*floor, DataResidencyId{8109}, home, "floor");
+        Machine::usable(floor, DataResidencyId{8109});
+
+        auto* peak = machine.data.create_data(
+            DataDescription{DataId{819}, "peak"});
+        Machine::record(*peak, DataResidencyId{8110}, home, "peak");
+        Machine::usable(peak, DataResidencyId{8110});
+
+        auto* floor2 = machine.data.create_data(
+            DataDescription{DataId{820}, "floor2"});
+        Machine::record(*floor2, DataResidencyId{8111}, home, "floor2");
+        Machine::usable(floor2, DataResidencyId{8111});
+
+        auto* total = machine.data.create_data(
+            DataDescription{DataId{821}, "total"});
+        Machine::record(*total, DataResidencyId{8112}, home, "total");
+        Machine::usable(total, DataResidencyId{8112});
+
+        auto entry = [](DataBindingRole role,
+                         DataId data,
+                         DataResidencyId residency) {
+            return DataBinding{role, DataResidencyRef{data, residency}};
+        };
+        auto compute_on = [&](ResourceRef mechanism) {
+            PhysicalBinding binding;
+            binding.resources.push_back(
+                ResourceBinding{ResourceBindingRole::COMPUTE, mechanism});
+            return binding;
+        };
+        auto run = [&](const OperationDescription& description,
+                       PhysicalBinding binding,
+                       ExecutionId id) {
+            const Operation operation{description};
+            Execution attempt{ExecutionDescription{id, description.id}};
+            GERDOS_CHECK(attempt.bind(binding));
+            GERDOS_CHECK(backend.submit(operation, attempt));
+            std::vector<BackendCompletion> completed;
+
+            while (completed.empty()) {
+                backend.poll(completed);
+            }
+
+            GERDOS_CHECK(completed.front().succeeded);
+        };
+        auto single = [&](OperationId op, DataId src, DataResidencyId rsrc,
+                          DataId dst, DataResidencyId rdst,
+                          WorkDescription work, ExecutionId eid) {
+            auto binding = compute_on(gpu_compute);
+            binding.data.push_back(entry(DataBindingRole::INPUT, src, rsrc));
+            binding.data.push_back(entry(DataBindingRole::OUTPUT, dst, rdst));
+            run(OperationDescription{
+                    op,
+                    {src},
+                    {dst},
+                    {},
+                    {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                    work,
+                },
+                binding, eid);
+        };
+
+        // P = 0*P + 2; T folds in place to [6,1,1,1,1,1]; floor = 1.
+        single(OperationId{942}, DataId{811}, DataResidencyId{8102},
+               DataId{811}, DataResidencyId{8102},
+               WorkDescription{6, 1, 0.0f, 0.0f, 2.0f},
+               ExecutionId{973});
+        single(OperationId{943}, DataId{810}, DataResidencyId{8101},
+               DataId{810}, DataResidencyId{8101},
+               WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+               ExecutionId{974});
+        single(OperationId{944}, DataId{810}, DataResidencyId{8101},
+               DataId{818}, DataResidencyId{8109},
+               WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_MIN},
+               ExecutionId{975});
+
+        // hi = max(T,P); lo = min(T,P).
+        auto pair = [&](OperationId op, DataId dst, DataResidencyId rdst,
+                        WorkForm form, ExecutionId eid) {
+            auto binding = compute_on(gpu_compute);
+            binding.data.push_back(
+                entry(DataBindingRole::INPUT, DataId{810}, DataResidencyId{8101}));
+            binding.data.push_back(
+                entry(DataBindingRole::INPUT, DataId{811}, DataResidencyId{8102}));
+            binding.data.push_back(
+                entry(DataBindingRole::OUTPUT, dst, rdst));
+            run(OperationDescription{
+                    op,
+                    {DataId{810}, DataId{811}},
+                    {dst},
+                    {},
+                    {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                    WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, form},
+                },
+                binding, eid);
+        };
+        pair(OperationId{945}, DataId{812}, DataResidencyId{8103},
+             WorkForm::ELEMENTWISE_MAX, ExecutionId{976});
+        pair(OperationId{946}, DataId{813}, DataResidencyId{8104},
+             WorkForm::ELEMENTWISE_MIN, ExecutionId{977});
+
+        // pred = T - 1; gate = select(pred, T, P).
+        single(OperationId{947}, DataId{810}, DataResidencyId{8101},
+               DataId{815}, DataResidencyId{8106},
+               WorkDescription{6, 1, 0.0f, 1.0f, -1.0f},
+               ExecutionId{978});
+        {
+            auto binding = compute_on(gpu_compute);
+            binding.data.push_back(
+                entry(DataBindingRole::INPUT, DataId{815}, DataResidencyId{8106}));
+            binding.data.push_back(
+                entry(DataBindingRole::INPUT, DataId{810}, DataResidencyId{8101}));
+            binding.data.push_back(
+                entry(DataBindingRole::INPUT, DataId{811}, DataResidencyId{8102}));
+            binding.data.push_back(
+                entry(DataBindingRole::OUTPUT, DataId{814}, DataResidencyId{8105}));
+            run(OperationDescription{
+                    OperationId{948},
+                    {DataId{815}, DataId{810}, DataId{811}},
+                    {DataId{814}},
+                    {},
+                    {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                    WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::MASK_SELECT},
+                },
+                binding, ExecutionId{979});
+        }
+
+        // idx = T - 1; picked = gather(T, idx); peak/floor/total.
+        single(OperationId{954}, DataId{810}, DataResidencyId{8101},
+               DataId{816}, DataResidencyId{8107},
+               WorkDescription{6, 1, 0.0f, 1.0f, -1.0f},
+               ExecutionId{985});
+        {
+            auto binding = compute_on(gpu_compute);
+            binding.data.push_back(
+                entry(DataBindingRole::INPUT, DataId{810}, DataResidencyId{8101}));
+            binding.data.push_back(
+                entry(DataBindingRole::INPUT, DataId{816}, DataResidencyId{8107}));
+            binding.data.push_back(
+                entry(DataBindingRole::OUTPUT, DataId{817}, DataResidencyId{8108}));
+            run(OperationDescription{
+                    OperationId{955},
+                    {DataId{810}, DataId{816}},
+                    {DataId{817}},
+                    {},
+                    {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                    WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::GATHER},
+                },
+                binding, ExecutionId{986});
+        }
+        single(OperationId{956}, DataId{817}, DataResidencyId{8108},
+               DataId{819}, DataResidencyId{8110},
+               WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_MAX},
+               ExecutionId{987});
+        single(OperationId{957}, DataId{817}, DataResidencyId{8108},
+               DataId{820}, DataResidencyId{8111},
+               WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_MIN},
+               ExecutionId{988});
+        single(OperationId{958}, DataId{817}, DataResidencyId{8108},
+               DataId{821}, DataResidencyId{8112},
+               WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::REDUCE_SUM},
+               ExecutionId{989});
+
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{811}, DataResidencyId{8102}}, 0) == 2.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{810}, DataResidencyId{8101}}, 0) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{810}, DataResidencyId{8101}}, 1) == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{818}, DataResidencyId{8109}}, 0) == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{812}, DataResidencyId{8103}}, 0) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{812}, DataResidencyId{8103}}, 1) == 2.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{813}, DataResidencyId{8104}}, 0) == 2.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{813}, DataResidencyId{8104}}, 1) == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{814}, DataResidencyId{8105}}, 0) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{814}, DataResidencyId{8105}}, 1) == 2.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{817}, DataResidencyId{8108}}, 0) == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{817}, DataResidencyId{8108}}, 1) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{819}, DataResidencyId{8110}}, 0) == 6.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{820}, DataResidencyId{8111}}, 0) == 1.0f);
+        GERDOS_CHECK(
+            backend.sample(DataResidencyRef{DataId{821}, DataResidencyId{8112}}, 0) == 31.0f);
+        std::printf("tiny-gated GPU: T=[6,1..] P=2 hi=6/2 lo=2/1 gate=6/2 picked=1/6 peak=6 floor=1 total=31\n");
+        std::fflush(stdout);
+    }
+
     return 0;
 }
