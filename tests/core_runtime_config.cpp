@@ -39,5 +39,18 @@ int main() {
         GERDOS_CHECK(!accelerator_from_env(nullptr).has_value());
     }
 
+    {
+        // Text-format law: CRLF parses exactly like its LF twin, and a
+        // lone CR line is blank.
+        const auto lf = parse_config("# comment\naccelerator = 300\n");
+        const auto crlf = parse_config("# comment\r\naccelerator = 300\r\n");
+        GERDOS_CHECK(lf.ok && crlf.ok);
+        GERDOS_CHECK(crlf.config.accelerator == lf.config.accelerator);
+
+        const auto blank_cr = parse_config("\r\naccelerator = 300\r\n");
+        GERDOS_CHECK(blank_cr.ok);
+        GERDOS_CHECK(blank_cr.config.accelerator == DeviceId{300});
+    }
+
     return 0;
 }

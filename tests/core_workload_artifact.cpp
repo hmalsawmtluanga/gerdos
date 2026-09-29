@@ -201,6 +201,17 @@ int main(int argc, char** argv) {
         const auto exponent =
             parse_artifact("version 1\nworkload x\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=1 passes=1 ds=1e3 ss=1 c=0\n");
         GERDOS_CHECK(exponent.ok);
+
+        // Text-format law: CRLF parses exactly like its LF twin, a lone
+        // CR line is blank, and a CR anywhere else is refused loudly.
+        const auto crlf = parse_artifact(
+            "version 1\r\n\r\nworkload x\r\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=1 passes=1 ds=1e3 ss=1 c=0\r\n");
+        GERDOS_CHECK(crlf.ok);
+        GERDOS_CHECK(crlf.artifact.workload.operations.size() == 1);
+
+        const auto stray_cr = parse_artifact(
+            "versio\rn 1\nworkload x\nop 1 inputs=- outputs=- deps=- req=COMPUTE:1 form=AFFINE dtype=F32 elements=1 passes=1 ds=1e3 ss=1 c=0\n");
+        GERDOS_CHECK(!stray_cr.ok);
     }
 
     // ---------------------------------------------------------------------
