@@ -837,6 +837,133 @@ int main(int argc, char** argv) {
         GERDOS_CHECK(modeled_evidence.succeeded_observations == 7);
     }
 
+    // ---------------------------------------------------------------------
+    // 8. The second tiny model translates, executes, and verifies
+    // ---------------------------------------------------------------------
+
+    {
+        // A gated sequence-selection pass over fresh-1.0 storage: fill
+        // a uniform partner, fold the table in place, bound it both
+        // ways, gate by predicate, gather by computed index, reduce
+        // the pick. Every value closed-form exact. The pick-decision
+        // (which entry) is refused: ARGMAX names the gap.
+        using gerdos::adapters::adapt;
+        using gerdos::adapters::Adaptation;
+        using gerdos::adapters::ModelOp;
+        using gerdos::adapters::ModelStep;
+
+        const std::vector<ModelStep> gated{
+            ModelStep{ModelOp::AFFINE, 201, 0, 0, 201, 6, 0, 0, 0.0f, 0.0f, 2.0f},
+            ModelStep{ModelOp::REDUCE_SUM, 200, 0, 0, 200, 6},
+            ModelStep{ModelOp::REDUCE_MIN, 200, 0, 0, 208, 6},
+            ModelStep{ModelOp::ELEMENTWISE_MAX, 200, 201, 0, 202, 6},
+            ModelStep{ModelOp::ELEMENTWISE_MIN, 200, 201, 0, 203, 6},
+            ModelStep{ModelOp::AFFINE, 200, 0, 0, 205, 6, 0, 0, 0.0f, 1.0f, -1.0f},
+            ModelStep{ModelOp::MASK_SELECT, 205, 200, 201, 204, 6},
+            ModelStep{ModelOp::AFFINE, 200, 0, 0, 206, 6, 0, 0, 0.0f, 1.0f, -1.0f},
+            ModelStep{ModelOp::GATHER, 200, 206, 0, 207, 6},
+            ModelStep{ModelOp::REDUCE_MAX, 207, 0, 0, 209, 6},
+            ModelStep{ModelOp::REDUCE_MIN, 207, 0, 0, 210, 6},
+            ModelStep{ModelOp::REDUCE_SUM, 207, 0, 0, 211, 6},
+            ModelStep{ModelOp::ARGMAX, 207, 0, 0, 212, 6},
+        };
+
+        const Adaptation gated_translated = adapt("gated selector", gated);
+        GERDOS_CHECK(gated_translated.workload.operations.size() == 12);
+        GERDOS_CHECK(gated_translated.refused.size() == 1);
+        GERDOS_CHECK(gated_translated.refused[0].find("ARGMAX") == 0);
+
+        Machine gated_machine;
+        CpuBackend gated_backend;
+        Executor gated_executor(
+            gated_machine.executions,
+            gated_machine.operations,
+            gated_machine.devices,
+            gated_machine.data,
+            gated_backend,
+            &gated_machine.measurements);
+        BindingPlanner gated_planner(
+            gated_machine.devices,
+            gated_machine.data,
+            gated_machine.topology,
+            gated_machine.measurements);
+
+        const auto gated_parsed = parse_artifact(
+            load_text((directory + "/tiny_gated_selector.gwd").c_str()));
+        GERDOS_CHECK(gated_parsed.ok);
+        GERDOS_CHECK(gated_parsed.artifact.workload.operations.size() == 12);
+
+        std::string gated_reason;
+        GERDOS_CHECK(populate_registries(
+            gated_parsed.artifact, gated_machine.devices, gated_machine.data,
+            gated_machine.operations, gated_reason));
+
+        const auto gated_plan =
+            gated_planner.plan_attempts(gated_machine.operations);
+        GERDOS_CHECK(gated_plan.size() == 12);
+
+        std::size_t gated_attempt = 0;
+
+        for (const auto& step : gated_plan) {
+            const auto* operation =
+                gated_machine.operations.find_operation(step.id);
+            GERDOS_CHECK(operation != nullptr);
+            PhysicalBindingValidator validator;
+            BindingResolver resolver(
+                gated_machine.devices, gated_machine.data);
+            BindingAdmissibilityValidator admissibility;
+            ExecutionAdmissionValidator admission(
+                gated_machine.devices, gated_machine.data);
+            GERDOS_CHECK(validator.validate(step.binding));
+            GERDOS_CHECK(resolver.resolve(step.binding).fully_resolved());
+            GERDOS_CHECK(admissibility.admissible(*operation, step.binding));
+            auto* execution = gated_machine.executions.create_execution(
+                ExecutionDescription{
+                    ExecutionId{8100 + gated_attempt}, step.id});
+            ++gated_attempt;
+            GERDOS_CHECK(execution->bind(step.binding));
+            GERDOS_CHECK(admission.admit(*execution).has_value());
+            GERDOS_CHECK(gated_executor.start(execution->description().id));
+            std::vector<AttemptStatus> outcomes;
+            gated_executor.advance(outcomes);
+
+            while (outcomes.empty()) {
+                gated_executor.advance(outcomes);
+            }
+
+            GERDOS_CHECK(outcomes.size() == 1);
+            GERDOS_CHECK(outcomes.front().integrity == AttemptIntegrity::COHERENT);
+        }
+
+        // Closed forms: P = 2.0; T = [6,1,1,1,1,1]; floor = 1;
+        // hi = [6,2,2,2,2,2]; lo = [2,1,1,1,1,1];
+        // gate = [6,2,2,2,2,2]; picked = [1,6,6,6,6,6];
+        // peak = 6; floor = 1; total = 31. All bit-exact.
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{201}, DataResidencyId{2002}}, 0) == 2.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{200}, DataResidencyId{2001}}, 0) == 6.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{200}, DataResidencyId{2001}}, 1) == 1.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{208}, DataResidencyId{2009}}, 0) == 1.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{202}, DataResidencyId{2003}}, 0) == 6.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{202}, DataResidencyId{2003}}, 1) == 2.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{203}, DataResidencyId{2004}}, 0) == 2.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{203}, DataResidencyId{2004}}, 1) == 1.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{204}, DataResidencyId{2005}}, 0) == 6.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{204}, DataResidencyId{2005}}, 1) == 2.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{207}, DataResidencyId{2008}}, 0) == 1.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{207}, DataResidencyId{2008}}, 1) == 6.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{209}, DataResidencyId{2010}}, 0) == 6.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{210}, DataResidencyId{2011}}, 0) == 1.0f);
+        GERDOS_CHECK(gated_backend.sample(DataResidencyRef{DataId{211}, DataResidencyId{2012}}, 0) == 31.0f);
+
+        std::printf("tiny-gated: T=[6,1..] P=2 hi=6/2 lo=2/1 gate=6/2 picked=1/6 peak=6 floor=1 total=31, 12 ops coherent\n");
+        std::fflush(stdout);
+
+        const auto gated_evidence = gated_machine.measurements.summarize(
+            ResourceRef{DeviceId{100}, ResourceId{102}},
+            MeasurementQuantity::DURATION_NS);
+        GERDOS_CHECK(gated_evidence.succeeded_observations == 12);
+    }
+
     return 0;
 }
 
