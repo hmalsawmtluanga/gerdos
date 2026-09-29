@@ -49,11 +49,20 @@ a printed reason and exit green. Register the suite at configure time
 only when the toolchain is found (see the OpenCL/Vulkan blocks in
 `CMakeLists.txt`).
 
-## 6. Checklist
+## 6. Device fallback (OpenCL)
+
+The heterogeneous backend prefers a GPU device and falls back to a
+CPU device on the same platform when no GPU exists. The fallback
+verifies the engine (submission, staging, kernels, dispatch) — it
+never substantiates silicon claims: every runner prints the device
+name and kind, and hardware-matrix rows record which kind ran.
+
+## 7. Checklist
 
 - [ ] rejection-atomic submit with undo
 - [ ] shared storage ownership, teardown order
 - [ ] F32-compute structure via shared helpers
 - [ ] exact-value chains on the new engine (CPU reference)
 - [ ] availability gate with skip-with-reason
+- [ ] device identity printed (name + GPU / CPU-fallback)
 - [ ] both configs green, zero warnings, leakage green
