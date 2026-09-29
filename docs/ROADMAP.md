@@ -34,7 +34,9 @@ gates, runtime config.
 - Physical small-board record (or community replies via
   `docs/COMMUNITY_TESTING.md`).
 - First outside contribution through the documented path.
-- `gerdos-micro` profile once board data dictates the cut list.
+- `gerdos-micro` profile: v1 cut list defined structurally by Phase B
+  (both tiny models are members); trimmed by floor/board data when
+  hardware appears.
 
 Standing laws (not repeated per phase): no `OperationKind` — work stays
 parameters, never kinds; no gate inspects the work (pinned by test); no

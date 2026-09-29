@@ -1787,6 +1787,35 @@ The decision itself (argmax: *which* class) has no form and is
 refused by name (`ARGMAX`): scores are the model, the decision is
 the gap. This is the artifact a revival board actually runs.
 
+## Second tiny model: gated selection with a refused decision
+
+A second workload family proves the runtime is infrastructure, not a
+single demo: a gated sequence-selection pass over fresh-1.0 storage.
+The chain folds a table in place (REDUCE_SUM T→T gives
+`[6,1,1,1,1,1]`), fills a uniform partner (AFFINE P→2.0), bounds the
+table both ways (ELEMENTWISE_MAX gives `[6,2,2,2,2,2]`,
+ELEMENTWISE_MIN gives `[2,1,1,1,1,1]`), gates by predicate
+(MASK_SELECT gives `[6,2,2,2,2,2]`), gathers by computed index
+(idx = T−1 = `[5,0,0,0,0,0]`, picked = `[1,6,6,6,6,6]`), then
+reduces the pick: peak 6, floor 1, total 1+6·5 = 31. Every value is
+exact at F32. The pick-decision itself (argmax: *which* entry) has
+no form and is refused by name (`ARGMAX`), the same thesis
+symmetry as the first model: the selection is the model, the
+decision is the gap. Eleven ops cohere, one step is refused.
+The chain uses only already-proven forms in already-dispatched
+lanes — no new kernel, no new adapter verb, no tolerance lane.
+
+## Revival profile: `gerdos-micro` v1
+
+A workload is a `gerdos-micro` v1 member iff it uses only
+{ELEMENTWISE_AFFINE, MATRIX_PRODUCT, REDUCE_SUM, REDUCE_MIN,
+REDUCE_MAX, ELEMENTWISE_MIN, ELEMENTWISE_MAX, MASK_SELECT,
+GATHER, MOVE} at F32 (I8 reductions where exact), and anything
+else is refused by name from {SOFTMAX, ATTENTION, RESIDUAL_ADD,
+DIVIDE, LAYER_NORM, ARGMAX}. Both tiny models are members — that
+membership is the profile's conformance test. The cut list is
+structural until floor/board data trims it.
+
 ## Second consumer: signal processing (Phase 6)
 
 A second workload family proves the runtime is infrastructure, not a
