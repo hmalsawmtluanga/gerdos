@@ -42,6 +42,13 @@ Early architectural development.
 The project is intentionally being built from a minimal foundation rather than
 starting with model-specific or hardware-specific assumptions.
 
+What runs today: the v1 op set (affine, matmul, reductions, min/max,
+mask-select, gather, move — F32), tiny gated demos, and tiled
+128x128x128 matmul on the CPU/OpenCL/Vulkan engines. Full-model
+inference is not claimed: softmax, attention, layer-norm, divide,
+residual-add, and argmax are refused by name until the algebra gap
+closes — nothing here runs an LLM yet.
+
 ---
 
 ## Quickstart
