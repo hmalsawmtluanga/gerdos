@@ -174,6 +174,21 @@ else()
         "OpenCL not found: the heterogeneous backend test is not registered")
 endif()
 
+# The hardware census test always registers: without an OpenCL toolchain it
+# pins the CPU/RAM half and the empty device list.
+gerdos_add_test(gerdos_core_hw_census
+    tests/core_census.cpp)
+if (OpenCL_FOUND)
+    target_include_directories(gerdos_core_hw_census_test
+        PRIVATE ${OpenCL_INCLUDE_DIRS})
+    target_link_libraries(gerdos_core_hw_census_test
+        PRIVATE ${OpenCL_LIBRARIES})
+    target_compile_definitions(gerdos_core_hw_census_test
+        PRIVATE GERDOS_HAS_OPENCL
+                CL_HPP_TARGET_OPENCL_VERSION=300
+                CL_HPP_MINIMUM_OPENCL_VERSION=120)
+endif()
+
 # The Vulkan compute backend test requires a Vulkan toolchain and a real
 # GPU with a compute queue (software rasterizers do not count). The test
 # registers only when the toolchain is found and aborts at vk_available()
