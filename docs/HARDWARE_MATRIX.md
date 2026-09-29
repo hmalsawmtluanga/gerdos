@@ -55,7 +55,23 @@ Notes: hetero suite exit 0 on 12th Gen i5-12400F CPU device; tiny-gated B line e
   Debug hetero/demo/benchmark exit 0. No silicon claim: GPU-device run still pending (Mint or contributor).
 ```
 
-### Row 4+ — contributor machines
+### Row 4 — ceiling census (maintainer, 2026-09-29)
+
+```text
+CPU / RAM / OS: i5-12400F / 2x8GB DDR4-3200 / Win11 Pro build 26200
+GPU / driver: RX 6700 XT 12 GB / 32.0.21030.2001
+Toolchain: MSVC 19.51, CMake 4.3.1, Ninja 1.13.2, Vulkan SDK 1.4.363.0
+OpenCL vendors: Intel CPU Runtime 2026.0 (intelocl64.dll)
+Commit: ccbe973
+ctest: 33/35 in 4.79 s Release (34, 35 Not-Run: no sh.exe, document-only)
+Engines registered: cpu + vk + hetero
+Notes: census prints 12 threads, 17032929280 RAM bytes, 1 OpenCL device
+  (i5-12400F, OpenCL 3.0, 17032929280 global bytes, wg 8192, CPU kind);
+  identical values in Debug. First matrix row cited from census output
+  instead of hand-typed machine lore.
+```
+
+### Row 5+ — contributor machines
 
 Appended as submissions arrive. Most-wanted: any pre-2016 iGPU
 (small `maxWorkGroup` takes the plain-Matmul branch our ceiling
