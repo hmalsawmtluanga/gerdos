@@ -1160,6 +1160,50 @@ int main() {
             backend.sample(
                 DataResidencyRef{DataId{725}, DataResidencyId{7206}},
                 1) == 1.0f);
+
+        // The scalar division: T / U[0] = [6,1,1,1,1,1] / 2 =
+        // [3,0.5,0.5,0.5,0.5,0.5]. The uniform partner still holds
+        // [2,2,2,2,2,2] from the min/max pair, and the table was only
+        // ever read since, so no reseed is needed.
+        run(OperationDescription{
+                OperationId{853},
+                {DataId{720}, DataId{721}},
+                {DataId{725}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{
+                    6, 1, 0.0f, 1.0f, 0.0f, WorkForm::ELEMENTWISE_DIVIDE},
+            },
+            compute_binding(
+                {entry(
+                    DataBindingRole::INPUT,
+                    DataId{720},
+                    DataResidencyId{7201}),
+                 entry(
+                    DataBindingRole::INPUT,
+                    DataId{721},
+                    DataResidencyId{7202}),
+                 entry(
+                    DataBindingRole::OUTPUT,
+                    DataId{725},
+                    DataResidencyId{7206})}),
+            ExecutionId{953});
+
+        std::printf(
+            "gpu divide: %f %f\n",
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 0),
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}}, 1));
+        std::fflush(stdout);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                0) == 3.0f);
+        GERDOS_CHECK(
+            backend.sample(
+                DataResidencyRef{DataId{725}, DataResidencyId{7206}},
+                1) == 0.5f);
     }
 
     // ---------------------------------------------------------------------

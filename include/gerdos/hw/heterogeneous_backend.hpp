@@ -292,6 +292,15 @@ public:
             "    }"
             "    d[i] = d[i] * dscale + v[position] * sscale + bias;"
             "  }"
+            "}"
+            "__kernel void elementwise_divide(__global float* d,"
+            " const __global float* a, const __global float* b,"
+            " float dscale, float sscale, float bias, ulong passes) {"
+            "  size_t i = get_global_id(0);"
+            "  float divisor = b[0];"
+            "  for (ulong pass = 0; pass < passes; ++pass) {"
+            "    d[i] = d[i] * dscale + (a[i] / divisor) * sscale + bias;"
+            "  }"
             "}");
 
         if (program_.build(std::vector<cl::Device>{device_}) !=
@@ -845,6 +854,25 @@ private:
                 binding.data[consuming[1]].residency.data !=
                     binding.data[out].residency.data) {
                 gather(
+                    context,
+                    device,
+                    program,
+                    slots[consuming[0]],
+                    slots[consuming[1]],
+                    destination,
+                    queue,
+                    gpu,
+                    work);
+                continue;
+            }
+
+            if (work.form == WorkForm::ELEMENTWISE_DIVIDE &&
+                consuming.size() >= 2 &&
+                binding.data[consuming[0]].residency.data !=
+                    binding.data[out].residency.data &&
+                binding.data[consuming[1]].residency.data !=
+                    binding.data[out].residency.data) {
+                divide(
                     context,
                     device,
                     program,
@@ -1837,6 +1865,104 @@ private:
                 staged_destination[i] =
                     staged_destination[i] * work.destination_scale +
                     chosen * work.source_scale + work.constant;
+            }
+        }
+
+        write_back(context, device, destination, staged_destination);
+    }
+
+    // The scalar division: A[i] / B[0] under the affine wrapper, IEEE-754
+    // with no special-casing — the divisor rides at the first element of
+    // the second operand on the device exactly as on the host.
+    static void divide(
+        const cl::Context& context,
+        const cl::Device& device,
+        const cl::Program& program,
+        const Slot& dividend,
+        const Slot& divisor,
+        const Slot& destination,
+        cl::CommandQueue& queue,
+        bool gpu,
+        const WorkDescription& work) {
+        const auto elements = work.elements;
+        const auto floats = elements * sizeof(float);
+
+        if (gpu) {
+            cl::Buffer staged_dividend = dividend.device;
+            cl::Buffer staged_divisor = divisor.device;
+            cl::Buffer staged_destination = destination.device;
+            std::vector<float> decoded_dividend(elements, 0.0f);
+            std::vector<float> decoded_divisor(elements, 0.0f);
+            decode_all(dividend.dtype, dividend.host->data(), decoded_dividend.data(), elements);
+            decode_all(divisor.dtype, divisor.host->data(), decoded_divisor.data(), elements);
+
+            if (!dividend.on_device) {
+                staged_dividend = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    floats,
+                    decoded_dividend.data());
+            }
+
+            if (!divisor.on_device) {
+                staged_divisor = cl::Buffer(
+                    context,
+                    CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                    floats,
+                    decoded_divisor.data());
+            }
+
+            if (!destination.on_device) {
+                staged_destination = cl::Buffer(
+                    context, CL_MEM_READ_WRITE, floats, nullptr);
+            }
+
+            cl::Kernel kernel(program, "elementwise_divide");
+            kernel.setArg(0, staged_destination);
+            kernel.setArg(1, staged_dividend);
+            kernel.setArg(2, staged_divisor);
+            kernel.setArg(3, work.destination_scale);
+            kernel.setArg(4, work.source_scale);
+            kernel.setArg(5, work.constant);
+            kernel.setArg(6, static_cast<cl_ulong>(work.passes));
+            queue.enqueueNDRangeKernel(
+                kernel, cl::NullRange, cl::NDRange(elements));
+
+            if (!destination.on_device) {
+                std::vector<float> working(elements, 0.0f);
+                queue.enqueueReadBuffer(
+                    staged_destination,
+                    CL_TRUE,
+                    0,
+                    floats,
+                    working.data());
+                encode_all(destination.dtype, working.data(), destination.host->data(), elements);
+            }
+
+            return;
+        }
+
+        std::vector<float> staged_dividend(elements, 1.0f);
+        std::vector<float> staged_divisor(elements, 1.0f);
+        std::vector<float> staged_destination(elements, 1.0f);
+        stage_pair(
+            context,
+            device,
+            dividend,
+            divisor,
+            destination,
+            staged_dividend,
+            staged_divisor,
+            staged_destination);
+
+        const float scalar = staged_divisor[0];
+
+        for (std::size_t pass = 0; pass < work.passes; ++pass) {
+            for (std::size_t i = 0; i < elements; ++i) {
+                staged_destination[i] =
+                    staged_destination[i] * work.destination_scale +
+                    (staged_dividend[i] / scalar) * work.source_scale +
+                    work.constant;
             }
         }
 
