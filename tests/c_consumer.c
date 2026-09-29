@@ -83,6 +83,19 @@ int main(int argc, char** argv) {
         gerdos_destroy(runtime);
         return 1;
     }
+    /* Host identity: the machine the runtime actually saw. */
+    const char* host = gerdos_host_text(runtime);
+    if (host == NULL || host[0] == '\0') {
+        printf("FAIL: no host identity\n");
+        gerdos_destroy(runtime);
+        return 1;
+    }
+    printf("host: %s\n", host);
+    if (strcmp(gerdos_host_text(NULL), "(no runtime)") != 0) {
+        printf("FAIL: null host text not handled\n");
+        gerdos_destroy(runtime);
+        return 1;
+    }
     if (gerdos_sample(NULL, 0, 0, 0) != 0.0f || gerdos_evidence(NULL) != 0 || gerdos_run(NULL) != -1) {
         printf("FAIL: null runtime not handled\n");
         gerdos_destroy(runtime);

@@ -274,6 +274,17 @@ add_library(gerdos_c SHARED src/gerdos_c.cpp)
 # GERDOS_API expands to dllexport; consumers import by default.
 target_compile_definitions(gerdos_c PRIVATE GERDOS_BUILD_CABI)
 gerdos_configure_target(gerdos_c)
+# The C ABI populates the host graph from the census, so it shares the
+# census toolchain: OpenCL includes and loader only when found.
+if (OpenCL_FOUND)
+    target_include_directories(gerdos_c
+        PRIVATE ${OpenCL_INCLUDE_DIRS})
+    target_link_libraries(gerdos_c PRIVATE ${OpenCL_LIBRARIES})
+    target_compile_definitions(gerdos_c
+        PRIVATE GERDOS_HAS_OPENCL
+                CL_HPP_TARGET_OPENCL_VERSION=300
+                CL_HPP_MINIMUM_OPENCL_VERSION=120)
+endif()
 
 # Pure-C consumer: compiled with cc, proves the ABI boundary.
 add_executable(gerdos_c_consumer_test tests/c_consumer.c)

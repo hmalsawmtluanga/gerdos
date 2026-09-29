@@ -16,6 +16,7 @@
 #include "gerdos/core/physical_binding_validation.hpp"
 #include "gerdos/core/workload_artifact.hpp"
 #include "gerdos/cpu/cpu_backend.hpp"
+#include "gerdos/hw/census.hpp"
 
 struct gerdos_runtime {
     gerdos::DeviceRegistry devices;
@@ -26,10 +27,20 @@ struct gerdos_runtime {
     gerdos::MeasurementRegistry measurements;
     gerdos::CpuBackend backend;
     unsigned long long next_execution{1};
+    std::string host_line{"(no census)"};
 
     gerdos_runtime() {
+        // Stable numeric IDs are ABI, not claims; the descriptions come
+        // from the census. An unrecognised CPU keeps the role name
+        // "host"; unknown RAM bytes keep the unbounded/unknown sentinel.
+        const gerdos::Census census = gerdos::collect_census();
+        const std::string host_name =
+            census.cpu_name == "(unknown)" ? "host" : census.cpu_name;
+        host_line = host_name + " | threads=" +
+                    std::to_string(census.cpu_threads) + " | ram=" +
+                    std::to_string(census.ram_bytes) + "B";
         auto* host = devices.create_device(
-            gerdos::DeviceDescription{gerdos::DeviceId{100}, "host"});
+            gerdos::DeviceDescription{gerdos::DeviceId{100}, host_name});
         (void)host->add_resource(
             gerdos::Resource{
                 gerdos::ResourceDescription{
@@ -41,6 +52,11 @@ struct gerdos_runtime {
             });
         host->find_resource(gerdos::ResourceId{101})
             ->set_availability(gerdos::ResourceAvailability::AVAILABLE);
+        if (census.ram_bytes > 0) {
+            host->find_resource(gerdos::ResourceId{101})
+                ->set_capacity(
+                    static_cast<std::size_t>(census.ram_bytes));
+        }
         (void)host->add_resource(
             gerdos::Resource{
                 gerdos::ResourceDescription{
@@ -184,6 +200,18 @@ float gerdos_sample(
             index);
     } catch (...) {
         return 0.0f;
+    }
+}
+
+const char* gerdos_host_text(const gerdos_runtime* runtime) {
+    if (runtime == nullptr) {
+        return "(no runtime)";
+    }
+
+    try {
+        return runtime->host_line.c_str();
+    } catch (...) {
+        return "(no runtime)";
     }
 }
 

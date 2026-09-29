@@ -11,6 +11,7 @@ int main() {
 
     std::printf("cpu threads: %u\n", census.cpu_threads);
     std::printf("ram bytes: %llu\n", (unsigned long long)census.ram_bytes);
+    std::printf("cpu name: %s\n", census.cpu_name.c_str());
     std::printf(
         "opencl devices: %u\n",
         (unsigned int)census.opencl_devices.size());
@@ -28,6 +29,7 @@ int main() {
 
     GERDOS_CHECK(census.cpu_threads >= 1);
     GERDOS_CHECK(census.ram_bytes > 0);
+    GERDOS_CHECK(!census.cpu_name.empty());
 #if defined(GERDOS_HAS_OPENCL)
     GERDOS_CHECK(!census.opencl_devices.empty());
     for (const auto& device : census.opencl_devices) {

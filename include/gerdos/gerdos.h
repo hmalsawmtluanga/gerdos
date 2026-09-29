@@ -50,6 +50,11 @@ GERDOS_API float gerdos_sample(
 /* Successful observation count (evidence growth, deterministic). */
 GERDOS_API unsigned long long gerdos_evidence(const gerdos_runtime* runtime);
 
+/* Host identity line the runtime actually saw
+ * ("<cpu> | threads=<n> | ram=<bytes>B"). Valid until gerdos_destroy;
+ * a null runtime reports "(no runtime)", never a crash. */
+GERDOS_API const char* gerdos_host_text(const gerdos_runtime* runtime);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

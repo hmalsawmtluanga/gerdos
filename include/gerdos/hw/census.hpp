@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <vector>
@@ -18,6 +19,12 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#endif
+
+#if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
+#include <intrin.h>
+#elif defined(__i386__) || defined(__x86_64__)
+#include <cpuid.h>
 #endif
 
 #if defined(GERDOS_HAS_OPENCL)
@@ -39,6 +46,7 @@ struct CensusDevice {
 struct Census {
     unsigned cpu_threads{0};
     std::uint64_t ram_bytes{0};
+    std::string cpu_name{"(unknown)"};
     std::vector<CensusDevice> opencl_devices;
 };
 
@@ -96,10 +104,59 @@ inline void census_opencl_devices(std::vector<CensusDevice>& out) {
 #endif
 }
 
+// Best-effort CPU brand string via the x86 CPUID extended leaves.
+// Non-x86 or leaf-less machines report "(unknown)": never invented.
+inline std::string census_cpu_name() {
+#if (defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))) || \
+    defined(__i386__) || defined(__x86_64__)
+    unsigned int words[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+#if defined(_MSC_VER)
+    int regs[4] = {0, 0, 0, 0};
+    __cpuid(regs, static_cast<int>(0x80000000u));
+    if (static_cast<unsigned int>(regs[0]) < 0x80000004u) {
+        return "(unknown)";
+    }
+    for (unsigned int leaf = 0; leaf < 3; ++leaf) {
+        __cpuid(regs, static_cast<int>(0x80000002u + leaf));
+        for (unsigned int word = 0; word < 4; ++word) {
+            words[leaf * 4 + word] = static_cast<unsigned int>(regs[word]);
+        }
+    }
+#else
+    if (__get_cpuid_max(0x80000000u, nullptr) < 0x80000004u) {
+        return "(unknown)";
+    }
+    for (unsigned int leaf = 0; leaf < 3; ++leaf) {
+        unsigned int a{0};
+        unsigned int b{0};
+        unsigned int c{0};
+        unsigned int d{0};
+        __get_cpuid(0x80000002u + leaf, &a, &b, &c, &d);
+        words[leaf * 4 + 0] = a;
+        words[leaf * 4 + 1] = b;
+        words[leaf * 4 + 2] = c;
+        words[leaf * 4 + 3] = d;
+    }
+#endif
+    char brand[49] = {};
+    std::memcpy(brand, words, 48);
+    const std::string raw(brand);
+    const std::string::size_type first = raw.find_first_not_of(' ');
+    if (first == std::string::npos) {
+        return "(unknown)";
+    }
+    const std::string::size_type last = raw.find_last_not_of(' ');
+    return raw.substr(first, last - first + 1);
+#else
+    return "(unknown)";
+#endif
+}
+
 inline Census collect_census() {
     Census census;
     census.cpu_threads = std::thread::hardware_concurrency();
     census.ram_bytes = census_ram_bytes();
+    census.cpu_name = census_cpu_name();
     census_opencl_devices(census.opencl_devices);
     return census;
 }
