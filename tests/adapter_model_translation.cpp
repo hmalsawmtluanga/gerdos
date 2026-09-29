@@ -51,17 +51,16 @@ int main() {
     const Adaptation adaptation = adapt("decoder fragment", fragment);
 
     GERDOS_CHECK(adaptation.workload.name == "decoder fragment");
-    GERDOS_CHECK(adaptation.workload.operations.size() == 11);
+    GERDOS_CHECK(adaptation.workload.operations.size() == 12);
 
     // Fail-closed translation: what the algebra cannot express exactly is
     // refused by name, never approximated silently.
-    GERDOS_CHECK(adaptation.refused.size() == 6);
+    GERDOS_CHECK(adaptation.refused.size() == 5);
     GERDOS_CHECK(adaptation.refused[0].find("SOFTMAX") == 0);
     GERDOS_CHECK(adaptation.refused[1].find("ATTENTION") == 0);
     GERDOS_CHECK(adaptation.refused[2].find("RESIDUAL_ADD") == 0);
-    GERDOS_CHECK(adaptation.refused[3].find("DIVIDE") == 0);
-    GERDOS_CHECK(adaptation.refused[4].find("LAYER_NORM") == 0);
-    GERDOS_CHECK(adaptation.refused[5].find("ARGMAX") == 0);
+    GERDOS_CHECK(adaptation.refused[3].find("LAYER_NORM") == 0);
+    GERDOS_CHECK(adaptation.refused[4].find("ARGMAX") == 0);
 
     const auto& linear = adaptation.workload.operations[0];
     GERDOS_CHECK(
@@ -123,6 +122,15 @@ int main() {
     GERDOS_CHECK(mean.work.elements == 6);
     GERDOS_CHECK(mean.work.source_scale == 1.0f / 6.0f);
     GERDOS_CHECK(mean.work.destination_scale == 0.0f);
+
+    // DIVIDE lowers to the scalar-divisor form: two inputs, six
+    // elements, plain A[i] / B[0] scales.
+    const auto& divide = adaptation.workload.operations[11];
+    GERDOS_CHECK(divide.work.form == WorkForm::ELEMENTWISE_DIVIDE);
+    GERDOS_CHECK(divide.work.elements == 6);
+    GERDOS_CHECK(divide.inputs.size() == 2);
+    GERDOS_CHECK(divide.work.destination_scale == 0.0f);
+    GERDOS_CHECK(divide.work.source_scale == 1.0f);
 
     // ---------------------------------------------------------------------
     // 1b. Dtype carriage: steps run in their declared dtype
@@ -331,8 +339,9 @@ int main() {
         // SOFTMAX as a composite is refused — but its expressible
         // prefix (EXPONENTIAL + REDUCE_SUM) adapts to chained steps
         // that execute in dependency order with exact values. The
-        // refusal names the missing divide; the prefix proves the
-        // chain machinery the full composite will ride on.
+        // refusal names the missing planner-owned intermediates; the
+        // prefix proves the chain machinery the full composite will
+        // ride on, closed by a separate DIVIDE step.
         const std::vector<ModelStep> prefix{
             ModelStep{ModelOp::EXPONENTIAL, 700, 0, 0, 701, 6},
             ModelStep{ModelOp::REDUCE_SUM, 701, 0, 0, 702, 6},

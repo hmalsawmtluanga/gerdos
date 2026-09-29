@@ -1,7 +1,8 @@
 # Decoder prefix layer: projections, shifts, exponentials, reductions,
 # means — the exactly-expressible scope. Fresh allocations decode to 1.0.
 # Q = LINEAR(ones(2x3), ones(3x2)) -> [[3,3],[3,3]]; shift is affine;
-# exp prefix over the raised 6-vector; max/mean close the statistics.
+# exp prefix over the raised 6-vector; max/mean close the statistics and
+# a divide-by-peak normalizes the exponentials (all ones here).
 version 1
 workload decoder-prefix
 
@@ -25,8 +26,11 @@ residency 612 6012 100 101 total
 usable 612 6012
 data 613 peak
 residency 613 6013 100 101 peak
+usable 613 6013
 data 614 mean
 residency 614 6014 100 101 mean
+data 616 divided
+residency 616 6016 100 101 divided
 
 data 620 norm_in
 residency 620 6020 100 101 norm_in
@@ -41,3 +45,4 @@ op 703 inputs=611 outputs=612 deps=702 req=COMPUTE:1 form=EXPONENTIAL dtype=F32 
 op 704 inputs=612 outputs=613 deps=703 req=COMPUTE:1 form=REDUCE_MAX dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0
 op 705 inputs=612 outputs=614 deps=703 req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=6 passes=1 ds=0 ss=0.16666667 c=0
 op 706 inputs=620 outputs=621 deps=- req=COMPUTE:1 form=REDUCE_SUM dtype=F32 elements=6 passes=1 ds=0 ss=0.16666667 c=0
+op 707 inputs=612,613 outputs=616 deps=703,704 req=COMPUTE:1 form=ELEMENTWISE_DIVIDE dtype=F32 elements=6 passes=1 ds=0 ss=1 c=0

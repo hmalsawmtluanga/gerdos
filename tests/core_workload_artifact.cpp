@@ -474,11 +474,11 @@ int main(int argc, char** argv) {
     {
         // The exactly-expressible layer scope as model steps: LINEAR
         // projection, AFFINE shift, REDUCE_SUM fold, EXPONENTIAL lift,
-        // REDUCE_MAX peak, mean-as-sum-with-1/N, plus the refusals that
-        // bound the scope (RESIDUAL_ADD needs two sources, DIVIDE and
-        // LAYER_NORM need division/variance, SOFTMAX/ATTENTION need the
-        // closing divide). Every step translates exactly or is refused
-        // loudly — never approximated.
+        // REDUCE_MAX peak, mean-as-sum-with-1/N, DIVIDE by the peak,
+        // plus the refusals that bound the scope (RESIDUAL_ADD needs
+        // two sources, LAYER_NORM needs variance, SOFTMAX/ATTENTION
+        // need planner-level intermediates). Every step translates
+        // exactly or is refused loudly — never approximated.
         using gerdos::adapters::adapt;
         using gerdos::adapters::Adaptation;
         using gerdos::adapters::ModelOp;
@@ -499,21 +499,22 @@ int main(int argc, char** argv) {
         };
 
         const Adaptation translated = adapt("decoder layer", layer);
-        GERDOS_CHECK(translated.workload.operations.size() == 7);
-        GERDOS_CHECK(translated.refused.size() == 5);
+        GERDOS_CHECK(translated.workload.operations.size() == 8);
+        GERDOS_CHECK(translated.refused.size() == 4);
         GERDOS_CHECK(translated.refused[0].find("RESIDUAL_ADD") == 0);
-        GERDOS_CHECK(translated.refused[1].find("DIVIDE") == 0);
-        GERDOS_CHECK(translated.refused[2].find("LAYER_NORM") == 0);
-        GERDOS_CHECK(translated.refused[3].find("SOFTMAX") == 0);
-        GERDOS_CHECK(translated.refused[4].find("ATTENTION") == 0);
+        GERDOS_CHECK(translated.refused[1].find("LAYER_NORM") == 0);
+        GERDOS_CHECK(translated.refused[2].find("SOFTMAX") == 0);
+        GERDOS_CHECK(translated.refused[3].find("ATTENTION") == 0);
 
         GERDOS_CHECK(translated.workload.operations[0].work.form == WorkForm::MATRIX_PRODUCT);
         GERDOS_CHECK(translated.workload.operations[5].work.form == WorkForm::REDUCE_SUM);
         GERDOS_CHECK(translated.workload.operations[5].work.source_scale == 1.0f / 6.0f);
+        GERDOS_CHECK(translated.workload.operations[7].work.form == WorkForm::ELEMENTWISE_DIVIDE);
+        GERDOS_CHECK(translated.workload.operations[7].work.elements == 6);
 
         // The translated prefix executes through the full gate chain
         // with the workload artifact cross-checking identical values:
-        // the artifact file declares the same seven operations.
+        // the artifact file declares the same eight operations.
         Machine layered;
         CpuBackend layered_backend;
         Executor layered_executor(
@@ -532,7 +533,7 @@ int main(int argc, char** argv) {
         const auto layered_parsed = parse_artifact(
             load_text((directory + "/decoder_prefix.gwd").c_str()));
         GERDOS_CHECK(layered_parsed.ok);
-        GERDOS_CHECK(layered_parsed.artifact.workload.operations.size() == 7);
+        GERDOS_CHECK(layered_parsed.artifact.workload.operations.size() == 8);
 
         std::string layered_reason;
         GERDOS_CHECK(populate_registries(
@@ -540,7 +541,7 @@ int main(int argc, char** argv) {
             layered.operations, layered_reason));
 
         const auto layered_plan = layered_planner.plan_attempts(layered.operations);
-        GERDOS_CHECK(layered_plan.size() == 7);
+        GERDOS_CHECK(layered_plan.size() == 8);
 
         // Hand-rolled CPU reference (outside GERDOS): the same chain
         // computed directly. Bit-exact where integer shapes govern
@@ -614,6 +615,15 @@ int main(int argc, char** argv) {
         GERDOS_CHECK(e1 == ref_exp[1]);
         GERDOS_CHECK(peak == ref_exp[0]);
         GERDOS_CHECK(std::fabs(mean - ref_sum / 6.0f) <= std::numeric_limits<float>::epsilon() * (ref_sum / 6.0f) * 4);
+        // Divide-by-peak: each element over the scalar peak at
+        // 613[0] (the divisor is the second operand first element).
+        // The peak element normalizes to exactly 1.0 (x / x on
+        // identical floats); the rest match the float ratio bit-exact.
+        for (std::size_t i = 0; i < 6; ++i) {
+            const float dividend = layered_backend.sample(DataResidencyRef{DataId{612}, DataResidencyId{6012}}, i);
+            GERDOS_CHECK(layered_backend.sample(DataResidencyRef{DataId{616}, DataResidencyId{6016}}, i) == dividend / peak);
+        }
+        GERDOS_CHECK(layered_backend.sample(DataResidencyRef{DataId{616}, DataResidencyId{6016}}, 0) == 1.0f);
        // ---------------------------------------------------------------------
     // 6. The signal chain translates, executes, and verifies
     // ---------------------------------------------------------------------

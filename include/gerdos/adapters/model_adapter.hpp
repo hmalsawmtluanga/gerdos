@@ -42,7 +42,7 @@ enum class ModelOp {
     // Refused by the current algebra — kept so refusal is explicit.
     SOFTMAX,
     ATTENTION,
-    // Refused: needs division the algebra cannot express exactly.
+    // dst = A[i] / B[0]: the scalar-divisor form.
     DIVIDE,
     LAYER_NORM,
     // Refused: selecting which index holds the extreme has no form.
@@ -413,26 +413,27 @@ struct Adaptation {
         }
 
         case ModelOp::SOFTMAX:
-            // Composite decision (Phase 1b): multi-step computations
-            // are planner-level chains of single-form operations, not
-            // in-work step lists. The softmax chain decomposes to
-            // EXPONENTIAL + REDUCE_SUM + divide-by-sum — and the algebra
-            // has no division form, so the whole step is refused: a
-            // partial exp+reduce emission would masquerade as progress
-            // toward normalized outputs the workload cannot produce.
-            // The expressible prefix (EXPONENTIAL, REDUCE_SUM) is
-            // available as separate steps; normalization awaits a
-            // division-capable form in a later algebra extension.
+            // Composite decision (Phase 1b, revisited in Phase D):
+            // multi-step computations are planner-level chains of
+            // single-form operations, not in-work step lists. The
+            // softmax chain decomposes to EXPONENTIAL + REDUCE_SUM +
+            // ELEMENTWISE_DIVIDE — every link now exists, but one step
+            // cannot mint the intermediate records the chain needs, so
+            // the whole step is refused: a partial emission would
+            // masquerade as normalized outputs the workload cannot
+            // produce. The links are available as separate steps; the
+            // planner chains them once it can own the intermediates.
             adaptation.refused.push_back(
                 "SOFTMAX: refused as a composite — its EXPONENTIAL + "
-                "REDUCE_SUM prefix is expressible as separate chained "
-                "steps, but the closing divide-by-sum has no form yet");
+                "REDUCE_SUM + divide-by-sum chain is expressible only "
+                "as separate chained steps, but one step cannot mint "
+                "the intermediate records the chain needs");
             break;
 
         case ModelOp::ATTENTION:
             adaptation.refused.push_back(
                 "ATTENTION: depends on SOFTMAX, which is refused as a "
-                "composite until its closing divide-by-sum has a form");
+                "composite until the planner chains its closing divide");
             break;
 
         case ModelOp::RESIDUAL_ADD:
@@ -477,16 +478,41 @@ struct Adaptation {
             break;
         }
 
-        case ModelOp::DIVIDE:
-            adaptation.refused.push_back(
-                "DIVIDE: the algebra has no division form — the exact"
-                " reason SOFTMAX stays refused");
+        case ModelOp::DIVIDE: {
+            if (step.rows == 0) {
+                adaptation.refused.push_back(
+                    "DIVIDE without an element count");
+                continue;
+            }
+
+            adaptation.workload.operations.push_back(
+                OperationDescription{
+                    OperationId{next_id++},
+                    {DataId{step.operand_a}, DataId{step.operand_b}},
+                    {DataId{step.result}},
+                    {},
+                    {
+                        ResourceRequirement{
+                            ResourceBindingRole::COMPUTE,
+                            1,
+                        },
+                    },
+                    WorkDescription{
+                        step.rows,
+                        1,
+                        0.0f,
+                        1.0f,
+                        0.0f,
+                        WorkForm::ELEMENTWISE_DIVIDE,
+                    },
+                });
             break;
+        }
 
         case ModelOp::LAYER_NORM:
             adaptation.refused.push_back(
-                "LAYER_NORM: needs variance and division, neither of"
-                " which the algebra expresses exactly");
+                "LAYER_NORM: needs variance, which the algebra does not "
+                "express exactly (division itself now has a form)");
             break;
 
         case ModelOp::ARGMAX:
