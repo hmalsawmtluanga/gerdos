@@ -1476,6 +1476,18 @@ can never read out of bounds. All comparison and selection forms apply
 elementwise to every producing entry; the minimum-reduction form writes
 only its first element, exactly as the other reductions do.
 
+Division closes the normalization gap the adapter names. A two-operand
+elementwise form takes the first two consuming entries as the dividend
+vector A and the scalar divisor B: `dst * destination_scale +
+source_scale * (A[i] / B[0]) + constant`, applied elementwise to every
+producing entry. The divisor is the first element of the second
+operand — the same index where every reduction folds its scalar — and
+the remaining elements are ignored, so a reduce-then-divide chain needs
+no broadcast form. Division is IEEE-754 single-precision with no
+special-casing: a zero divisor yields the IEEE result (infinity or NaN)
+deterministically on every engine, pinned by test exactly like any
+other value.
+
 The work description is parameters, not kinds: there is no operation type
 anywhere in the core, and no gate inspects the work. Structural validation,
 runtime resolution, semantic admissibility, and execution admission judge an
@@ -1500,8 +1512,8 @@ iterated form: each pass composes over the previous result. This holds for
 the single-source elementwise forms, including the exponential: an
 in-place pass reads the value the previous pass wrote. All three
 reduction forms are also iterated: each pass re-folds the unchanged
-source into the running first element. Multi-operand selections
-(elementwise min/max, predicate selection, gather) require operand Data
+source into the running first element. Multi-operand forms
+(elementwise min/max, predicate selection, gather, division) require operand Data
 records distinct from the destination Data: an attempt that aliases an
 operand Data with its destination Data writes nothing, exactly as a
 compute shape with fewer than two consuming entries writes nothing
