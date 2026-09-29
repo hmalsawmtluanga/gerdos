@@ -68,7 +68,19 @@ toolchain the device list is empty. Runners print the census before
 asserting, and hardware-matrix rows cite it instead of hand-typed
 machine lore.
 
-## 8. Checklist
+## 8. C ABI host identity
+
+The numeric host IDs (device 100, RAM 101, compute 102) are stable ABI,
+not claims — consumers may hold them across versions. What the census
+owns is the description: `gerdos_create` names the host device from the
+census CPU brand string and stamps the RAM resource capacity from census
+RAM bytes (zero census bytes keep the documented unbounded/unknown
+sentinel, never a refusal). `gerdos_host_text` reports that line
+(`<cpu> | threads=<n> | ram=<bytes>B`) so any consumer — including
+`python -m gerdos report` — prints the machine the runtime actually saw.
+A null runtime reports `(no runtime)`, never a crash.
+
+## 9. Checklist
 
 - [ ] rejection-atomic submit with undo
 - [ ] shared storage ownership, teardown order
