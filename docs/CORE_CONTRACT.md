@@ -1799,6 +1799,17 @@ semantics; the leakage guard covers them identically. The family
 reuses the runtime, planner, and backends untouched, ships its own
 artifact, and prints its own verdict with a full reproduction record.
 
+## Text format: LF canonical, CRLF accepted
+
+Every text input the runtime reads — workload artifacts, runtime
+config files — is parsed as bytes: lines split on `\n`, then one
+trailing `\r` per line is stripped before any other rule runs. The
+canonical on-disk form is LF (`.gitattributes` holds every checkout
+to LF), but a CRLF file parses identically — a lone `\r` line is
+blank, and a `\r` anywhere else is refused like any other stray
+byte. Either way the verdict is identical: CRLF parses exactly like
+its LF twin, pinned by regression tests that feed both.
+
 ## Workload artifact format (version 1)
 
 The on-disk form of a workload is a line-oriented text format — the

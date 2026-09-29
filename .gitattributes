@@ -1,0 +1,5 @@
+# Canonical LF: text is LF in the repo and on every checkout, so a
+# Windows autocrlf setting can never smuggle carriage returns into
+# inputs that are read as raw bytes. Parsers accept CRLF anyway
+# (CORE_CONTRACT "Text format"), so foreign CRLF files still work.
+* text=auto eol=lf
