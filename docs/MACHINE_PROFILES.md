@@ -76,7 +76,10 @@ Dispatched and verified on silicon: `FillVec` (fill seeds), affine via
 `MatmulTile` for all three tested shapes (2x3x2, 2x3x1, tiled
 17x17x17 — all exact), `ElementwiseMinmax`, `MaskSelect`, `Gather`,
 and the composed tiny-classifier chain (`W=2 scores=6 biased=6.5
-layer2=14 stats=14`).
+layer2=14 stats=14`), plus the gated-selector chain (`T=[6,1..] P=2
+hi=6/2 lo=2/1 gate=6/2 picked=1/6 peak=6 floor=1 total=31`,
+12 ops coherent) — proven exact on the CPU artifact and on the
+Vulkan engine, in Release and Debug with zero warnings.
 
 NOT dispatched on this run (pipelines created at init, never
 selected): the scalar `Transform` / `Exponential` / `Fill` shaders —
@@ -98,9 +101,12 @@ implementation differences. Observed: `404.428680` vs `404.428802`
 40.3 ms Debug. `gerdos_core_vk_compute`: ~530-560 ms in both
 configs (558.6 / 531.8 / 529.3 Release, 551.7 Debug) — dominated
 by Vulkan instance/device/pipeline setup, which is why the host
-build type barely moves it. Full `ctest`: 29/31 in ~1.1 s in
-both configs; the 2 gaps are the known environmental Not-Runs
-(no `sh.exe`, no Python), identical in Release and Debug.
+build type barely moves it. After the gated-selector mirror:
+`vk_compute` 0.75 s Release (setup still dominates; the 12
+extra ops add ~0.2 s), full
+`ctest` 29/31 in 1.21 s. The 2 gaps are the known
+environmental Not-Runs (no `sh.exe`, no Python), identical in
+Release and Debug.
 
 Floor-vs-ceiling note: the Mint i3-8100 comparison is deferred —
 that machine is not available. When it is: pull `db54a8a`,
