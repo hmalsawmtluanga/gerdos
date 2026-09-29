@@ -255,6 +255,9 @@ install(
 # C ABI library (flagship backends untouched behind the shim).
 # Shared: ctypes consumers load it directly (static archives cannot).
 add_library(gerdos_c SHARED src/gerdos_c.cpp)
+# Export anchor: compiling the library defines GERDOS_BUILD_CABI so
+# GERDOS_API expands to dllexport; consumers import by default.
+target_compile_definitions(gerdos_c PRIVATE GERDOS_BUILD_CABI)
 gerdos_configure_target(gerdos_c)
 
 # Pure-C consumer: compiled with cc, proves the ABI boundary.
