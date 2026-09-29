@@ -692,6 +692,31 @@ int main() {
             ExecutionId{948});
         GERDOS_CHECK(backend.sample(DataResidencyRef{DataId{742}, DataResidencyId{7403}}, 0) == 1.0f);
         GERDOS_CHECK(backend.sample(DataResidencyRef{DataId{742}, DataResidencyId{7403}}, 1) == 6.0f);
+
+        // Divide: T / 2 reads the scalar divisor at B[0]: [3,0.5,...].
+        run(
+            OperationDescription{
+                OperationId{849},
+                {DataId{740}, DataId{741}},
+                {DataId{742}},
+                {},
+                {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+                WorkDescription{6, 1, 0.0f, 1.0f, 0.0f, WorkForm::ELEMENTWISE_DIVIDE},
+            },
+            [&] {
+                auto binding = compute_on(gpu_compute);
+                binding.data.push_back(entry(DataBindingRole::INPUT, DataId{740}, DataResidencyId{7401}));
+                binding.data.push_back(entry(DataBindingRole::INPUT, DataId{741}, DataResidencyId{7402}));
+                binding.data.push_back(entry(DataBindingRole::OUTPUT, DataId{742}, DataResidencyId{7403}));
+                return binding;
+            }(),
+            ExecutionId{949});
+        const float div_head = backend.sample(DataResidencyRef{DataId{742}, DataResidencyId{7403}}, 0);
+        const float div_tail = backend.sample(DataResidencyRef{DataId{742}, DataResidencyId{7403}}, 1);
+        std::printf("vk divide: %f %f (expect 3.0 0.5)\n", div_head, div_tail);
+        std::fflush(stdout);
+        GERDOS_CHECK(div_head == 3.0f);
+        GERDOS_CHECK(div_tail == 0.5f);
     }
 
     // ---------------------------------------------------------------------

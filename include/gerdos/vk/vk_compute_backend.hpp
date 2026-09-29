@@ -337,6 +337,8 @@ private:
         VkPipelineLayout mask_layout{VK_NULL_HANDLE};
         VkPipeline gather{VK_NULL_HANDLE};
         VkPipelineLayout gather_layout{VK_NULL_HANDLE};
+        VkPipeline divide{VK_NULL_HANDLE};
+        VkPipelineLayout divide_layout{VK_NULL_HANDLE};
         VkPipeline exponential{VK_NULL_HANDLE};
         VkPipelineLayout exponential_layout{VK_NULL_HANDLE};
         VkDescriptorSetLayout layout1{VK_NULL_HANDLE};
@@ -692,6 +694,10 @@ private:
                    context_.layout3, sizeof(PcAffine), &context_.gather,
                    &context_.gather_layout) &&
                make_pipeline(
+                   kSpvDivide.data(), kSpvDivide.size(),
+                   context_.layout3, sizeof(PcAffine), &context_.divide,
+                   &context_.divide_layout) &&
+               make_pipeline(
                    kSpvExponential.data(), kSpvExponential.size(),
                    context_.layout2, sizeof(PcAffine),
                    &context_.exponential, &context_.exponential_layout);
@@ -779,7 +785,7 @@ private:
             context_.exponential_vec, context_.fill_vec,
             context_.reduce_sum, context_.reduce_minmax,
             context_.select, context_.mask, context_.gather,
-            context_.exponential};
+            context_.divide, context_.exponential};
 
         for (const auto pipeline : pipelines) {
             if (pipeline != VK_NULL_HANDLE) {
@@ -793,7 +799,8 @@ private:
             context_.exponential_vec_layout, context_.fill_vec_layout,
             context_.reduce_sum_layout, context_.reduce_minmax_layout,
             context_.select_layout, context_.mask_layout,
-            context_.gather_layout, context_.exponential_layout};
+            context_.gather_layout, context_.divide_layout,
+            context_.exponential_layout};
 
         for (const auto layout : layouts) {
             if (layout != VK_NULL_HANDLE) {
@@ -1532,6 +1539,45 @@ private:
                     context.gather_layout,
                     context.layout3,
                     {destination->buffer, table->buffer, indices->buffer},
+                    to_bytes(push),
+                    groups,
+                });
+            download_transient(out, staging_for[out], destination);
+            return true;
+        }
+
+        if (work.form == WorkForm::ELEMENTWISE_DIVIDE) {
+            if (consuming.size() < 2 ||
+                binding.data[consuming[0]].residency.data ==
+                    binding.data[out].residency.data ||
+                binding.data[consuming[1]].residency.data ==
+                    binding.data[out].residency.data) {
+                return true;
+            }
+
+            auto dividend = transient_of(staging_for[consuming[0]]);
+            auto divisor = transient_of(staging_for[consuming[1]]);
+            auto destination = producing_buffer(out, staging_for[out]);
+
+            if (dividend == nullptr || divisor == nullptr ||
+                destination == nullptr) {
+                return false;
+            }
+
+            const PcAffine push{
+                work.destination_scale,
+                work.source_scale,
+                work.constant,
+                static_cast<std::uint32_t>(work.passes),
+                static_cast<std::uint32_t>(work.elements),
+            };
+            record_dispatch(
+                context.device, commands, pool,
+                Dispatch{
+                    context.divide,
+                    context.divide_layout,
+                    context.layout3,
+                    {destination->buffer, dividend->buffer, divisor->buffer},
                     to_bytes(push),
                     groups,
                 });
