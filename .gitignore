@@ -45,6 +45,9 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+uv.lock
+*.egg-info/
+wheelhouse-*/
 
 # Compilation databases
 compile_commands.json
