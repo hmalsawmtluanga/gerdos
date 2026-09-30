@@ -31,9 +31,17 @@ ISSUE low "F-12] docs index covers 6 of 15 guides" "Location: docs/README.md. Fi
 ISSUE low "F-13] CI has no permissions block and tag-only action pins" "Location: .github/workflows/ci.yml. Fix: least-privilege permissions block plus SHA-pinned actions."
 ISSUE low "F-14] workspace re-clutter guard" "Location: .gitignore (fixed for .venv/egg-info/uv.lock at 2b87ff4). Fix: a CI check that fails on committed build artifacts so the clutter cannot return."
 echo "14 issues filed. Locking main: PRs only, CI must be green."
-gh api "repos/$REPO/branches/main/protection" -X PUT \
-  -f enforce_admins=true -f required_linear_history=true \
-  -f allow_force_pushes=false -f allow_deletions=false \
-  -F required_status_checks={"strict":true,"contexts":["build-and-test","build-wheels"]} \
-  -F restrictions={"users":[],"teams":[]} > /dev/null
+PROT_JSON=$(mktemp)
+trap "rm -f $PROT_JSON" EXIT
+cat > "$PROT_JSON" <<JSON
+{
+  "required_status_checks": {"strict": true, "contexts": ["build-and-test", "build-wheels"]},
+  "enforce_admins": true,
+  "restrictions": {"users": [], "teams": []},
+  "required_linear_history": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+JSON
+gh api "repos/$REPO/branches/main/protection" -X PUT --input "$PROT_JSON" > /dev/null
 echo "main is locked. Phase 0 gate: confirm 14 issues plus labels."
