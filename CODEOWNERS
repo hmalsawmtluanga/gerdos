@@ -1,0 +1,26 @@
+# GERDOS code owners. M (Orchestrator) owns everything; lane owners
+# own their areas. The Owner is the second reviewer on every PR.
+# Replace the placeholder handles with real GitHub usernames when the
+# team forms; until then the Owner covers all lanes.
+
+* @hmalsawmtluanga
+
+# Lane A: Core and Correctness — parser, C ABI, planner, executor, CPU backend.
+/include\/gerdos\/core/ @hmalsawmtluanga
+/include\/gerdos\/cpu/ @hmalsawmtluanga
+/src/ @hmalsawmtluanga
+
+# Lane B: GPU Backends — Vulkan, OpenCL, shaders, capability profile, quirks.
+/include\/gerdos\/vk/ @hmalsawmtluanga
+/include\/gerdos\/hw/ @hmalsawmtluanga
+/shaders/ @hmalsawmtluanga
+
+# Lane C: Platform, Evidence and Community — CMake, packaging, CI, bench,
+# doctor/report, hardware matrix, docs site.
+/CMakeLists.txt @hmalsawmtluanga
+/.github/ @hmalsawmtluanga
+/setup.py @hmalsawmtluanga
+/pyproject.toml @hmalsawmtluanga
+/python/ @hmalsawmtluanga
+/docs/ @hmalsawmtluanga
+/evidence/ @hmalsawmtluanga
