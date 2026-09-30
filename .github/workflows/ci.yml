@@ -10,16 +10,39 @@ on:
 
 jobs:
   build-and-test:
+    # Toolchain matrix (Phase 0, P0-05): pinned compilers on Ubuntu 24.04.
+    # CMake minimum is 3.20 (see cmake_minimum_required); the runner ships
+    # newer. The Windows/MSVC lane is defined but pending (Phase 1, P1-05).
     strategy:
       matrix:
         include:
-          - build_dir: build
+          - cc: gcc
+            cxx: g++
+            build_dir: build
             build_type: ""
-          - build_dir: build-release
+          - cc: gcc
+            cxx: g++
+            build_dir: build-release
+            build_type: -DCMAKE_BUILD_TYPE=Release
+          - cc: gcc-13
+            cxx: g++-13
+            build_dir: build-gcc13
+            build_type: -DCMAKE_BUILD_TYPE=Release
+          - cc: clang-18
+            cxx: clang++-18
+            build_dir: build-clang18
             build_type: -DCMAKE_BUILD_TYPE=Release
     runs-on: ubuntu-24.04
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install compiler
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-13 g++-13 clang-18 || true
+          ${{ matrix.cc }} --version
       - name: Configure
         run: >
           cmake -S . -B ${{ matrix.build_dir }}
