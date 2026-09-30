@@ -16,6 +16,9 @@ minor version so they stay visible.
 - Vulkan backend: host-homed outputs now download their transient result
   after the queue completes instead of copying stale pre-dispatch data
   (F-01). All work forms funnel through the single deferred readback.
+- `sample()` bounds check compares the index against the element count
+  instead of multiplying first, closing a `size_t` wrap that turned
+  hostile indices into out-of-bounds reads (F-02, all backends).
 
 ## [0.1.3]
 
