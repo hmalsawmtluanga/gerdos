@@ -5,8 +5,9 @@
 GERDOS is a model-agnostic execution runtime designed to extract useful
 performance from heterogeneous and constrained hardware.
 
-Its purpose is to make modern open models practical across hardware
-configurations that conventional inference runtimes may not exploit efficiently.
+Its purpose is the measured heterogeneous execution of a small exact
+operation set across hardware configurations that conventional inference
+runtimes may not exploit efficiently.
 
 GERDOS treats compute, memory, storage, transfer mechanisms, and model state
 as resources within a single global execution system, while representing
@@ -15,6 +16,9 @@ physical connectivity through a separate topology model.
 ### Core principle
 
 > Revive old hardware. Run new models.
+>
+> Direction, not status: what actually runs today is listed under Status
+> below. Full-model inference is not claimed.
 
 ### Architectural principles
 
@@ -43,9 +47,9 @@ The project is intentionally being built from a minimal foundation rather than
 starting with model-specific or hardware-specific assumptions.
 
 What runs today: the v1 op set (affine, matmul, reductions, min/max,
-mask-select, gather, move — F32), tiny gated demos, and tiled
+mask-select, gather, division, move — F32), tiny gated demos, and tiled
 128x128x128 matmul on the CPU/OpenCL/Vulkan engines. Full-model
-inference is not claimed: softmax, attention, layer-norm, divide,
+inference is not claimed: softmax, attention, layer-norm,
 residual-add, and argmax are refused by name until the algebra gap
 closes — nothing here runs an LLM yet.
 
@@ -101,4 +105,4 @@ spot with no repo, no compiler, no env vars.
 ## License
 
 MIT — see [LICENSE](LICENSE). Version is single-sourced from
-`include/gerdos/version.hpp` (currently 0.1.2).
+`include/gerdos/version.hpp` (currently 0.1.3).
