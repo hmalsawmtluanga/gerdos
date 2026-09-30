@@ -234,7 +234,7 @@ public:
 
         const auto width = dtype_bytes(it->second.dtype);
 
-        if ((index + 1) * width > it->second.bytes) {
+        if (index >= it->second.bytes / width) {
             return 0.0f;
         }
 

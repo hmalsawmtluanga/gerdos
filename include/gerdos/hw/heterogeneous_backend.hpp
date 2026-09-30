@@ -537,7 +537,7 @@ public:
         const auto width = dtype_bytes(it->second.dtype);
         const auto bytes = it->second.bytes;
 
-        if ((index + 1) * width > bytes) {
+        if (index >= bytes / width) {
             return 0.0f;
         }
 
