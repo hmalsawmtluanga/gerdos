@@ -237,6 +237,11 @@ synchronization or lifetime requirements.
 The initial contract does not prescribe mutexes, atomics, lock-free structures,
 or another particular synchronization mechanism.
 
+Result readback follows execution. A backend must not copy produced data
+to host-visible storage until the producing device execution has completed
+(fence wait, queue idle, or equivalent). Copying before completion exposes
+stale inputs as results (see F-01).
+
 ## 12. Topology Boundary
 
 Topology is a separate runtime graph and is not part of the Device ownership
