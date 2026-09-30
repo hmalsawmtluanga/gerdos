@@ -222,6 +222,74 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
+    // 1b. Affine elementwise with a host-homed output (F-01 regression)
+    //
+    // The output residency lives on the host, so the backend must carry
+    // the device result home after the queue completes. Sampling must
+    // read 2.0, not the stale 1.0 seed still present before the dispatch
+    // runs.
+    // ---------------------------------------------------------------------
+
+    {
+        auto* source = machine.data.create_data(
+            DataDescription{DataId{702}, "source-host"});
+        Machine::record(
+            *source, DataResidencyId{7021},
+            ResourceRef{DeviceId{200}, ResourceId{201}}, "device");
+
+        auto* result = machine.data.create_data(
+            DataDescription{DataId{703}, "result-host"});
+        Machine::record(
+            *result, DataResidencyId{7031},
+            ResourceRef{DeviceId{100}, ResourceId{101}}, "host");
+
+        (void)machine.operations.create_operation(OperationDescription{
+            OperationId{802},
+            {DataId{702}},
+            {DataId{703}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{64, 1, 0.5f, 1.5f, 0.0f},
+        });
+
+        const OperationDescription fill_desc{
+            OperationId{803},
+            {},
+            {DataId{702}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{64, 1, 1.0f, 0.0f, 0.0f},
+        };
+
+        auto fill_binding = compute_on(gpu_compute);
+        fill_binding.data.push_back(
+            entry(DataBindingRole::OUTPUT, DataId{702}, DataResidencyId{7021}));
+        run(fill_desc, fill_binding, ExecutionId{903});
+
+        const OperationDescription work_desc{
+            OperationId{802},
+            {DataId{702}},
+            {DataId{703}},
+            {},
+            {ResourceRequirement{ResourceBindingRole::COMPUTE, 1}},
+            WorkDescription{64, 1, 0.5f, 1.5f, 0.0f},
+        };
+
+        auto binding = compute_on(gpu_compute);
+        binding.data.push_back(
+            entry(DataBindingRole::INPUT, DataId{702}, DataResidencyId{7021}));
+        binding.data.push_back(
+            entry(DataBindingRole::OUTPUT, DataId{703}, DataResidencyId{7031}));
+        run(work_desc, binding, ExecutionId{902});
+
+        const float value = backend.sample(
+            DataResidencyRef{DataId{703}, DataResidencyId{7031}}, 0);
+        std::printf("vk affine host-homed: %f (expect 2.0)\n", value);
+        std::fflush(stdout);
+        GERDOS_CHECK(value == 2.0f);
+    }
+
+    // ---------------------------------------------------------------------
     // 2. Chained reductions + exponential, matching the OpenCL engine
     // ---------------------------------------------------------------------
 
