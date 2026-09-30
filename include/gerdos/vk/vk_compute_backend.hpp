@@ -1245,6 +1245,11 @@ private:
         vkUnmapMemory(context.device, buffer->memory);
     }
 
+    struct PendingDownload {
+        std::shared_ptr<DeviceBuffer> buffer;
+        std::size_t staging = 0;
+    };
+
     [[nodiscard]] static bool dispatch_form(
         const Context& context,
         VkCommandBuffer commands,
@@ -1258,7 +1263,8 @@ private:
         const WorkDescription& work,
         std::size_t out,
         std::size_t source_index,
-        bool has_source) {
+        bool has_source,
+        std::vector<PendingDownload>& pending) {
         const auto elements = work.storage_elements();
         const std::uint32_t groups =
             static_cast<std::uint32_t>((elements + 63) / 64);
@@ -1285,7 +1291,7 @@ private:
                 return;
             }
 
-            download_into(context, buffer, owned[staging].data(), elements);
+            pending.push_back(PendingDownload{buffer, staging});
         };
 
         const bool exact_copy =
@@ -1787,6 +1793,7 @@ private:
         }
 
         Scratch scratch;
+        std::vector<PendingDownload> pending;
         bool ok = true;
 
         for (std::size_t out = 0; out < binding.data.size() && ok; ++out) {
@@ -1799,11 +1806,19 @@ private:
             ok = dispatch_form(
                 context, commands, descriptor_pool, scratch, binding, slots,
                 owned, staging_for, consuming, work, out, source_index,
-                has_source);
+                has_source, pending);
         }
 
         if (ok) {
             ok = execute_run(context, pool, commands);
+        }
+
+        if (ok) {
+            for (const auto& fetch : pending) {
+                download_into(
+                    context, fetch.buffer, owned[fetch.staging].data(),
+                    elements);
+            }
         }
 
         vkDestroyDescriptorPool(context.device, descriptor_pool, nullptr);
