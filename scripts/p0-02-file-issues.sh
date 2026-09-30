@@ -36,6 +36,7 @@ trap "rm -f $PROT_JSON" EXIT
 cat > "$PROT_JSON" <<JSON
 {
   "required_status_checks": {"strict": true, "contexts": ["build-and-test", "build-wheels"]},
+  "required_pull_request_reviews": null,
   "enforce_admins": true,
   "restrictions": {"users": [], "teams": []},
   "required_linear_history": true,
