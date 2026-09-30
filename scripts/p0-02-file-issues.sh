@@ -31,18 +31,23 @@ ISSUE low "F-12] docs index covers 6 of 15 guides" "Location: docs/README.md. Fi
 ISSUE low "F-13] CI has no permissions block and tag-only action pins" "Location: .github/workflows/ci.yml. Fix: least-privilege permissions block plus SHA-pinned actions."
 ISSUE low "F-14] workspace re-clutter guard" "Location: .gitignore (fixed for .venv/egg-info/uv.lock at 2b87ff4). Fix: a CI check that fails on committed build artifacts so the clutter cannot return."
 echo "14 issues filed. Locking main: PRs only, CI must be green."
-PROT_JSON=$(mktemp)
-trap "rm -f $PROT_JSON" EXIT
-cat > "$PROT_JSON" <<JSON
+RULESET_JSON=$(mktemp)
+trap "rm -f $RULESET_JSON" EXIT
+cat > "$RULESET_JSON" <<JSON
 {
-  "required_status_checks": {"strict": true, "contexts": ["build-and-test", "build-wheels"]},
-  "required_pull_request_reviews": null,
-  "enforce_admins": true,
-  "restrictions": {"users": [], "teams": []},
-  "required_linear_history": true,
-  "allow_force_pushes": false,
-  "allow_deletions": false
+  "name": "main-lock",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+  "rules": [
+    {"type": "pull_request", "parameters": {"required_approving_review_count": 0, "dismiss_stale_reviews_on_push": false, "require_code_owner_review": false, "require_last_push_approval": false, "required_review_thread_resolution": false}},
+    {"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": true, "required_status_checks": [{"context": "build-and-test"}, {"context": "build-wheels"}]}},
+    {"type": "required_linear_history"},
+    {"type": "non_fast_forward"},
+    {"type": "deletion"}
+  ],
+  "bypass_actors": []
 }
 JSON
-gh api "repos/$REPO/branches/main/protection" -X PUT --input "$PROT_JSON" > /dev/null
+gh api "repos/$REPO/rulesets" -X POST --input "$RULESET_JSON" > /dev/null
 echo "main is locked. Phase 0 gate: confirm 14 issues plus labels."
