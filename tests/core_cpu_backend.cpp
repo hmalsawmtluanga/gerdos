@@ -1,5 +1,7 @@
 #include "test_check.hpp"
 
+#include <cstdio>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -258,6 +260,32 @@ int main() {
         GERDOS_CHECK(outcomes.size() == 1);
         GERDOS_CHECK(first->state() == ExecutionState::COMPLETED);
         GERDOS_CHECK(second->state() == ExecutionState::COMPLETED);
+    }
+
+    // ---------------------------------------------------------------------
+    // 3b. Sampling past the end reads nothing (F-02)
+    // ---------------------------------------------------------------------
+
+    {
+        const DataResidencyRef produced{
+            DataId{501}, DataResidencyId{5101}};
+
+        const float past_end = backend.sample(produced, 1 << 14);
+        std::printf("cpu sample past-end: %f (expect 0.0)\n", past_end);
+        std::fflush(stdout);
+        GERDOS_CHECK(past_end == 0.0f);
+
+        const float huge = backend.sample(
+            produced, std::size_t{1} << 62);
+        std::printf("cpu sample huge index: %f (expect 0.0)\n", huge);
+        std::fflush(stdout);
+        GERDOS_CHECK(huge == 0.0f);
+
+        const float hostile = backend.sample(
+            produced, std::numeric_limits<std::size_t>::max());
+        std::printf("cpu sample hostile: %f (expect 0.0)\n", hostile);
+        std::fflush(stdout);
+        GERDOS_CHECK(hostile == 0.0f);
     }
 
     // ---------------------------------------------------------------------
