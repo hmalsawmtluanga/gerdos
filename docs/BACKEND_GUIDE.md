@@ -39,6 +39,11 @@ allocations keep their own dtype and convert per operation. Honor the
 aliasing rules: single-source iterated form, multi-operand Data-identity
 guards, gather truncate-and-clamp. Match the CPU engine value-for-value
 (exact for integer shapes, documented tolerance for float reductions).
+Inspection is fail-closed on range: `sample()` with an out-of-range
+index returns `0.0f` and never reads outside the allocation. Compare
+the index against the element count (`bytes / width`); multiplying
+first can wrap `size_t` and turn a hostile index into an in-range
+one (F-02).
 
 ## 5. Vocabulary and gating
 
