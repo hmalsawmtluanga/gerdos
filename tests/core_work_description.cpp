@@ -2400,7 +2400,13 @@ int main() {
             e0);
         std::fflush(stdout);
         GERDOS_CHECK(chained_e0 == e0);
-        GERDOS_CHECK(chained_sum == e0 + 5.0f * e1);
+        // The sum accumulates left-to-right in F32 (not the regrouped
+        // closed form), so it compares exact-or-within-4-ulp.
+        const float expected_sum = e0 + 5.0f * e1;
+        GERDOS_CHECK(
+            chained_sum == expected_sum ||
+            std::fabs(chained_sum - expected_sum) <=
+                std::numeric_limits<float>::epsilon() * expected_sum * 4);
         GERDOS_CHECK(chained_max == e0);
         // The tail still reads the seed's exp: E[1] = e^-2.
         GERDOS_CHECK(
