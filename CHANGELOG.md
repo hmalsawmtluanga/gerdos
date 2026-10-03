@@ -8,6 +8,12 @@ minor version so they stay visible.
 
 ## [Unreleased]
 
+### Fixed
+
+- Chained-sum test compares exact-or-within-4-ulp: left-to-right F32
+  accumulation is not bit-identical to the regrouped closed form on every
+  toolchain/libm (1-ulp CI failure on the newer ubuntu-24.04 image).
+
 ## [0.1.3]
 
 ### Added
